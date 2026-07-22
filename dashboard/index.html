@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hi boss</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#e6edf3; --dim:#8b949e;
+          --aligned:#3fb950; --mild:#d29922; --friction:#f0883e; --misaligned:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:8px 0 16px; }
+  .trigger { display:flex; gap:8px; margin-bottom:20px; }
+  .trigger input { flex:1; background:var(--card); border:1px solid var(--border);
+                   color:var(--text); border-radius:8px; padding:10px; font-size:15px; }
+  .trigger button { background:#238636; color:#fff; border:0; border-radius:8px;
+                    padding:10px 18px; font-size:15px; }
+  .queued { color:var(--dim); font-size:13px; margin:-12px 0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px;
+          padding:14px 16px; margin-bottom:12px; cursor:pointer; }
+  .card .head { display:flex; justify-content:space-between; align-items:center; }
+  .card .date { font-weight:600; font-size:16px; }
+  .badge { font-size:12px; padding:2px 10px; border-radius:10px; color:#0d1117; font-weight:600; }
+  .bar { height:6px; background:var(--border); border-radius:3px; margin:10px 0 6px; }
+  .bar > div { height:6px; border-radius:3px; }
+  .moods { color:var(--dim); font-size:13px; margin-top:6px; }
+  .question { font-size:15px; font-style:italic; margin:10px 0 4px;
+              display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .card.open .question { -webkit-line-clamp:unset; }
+  .mood-line { color:var(--dim); font-size:13px; margin:6px 0; }
+  .mood-line b { color:var(--text); font-style:normal; }
+  .insight { font-size:14px; margin:8px 0 2px; padding:8px 10px; background:var(--bg);
+             border-left:3px solid var(--mild); border-radius:0 8px 8px 0;
+             display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .card.open .insight { -webkit-line-clamp:unset; }
+  .detail { display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px; }
+  .card.open .detail { display:block; }
+  .card.min .question, .card.min .mood-line, .card.min .insight, .card.min .detail { display:none; }
+  .detail h3 { font-size:13px; text-transform:uppercase; letter-spacing:.05em;
+               color:var(--dim); margin:14px 0 6px; }
+  .detail p, .detail li { font-size:14px; margin:4px 0; }
+  .detail ul { margin:4px 0; padding-left:18px; }
+  .topic { display:inline-block; background:var(--bg); border:1px solid var(--border);
+           border-radius:12px; padding:2px 10px; margin:2px 4px 2px 0; font-size:13px; }
+  .topic.new { border-color:var(--aligned); }
+  .rec b { color:var(--mild); }
+  .empty { color:var(--dim); text-align:center; margin-top:40px; }
+  .usage { background:var(--card); border:1px solid var(--border); border-radius:12px;
+           padding:12px 16px; margin-bottom:16px; }
+  .usage h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em;
+              color:var(--dim); margin:0 0 8px; display:flex; justify-content:space-between; }
+  .usage h2 button { background:none; border:0; color:var(--dim); font-size:14px;
+                     cursor:pointer; padding:0; }
+  .urow { display:flex; align-items:center; gap:10px; margin:6px 0; font-size:13px; }
+  .urow .name { width:110px; color:var(--text); }
+  .urow .bar { flex:1; margin:0; }
+  .urow .pct { width:44px; text-align:right; font-variant-numeric:tabular-nums; }
+  .usage .asof { color:var(--dim); font-size:11px; margin-top:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🫡 hi boss</h1>
+  <div class="usage" id="usage" style="display:none"></div>
+  <div class="trigger">
+    <input type="date" id="date">
+    <button onclick="trigger()">Reflect</button>
+  </div>
+  <div class="queued" id="queued"></div>
+  <div id="logs"><p class="empty">Loading…</p></div>
+</div>
+<script>
+const COLORS = { "aligned":"var(--aligned)", "mild-friction":"var(--mild)",
+                 "friction":"var(--friction)", "misaligned":"var(--misaligned)" };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function usageColor(p) {
+  return p >= 90 ? "var(--misaligned)" : p >= 70 ? "var(--friction)"
+       : p >= 50 ? "var(--mild)" : "var(--aligned)";
+}
+
+function usageRow(name, pct, resetsAt) {
+  if (pct == null) return "";
+  const reset = resetsAt ? new Date(resetsAt).toLocaleString([], {weekday:"short", hour:"numeric", minute:"2-digit"}) : "";
+  return `<div class="urow"><span class="name">${name}</span>
+    <div class="bar"><div style="width:${Math.min(pct,100)}%;background:${usageColor(pct)}"></div></div>
+    <span class="pct">${Math.round(pct)}%</span>
+    <span style="color:var(--dim)">resets ${reset}</span></div>`;
+}
+
+function renderUsage(u) {
+  const el = document.getElementById("usage");
+  if (!u || (!u.claude && !u.codex)) return;
+  let rows = "";
+  if (u.claude) rows += usageRow("Claude 5h", u.claude.five_hour_pct, u.claude.five_hour_resets_at)
+                      + usageRow("Claude week", u.claude.seven_day_pct, u.claude.seven_day_resets_at);
+  if (u.codex)  rows += usageRow("Codex 5h", u.codex.five_hour_pct, u.codex.five_hour_resets_at)
+                      + usageRow("Codex week", u.codex.weekly_pct, u.codex.weekly_resets_at);
+  el.innerHTML = `<h2>Subscription usage <button onclick="load()" title="Refresh">↻ refresh</button></h2>${rows}
+    <div class="asof">updated ${new Date(u.collected_at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})} · checked ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit", second:"2-digit"})}</div>`;
+  el.style.display = "block";
+}
+
+async function load() {
+  const [logs, queue, usage] = await Promise.all([
+    fetch("/api/logs").then(r => r.json()),
+    fetch("/api/queue").then(r => r.json()),
+    fetch("/api/usage").then(r => r.json()).catch(() => null),
+  ]);
+  renderUsage(usage);
+  document.getElementById("queued").textContent =
+    queue.length ? "Queued for reflection (runs when laptop is awake): " + queue.join(", ") : "";
+  const el = document.getElementById("logs");
+  if (!logs.length) { el.innerHTML = '<p class="empty">No reflections yet.</p>'; return; }
+  el.innerHTML = logs.map(render).join("");
+}
+
+const MOOD_EMOJI = { "deep-focus":"🎯", "exploratory":"🧭", "frustrated":"😤", "iterating":"🔁",
+                     "uncertain":"🤔", "confident":"😎", "stuck":"🧱", "flowing":"🌊" };
+
+function render(l) {
+  const c = COLORS[l.alignment_label] || "var(--dim)";
+  const pct = Math.round((l.alignment_score || 0) * 100);
+  const insight = l.insight || (l.recommendations || [])[0]?.action || "";
+  const moodEmoji = MOOD_EMOJI[l.your_mood?.label] || "💭";
+  const topics = (l.mind_map_nodes || []).sort((a,b) => b.weight - a.weight).slice(0, 12)
+    .map(n => `<span class="topic${n.is_new ? " new" : ""}">${esc(n.topic)}</span>`).join("");
+  const frictions = (l.friction_points || [])
+    .map(f => `<li><b>${esc(f.type)}</b> — ${esc(f.description)}</li>`).join("");
+  const recs = (l.recommendations || [])
+    .map(r => `<li class="rec"><b>${esc(r.target)}</b>: ${esc(r.action)}<br><i style="color:var(--dim)">${esc(r.reason)}</i></li>`).join("");
+  return `<div class="card" onclick="if(event.target.closest('.head')){this.classList.remove('open');this.classList.toggle('min')}else if(!event.target.closest('.detail')){this.classList.remove('min');this.classList.toggle('open')}">
+    <div class="head">
+      <span class="date">${esc(l.date)}</span>
+      <span class="badge" style="background:${c}">${esc(l.alignment_label)} · ${pct}%</span>
+    </div>
+    <div class="question">💭 ${esc(l.your_question?.question)}</div>
+    <div class="mood-line">${moodEmoji} <b>${esc(l.your_mood?.label)}</b> — ${esc((l.your_mood?.summary || "").slice(0, 120))}</div>
+    ${insight ? `<div class="insight">✨ ${esc(insight)}</div>` : ""}
+    <div class="detail">
+      <h3>Topics</h3>${topics || "—"}
+      <h3>Your mood</h3><p>${esc(l.your_mood?.summary)}</p>
+      <h3>Agent mood</h3><p>${esc(l.agent_mood?.summary)}</p>
+      <h3>Your open question</h3><p>${esc(l.your_question?.question)}</p>
+      <h3>Friction</h3><ul>${frictions || "<li>none</li>"}</ul>
+      <h3>Recommendations</h3><ul>${recs || "<li>none</li>"}</ul>
+      <h3>Briefing</h3><p>${esc(l.synthesis_context)}</p>
+    </div>
+  </div>`;
+}
+
+async function trigger() {
+  const date = document.getElementById("date").value;
+  if (!date) return alert("Pick a date first");
+  const res = await fetch("/api/trigger", { method:"POST", body: JSON.stringify({date}) });
+  if (res.ok) load(); else alert("Trigger failed: " + (await res.text()));
+}
+
+document.getElementById("date").value = new Date().toLocaleDateString("sv");
+load();
+</script>
+</body>
+</html>
