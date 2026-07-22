@@ -10,7 +10,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from chat.search import search_chat_history
+from wisen.chat.search import search_chat_history
 
 
 async def main():

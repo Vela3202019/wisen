@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wisen"
+version = "0.1.0"
+description = "A reflection harness for coding agents — reads your agent sessions, synthesizes daily reflections, and learns what makes your harness work better"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "motor>=3.5.0",
+    "pydantic>=2.8.0",
+    "pydantic-ai[google,openai,anthropic]>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "aiofiles>=24.1.0",
+    "pypdf>=4.0.0",
+    "python-docx>=1.1.0",
+]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.115.0", "uvicorn[standard]>=0.30.0", "certifi>=2024.0.0"]
+voice = ["livekit-agents[google]~=1.5", "livekit>=0.17"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+wisen = "wisen.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Bella3202019/wisen"
+
+[tool.setuptools.packages.find]
+include = ["wisen*"]
+
+[tool.setuptools.package-data]
+"wisen.dashboard" = ["index.html"]

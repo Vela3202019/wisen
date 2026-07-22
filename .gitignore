@@ -4,3 +4,8 @@ __pycache__/
 .env
 .venv/
 venv/
+*.egg-info/
+
+# private: mined transcript case bank + personal spec docs
+wisen/evals/cases/
+docs/superpowers/

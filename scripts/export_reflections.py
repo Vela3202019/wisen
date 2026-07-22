@@ -11,11 +11,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from db import get_db
+from wisen import config
+from wisen.db import get_db
 
 
 async def main() -> None:
-    out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "~/.wisen/exports/reflections").expanduser()
+    out_dir = Path(sys.argv[1] if len(sys.argv) > 1 else config.get("paths", "export_dir", "WISEN_EXPORT_DIR", "~/.wisen/exports/reflections")).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     db = get_db()

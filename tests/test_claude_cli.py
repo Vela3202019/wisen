@@ -4,8 +4,8 @@ Run: python3 -m tests.test_claude_cli
 """
 import json
 
-from synthesis.claude_cli import _parse_result, _extract_json_object, _model_name
-from synthesis.schema import DayObservation
+from wisen.synthesis.claude_cli import _parse_result, _extract_json_object, _model_name
+from wisen.synthesis.schema import DayObservation
 
 
 def _valid_observation() -> dict:

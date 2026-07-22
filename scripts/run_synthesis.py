@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ingestion.pipeline import ingest_all
-from synthesis.agent import synthesize
+from wisen.ingestion.pipeline import ingest_all
+from wisen.synthesis.agent import synthesize
 
 
 async def main() -> None:

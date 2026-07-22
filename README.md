@@ -15,28 +15,34 @@ produces the morning briefing.
 
 | Directory | What it does |
 |---|---|
-| `ingestion/` + `connectors/` | Read session history from each agent's on-disk format, plus agent configs (CLAUDE.md, MCP, skills) and git commits |
-| `synthesis/` | Two-stage Observer → Synthesizer pipeline producing a `Reflection` per day (MongoDB) |
-| `chat/` | Chat agent with grep-first search tools over session history and configs |
-| `voice/` | LiveKit voice agent + token endpoint (morning briefing out loud) |
-| `dashboard/` | Stdlib-only web dashboard for a VPS: reflection history, subscription usage, remote reflection triggers |
-| `evals/` | Correction case miner + outcome metrics — the ground-truth layer for evaluating config changes (see `docs/plan/eval-loop.md`) |
-| `scripts/` | `run_synthesis.py` (nightly job), `export_reflections.py` (dashboard data), `collect_usage.py` (subscription usage snapshot) |
+| `wisen/ingestion/` + `wisen/connectors/` | Read session history from each agent's on-disk format, plus agent configs (CLAUDE.md, MCP, skills) and git commits |
+| `wisen/synthesis/` | Two-stage Observer → Synthesizer pipeline producing a `Reflection` per day (MongoDB) |
+| `wisen/chat/` | Chat agent with grep-first search tools over session history and configs |
+| `wisen/voice/` | LiveKit voice agent + token endpoint (morning briefing out loud) — `[voice]` extra |
+| `wisen/dashboard/` | Stdlib-only web dashboard for a VPS: reflection history, subscription usage, remote reflection triggers |
+| `wisen/evals/` | Correction case miner, outcome metrics, and headless replay — the ground-truth layer for evaluating config changes (see `docs/plan/eval-loop.md`) |
+| `scripts/` | Thin wrappers for scheduled jobs (nightly synthesis, dashboard export, usage snapshot) |
 
-## Run
+## Install & run
 
 ```bash
 brew services start mongodb-community      # local MongoDB (db: wisen)
-python3 -m venv venv && venv/bin/pip install -r requirements.txt
-venv/bin/uvicorn main:app --reload         # API on :8000
+pip install -e ".[server]"                 # editable install with the API server
+wisen --help
 ```
 
-API surface: `POST /synthesize` (background job), `GET /reflections`, `POST /chat` (SSE),
-plus the LiveKit token endpoint for voice.
+```bash
+wisen synthesize [YYYY-MM-DD]   # ingest sessions + write one day's reflection
+wisen serve                     # API on :8000 — POST /synthesize, GET /reflections, POST /chat (SSE)
+wisen export [dir]              # dump reflections to JSON files
+wisen eval mine                 # see Evals below
+```
 
-Model config lives in `.env` — `WISEN_MODEL` takes a pydantic-ai model string
-(default `google:gemini-2.5-flash`; also `deepseek:*`, `anthropic:*`). Note that
-synthesis and evals bill against raw API keys, not a Claude subscription.
+Configuration: copy `config.example.toml` to `~/.wisen/config.toml` (model,
+MongoDB, export paths). Environment variables / `.env` override the file —
+`WISEN_MODEL` takes a pydantic-ai model string (default `google:gemini-2.5-flash`;
+also `deepseek:*`, `anthropic:*`). Set `WISEN_SYNTH_MODEL=claude-cli:<model>` to run
+synthesis through the Claude Code CLI on a Claude subscription instead of API billing.
 
 ## Evals
 
@@ -46,15 +52,17 @@ being a self-graded loop. Real user corrections (rejected tool calls, interrupti
 correction as ground truth:
 
 ```bash
-python3 -m evals mine            # scan transcripts → evals/cases/*.json
-python3 -m evals list            # inspect the bank
-python3 -m evals review <id> --confirm|--reject
-python3 -m evals metrics         # corrections/100 turns, friction half-life,
+wisen eval mine                  # scan transcripts → case bank (one JSON per case)
+wisen eval list                  # inspect the bank
+wisen eval review <id> --confirm|--reject
+wisen eval metrics               # corrections/100 turns, friction half-life,
                                  # alignment-score-vs-reality correlation
+wisen eval replay <id>           # re-run one case headlessly, judge the outcome
+wisen eval compare --a A.md --b B.md   # run the suite under two config variants
 ```
 
-Phase 2 (planned): replay cases headlessly under config variants and gate CLAUDE.md
-changes on measured improvement. Full design in `docs/plan/eval-loop.md`.
+The case bank stays local (gitignored) — it contains verbatim excerpts of your own
+sessions. Full design in `docs/plan/eval-loop.md`.
 
 ## Tests
 

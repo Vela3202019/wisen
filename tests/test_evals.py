@@ -6,10 +6,10 @@ import json
 import tempfile
 from pathlib import Path
 
-from evals.cases import Case, ContextTurn, assign_split, load_cases, save_case
-from evals.metrics import daily_correction_rates, friction_half_life, pearson
-from evals.miner import scan_all
-from evals.replay import build_prompt
+from wisen.evals.cases import Case, ContextTurn, assign_split, load_cases, save_case
+from wisen.evals.metrics import daily_correction_rates, friction_half_life, pearson
+from wisen.evals.miner import scan_all
+from wisen.evals.replay import build_prompt
 
 
 def _event(role: str, text, ts: str, session="s1", **extra) -> dict:

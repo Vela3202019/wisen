@@ -6,7 +6,7 @@ Test ingestion pipeline. Run from the repo root:
 import asyncio
 import sys
 from datetime import date, timedelta
-from ingestion.pipeline import ingest_all
+from wisen.ingestion.pipeline import ingest_all
 
 
 async def main():

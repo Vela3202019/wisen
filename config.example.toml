@@ -1,0 +1,21 @@
+# wisen configuration — copy to ~/.wisen/config.toml
+# Environment variables (in parentheses) always override these values.
+
+[model]
+# pydantic-ai model string for synthesis + chat (WISEN_MODEL)
+# google:* needs GEMINI_API_KEY, deepseek:* needs DEEPSEEK_API_KEY,
+# anthropic:* needs ANTHROPIC_API_KEY
+model = "google:gemini-2.5-flash"
+
+# Optional: run synthesis through the Claude Code CLI on a Claude
+# subscription instead of API billing (WISEN_SYNTH_MODEL).
+# Only synthesis reads this; chat always uses `model` above.
+# synth_model = "claude-cli:claude-sonnet-4-6"
+
+[storage]
+mongodb_uri = "mongodb://127.0.0.1:27017"   # (MONGODB_URI)
+mongodb_db = "wisen"                        # (MONGODB_DB)
+
+[paths]
+# Where `wisen export` writes reflection JSON files (WISEN_EXPORT_DIR)
+export_dir = "~/.wisen/exports/reflections"

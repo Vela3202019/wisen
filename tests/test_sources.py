@@ -4,7 +4,7 @@ Run from the repo root:  python3 -m tests.test_sources
 """
 import asyncio
 from datetime import date, timedelta
-from connectors import claude_code, opencode, cursor, codex, gemini_cli, pi, generic_export, git_commits, agent_configs
+from wisen.connectors import claude_code, opencode, cursor, codex, gemini_cli, pi, generic_export, git_commits, agent_configs
 
 DATES = [(date.today() - timedelta(days=i)).isoformat() for i in range(7)]
 

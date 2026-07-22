@@ -6,25 +6,29 @@ FastAPI backend that ingests coding-agent session history (Claude Code, Codex, G
 
 ```bash
 brew services start mongodb-community            # local MongoDB (wisen db), auto-starts at login
-venv/bin/pip install -r requirements.txt
-venv/bin/uvicorn main:app --reload                # API on :8000
+pip install -e ".[server,dev]"                   # editable install; `wisen` CLI entry point
+wisen serve --reload                             # API on :8000 (or: uvicorn wisen.main:app --reload)
 ```
 
 Tests live in `tests/` and run as scripts from the repo root: `python3 -m tests.test_search` (also `test_ingest`, `test_sources`, `test_synthesis`, `test_evals`).
 
 ## Model config
 
-`llm.py` resolves the pydantic-ai model string from `WISEN_MODEL` in `.env` (default `google:gemini-2.5-flash`). Supported: `google:*` (GEMINI_API_KEY), `deepseek:*` (DEEPSEEK_API_KEY), `anthropic:*` (ANTHROPIC_API_KEY). Both the chat and synthesis agents share it.
+`wisen/llm.py` resolves the pydantic-ai model string from `WISEN_MODEL` (env/`.env`) or `[model].model` in `~/.wisen/config.toml` (default `google:gemini-2.5-flash`). Supported: `google:*` (GEMINI_API_KEY), `deepseek:*` (DEEPSEEK_API_KEY), `anthropic:*` (ANTHROPIC_API_KEY). Both the chat and synthesis agents share it. `WISEN_SYNTH_MODEL=claude-cli:<model>` routes synthesis through `claude -p` on a Claude subscription. Env vars always override the config file (`wisen/config.py`).
 
 ## Layout
 
-- `main.py` — FastAPI app: `/synthesize` (background job), `/reflections`, `/chat` (SSE)
-- `ingestion/` — pulls sessions from each agent's on-disk history
-- `connectors/` — per-agent parsers + `agent_configs.py` (harness/config file enumeration)
-- `synthesis/` — daily reflection synthesis agent
-- `chat/` — chat agent (`agent.py`) + history/config search tools (`search.py`)
-- `voice/` — LiveKit token endpoint
-- `dashboard/` — stdlib-only web dashboard for remote hosting (synced logs + queued reflection triggers); `scripts/export_reflections.py` produces its data files
+All package code lives under `wisen/`:
+
+- `wisen/main.py` — FastAPI app: `/synthesize` (background job), `/reflections`, `/chat` (SSE)
+- `wisen/cli.py` — `wisen` entry point: `synthesize`, `serve`, `export`, `eval <args>`
+- `wisen/ingestion/` — pulls sessions from each agent's on-disk history
+- `wisen/connectors/` — per-agent parsers + `agent_configs.py` (harness/config file enumeration)
+- `wisen/synthesis/` — daily reflection synthesis agent
+- `wisen/chat/` — chat agent (`agent.py`) + history/config search tools (`search.py`)
+- `wisen/voice/` — LiveKit token endpoint (`[voice]` extra; lazily imported)
+- `wisen/dashboard/` — stdlib-only web dashboard for remote hosting (synced logs + queued reflection triggers); `scripts/export_reflections.py` produces its data files
+- `scripts/` — thin wrappers for launchd jobs; must stay runnable by system python (they bootstrap `sys.path` themselves)
 
 ## Conventions
 

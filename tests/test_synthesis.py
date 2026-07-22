@@ -6,9 +6,9 @@ End-to-end synthesis test. Run from the repo root:
 import asyncio
 import sys
 import json
-from db import ensure_indexes
-from ingestion.pipeline import ingest_all
-from synthesis.agent import synthesize
+from wisen.db import ensure_indexes
+from wisen.ingestion.pipeline import ingest_all
+from wisen.synthesis.agent import synthesize
 
 
 async def main():
