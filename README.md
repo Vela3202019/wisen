@@ -42,10 +42,14 @@ files (grep-first) at question time.
 
 ## Quickstart
 
+You need a local MongoDB and one LLM API key (default model: `openai:gpt-5.6-terra`
+→ `OPENAI_API_KEY`; any pydantic-ai provider works, see Configuration).
+
 ```bash
-brew services start mongodb-community   # local MongoDB (db: wisen)
+brew services start mongodb-community   # macOS — or: docker run -d -p 27017:27017 mongo
 pip install -e ".[server]"
-wisen synthesize                        # reflect on yesterday
+export OPENAI_API_KEY=sk-...            # or put it in a repo-root .env
+wisen synthesize                        # reflect on yesterday (one real LLM call)
 wisen serve                             # API on :8000
 ```
 
@@ -70,13 +74,13 @@ model = "openai:gpt-5.6-terra"        # OPENAI_API_KEY   (default)
 # model = "anthropic:claude-sonnet-5"   # ANTHROPIC_API_KEY
 ```
 
-**Synthesis model** — the nightly synthesis is the big token spend, so it
-defaults to **Claude Sonnet 5 on a Claude Pro/Max subscription** via the Claude
-Code CLI (`claude` must be installed and logged in — no API billing). To run
-synthesis on the API model above instead:
+**Synthesis model** — the nightly synthesis is the big token spend. By default
+it runs on the same API model as chat. If you have a **Claude Pro/Max
+subscription**, you can route it through the Claude Code CLI instead — no API
+billing (`claude` must be installed and logged in):
 
 ```toml
-synth_model = "api"    # any non claude-cli value falls back to `model`
+synth_model = "claude-cli:claude-sonnet-5"
 ```
 
 **Paths** — where wisen looks for your data:
@@ -129,20 +133,19 @@ reflection requests queue as files that your machine picks up when awake.
 Script-style tests, run from the repo root:
 
 ```bash
+python3 -m tests.test_fixtures   # committed sample data — runs anywhere, what CI runs
+python3 -m tests.test_claude_cli # subscription-synthesis adapter (no live call)
 python3 -m tests.test_ingest     # reads your real local session data
 python3 -m tests.test_sources    # per-connector, real local data
-python3 -m tests.test_claude_cli # subscription-synthesis adapter (no live call)
 python3 -m tests.test_synthesis  # end-to-end: calls the LLM, writes MongoDB
 ```
 
-## Adding a connector
+## Contributing
 
-Connectors are deliberately dumb: find files → parse tolerantly (skip anything
-malformed, silently) → emit `NormalizedSession`. Copy the shape of
-`wisen/connectors/claude_code.py` (each connector's docstring shows annotated
-examples of its raw on-disk format), add the source name to the `Literal` in
-`wisen/ingestion/normalizer.py`, and register it in `wisen/ingestion/pipeline.py`.
-A connector that dies takes down nothing — errors are collected, not raised.
+Dev setup, the offline fixture workflow, and a step-by-step guide to adding a
+connector for a new coding agent live in [CONTRIBUTING.md](CONTRIBUTING.md).
+Connectors are deliberately dumb — find files, parse tolerantly, emit
+`NormalizedSession` — so a first contribution is small.
 
 ## License
 
