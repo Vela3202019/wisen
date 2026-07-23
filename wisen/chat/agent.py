@@ -18,7 +18,10 @@ from typing import Any, AsyncIterator
 
 from dotenv import load_dotenv
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, UserPromptPart, TextPart
+from pydantic_ai.messages import (
+    ModelMessage, ModelRequest, ModelResponse, UserPromptPart, TextPart,
+    PartStartEvent, PartDeltaEvent, TextPartDelta,
+)
 from pydantic_ai.settings import ModelSettings
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -29,44 +32,37 @@ from wisen.chat.search import search_chat_history as _search, search_agent_confi
 load_dotenv()
 
 _SYSTEM_PROMPT = """\
-You are Wisen — a personal AI that has analyzed the collaboration between this \
-builder and their coding agents (Claude Code, Codex, Cursor, opencode, Gemini CLI, Pi).
+You are Wisen — a personal AI that watches the collaboration between this builder \
+and their coding agents (Claude Code, Codex, Cursor, opencode, Gemini CLI, Pi), and \
+helps them understand and improve it.
 
-You have access to four tools. Use them — do not guess or refuse when a tool \
-can answer the question.
+Your goal every turn: a grounded, specific answer about their actual sessions, \
+reflections, and harness configs — never a generic one.
 
-TOOL RULES (mandatory):
-1. search_chat_history — call this whenever the user uses any of these words: \
-   "find", "search", "look up", "show me", "was there a session", "did I discuss", \
-   "what did I say about", "where did we talk about". Do NOT answer these from memory.
-2. search_agent_configs — call this when the question is about harness setup or \
-   config files rather than conversations: CLAUDE.md, AGENTS.md, GEMINI.md, \
-   .cursorrules, skills, subagents, MCP servers, settings.json, "which projects \
-   have X configured", "what rules did I set". Do NOT answer these from memory.
-3. get_reflection — call this when they ask about a specific date ("June 26", \
-   "yesterday", "last Tuesday") and want details beyond the loaded context.
-4. list_reflections — call this immediately for ANY of these: trend questions \
-   ("how was my week", "which day had the highest alignment"), improvement questions \
-   ("how can I be better", "what should I change", "what can I improve", "advice", \
-   "recommendations", "what patterns do you see"), or vague time references \
-   ("past week", "this week", "lately", "recently", "last few days"). \
-   NEVER ask the user to pick a date for these — fetch the data yourself and synthesize.
+Your tools reach the source of record:
+- get_reflection — one day's full reflection (moods, friction, recommendations)
+- list_reflections — the last 7 days of scores, moods, and briefings
+- search_chat_history — the raw transcripts across every coding agent
+- search_agent_configs — the harness files (CLAUDE.md, AGENTS.md, MCP, skills, rules)
 
-NEVER ask the user to clarify which date they want when:
-- The question is about improvement, patterns, or trends.
-- The user says "this week", "past week", "recently", or "last N days".
-- The answer can be derived from list_reflections or the loaded synthesis_context.
-Just call the tool and answer.
-
-When you have tool results:
-- Synthesize across all logs. Give concrete, actionable recommendations.
-- Name specific friction patterns you saw, not generic advice.
-- Quote specific dates and incidents to back up each recommendation.
-
-When answering from the loaded synthesis_context:
-- Be direct and specific. Name the actual friction points, sessions, projects.
-- Don't hedge. Don't encourage. You watched the sessions — say what happened.
-- Keep responses concise unless asked to elaborate.
+Working principles:
+- Evidence before conclusions. When the answer depends on what actually happened — \
+in a session, a config, a past day — retrieve it. The loaded context is a starting \
+point, not the record. A claim you can't back with retrieved evidence is a guess; \
+say so or go fetch.
+- Own the ambiguity. Interpret vague ranges yourself ("lately", "this week" → the \
+last 7 days) and fetch them. For fuzzy questions, take the most useful reading, \
+answer it, and note the assumption in passing. Reserve clarifying questions for \
+cases where a wrong guess would send you down a genuinely different path.
+- Advice must be earned. For improvement or pattern questions, look across days \
+before prescribing: which friction repeats, what changed after a config edit, which \
+recommendations were ignored. Generic advice that could apply to anyone is a failure.
+- Say what happened. You watched the sessions — be direct, name projects, dates, \
+and incidents, and quote the moments that back each claim. Don't hedge, don't \
+cheerlead. Concise unless asked to elaborate.
+- Tools first, words after. A turn is either tool calls or your answer, never both: \
+retrieve silently (the UI already shows progress), and write only once you have \
+what you need — the text you write is the final answer.
 """
 
 
@@ -112,10 +108,11 @@ def _resolve_date(raw: str) -> str:
     Falls back to the raw string if unrecognised.
     """
     import re
-    from datetime import date, timedelta
+    from datetime import timedelta
 
     raw = raw.strip().lower()
-    today = date.today()
+    # UTC to match how reflections and sessions are dated everywhere else
+    today = datetime.now(timezone.utc).date()
 
     if raw in ("today",):
         return today.isoformat()
@@ -295,14 +292,35 @@ async def stream_chat(
     history = _to_history(messages[:-1])
 
     async def run_agent() -> None:
+        # agent.iter streams text from EVERY model response and keeps going
+        # through tool calls — run_stream would stop at the first text part,
+        # cutting the answer off when the model narrates before a tool call.
+        agent = _get_agent()
+        emitted_text = False
         try:
-            async with _get_agent().run_stream(
+            async with agent.iter(
                 current_message,
                 deps=deps,
                 message_history=history,
-            ) as result:
-                async for delta in result.stream_text(delta=True):
-                    await queue.put({"type": "token", "data": delta})
+            ) as run:
+                async for node in run:
+                    if not Agent.is_model_request_node(node):
+                        continue
+                    started_this_node = False
+                    async with node.stream(run.ctx) as node_stream:
+                        async for event in node_stream:
+                            text = ""
+                            if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+                                text = event.part.content
+                            elif isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                                text = event.delta.content_delta
+                            if not text:
+                                continue
+                            if emitted_text and not started_this_node:
+                                await queue.put({"type": "token", "data": "\n\n"})
+                            started_this_node = True
+                            emitted_text = True
+                            await queue.put({"type": "token", "data": text})
         except Exception as e:
             await queue.put({"type": "error", "message": str(e)})
         finally:
