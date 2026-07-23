@@ -1,82 +1,148 @@
 # wisen
 
-A reflection harness for coding agents. It reads your real coding-agent sessions
-(Claude Code, Codex, opencode, Cursor, Gemini CLI, Pi), synthesizes a nightly
-"reflection" — mood, friction, alignment, recommendations — and is growing an eval
-loop that measures whether those recommendations actually make the agents work
-better for you.
+**A reflection harness for coding agents.** wisen reads your real coding-agent
+sessions — Claude Code, Codex, Cursor, opencode, Gemini CLI, Pi — and synthesizes
+a nightly *reflection*: your mood, your agents' mood, where the collaboration had
+friction, whether your harness configs are aligned with how you actually work, and
+concrete recommendations. A chat agent answers questions about any of it.
 
-The metaphor is deliberate: a two-stage pipeline modeled on sleep. An Observer
-(NREM) extracts the emotionally charged moments from raw transcripts — rejections,
-rephrase storms, hedges — and a Synthesizer (REM) finds cross-day patterns and
-produces the morning briefing.
+You generate hours of transcripts every day: corrections, rephrases, rejected tool
+calls, the occasional flow state. Then it all evaporates. wisen is the missing
+feedback loop — the richest dataset about how you work with AI, finally read.
 
-## Components
+## How it works
 
-| Directory | What it does |
-|---|---|
-| `wisen/ingestion/` + `wisen/connectors/` | Read session history from each agent's on-disk format, plus agent configs (CLAUDE.md, MCP, skills) and git commits |
-| `wisen/synthesis/` | Two-stage Observer → Synthesizer pipeline producing a `Reflection` per day (MongoDB) |
-| `wisen/chat/` | Chat agent with grep-first search tools over session history and configs |
-| `wisen/voice/` | LiveKit voice agent + token endpoint (morning briefing out loud) — `[voice]` extra |
-| `wisen/dashboard/` | Stdlib-only web dashboard for a VPS: reflection history, subscription usage, remote reflection triggers |
-| `wisen/evals/` | Correction case miner, outcome metrics, and headless replay — the ground-truth layer for evaluating config changes (see `docs/plan/eval-loop.md`) |
-| `scripts/` | Thin wrappers for scheduled jobs (nightly synthesis, dashboard export, usage snapshot) |
+The pipeline is modeled on sleep, and the metaphor is load-bearing:
 
-## Install & run
+- The **Observer** (NREM) reads the day's raw transcripts and extracts the
+  emotionally charged moments — rejections, rephrase storms, hedges — because the
+  brain doesn't replay everything; it replays what mattered.
+- The **Synthesizer** (REM) takes those notes and finds cross-day patterns,
+  unexpected connections, and the one insight conscious review would miss. Its
+  output is your morning briefing.
+
+```mermaid
+flowchart LR
+    subgraph sources["Your machine (never leaves it)"]
+        A["8 connectors<br/>Claude Code · Codex · Cursor<br/>opencode · Gemini CLI · Pi<br/>exports · git commits"]
+    end
+    A --> N["Normalizer<br/>one shared session shape"]
+    N --> O["Observer (NREM)<br/>charged moments, quotes"]
+    O --> S["Synthesizer (REM)<br/>patterns, insight, briefing"]
+    S --> M[("MongoDB<br/>reflections only")]
+    M --> C["Chat agent"]
+    M --> D["Dashboard"]
+    M --> V["Voice briefing"]
+```
+
+**Local-first by construction:** transcripts flow *through* wisen but are never
+stored *by* it. MongoDB receives only the synthesized reflection; raw content
+stays wherever your agents put it. Search happens by re-reading the original
+files (grep-first) at question time.
+
+## Quickstart
 
 ```bash
-brew services start mongodb-community      # local MongoDB (db: wisen)
-pip install -e ".[server]"                 # editable install with the API server
-wisen --help
+brew services start mongodb-community   # local MongoDB (db: wisen)
+pip install -e ".[server]"
+wisen synthesize                        # reflect on yesterday
+wisen serve                             # API on :8000
 ```
 
 ```bash
 wisen synthesize [YYYY-MM-DD]   # ingest sessions + write one day's reflection
-wisen serve                     # API on :8000 — POST /synthesize, GET /reflections, POST /chat (SSE)
+wisen serve                     # POST /synthesize, GET /reflections, POST /chat (SSE)
 wisen export [dir]              # dump reflections to JSON files
-wisen eval mine                 # see Evals below
 ```
 
-Configuration: copy `config.example.toml` to `~/.wisen/config.toml` (model,
-MongoDB, export paths). Environment variables / `.env` override the file —
-`WISEN_MODEL` takes a pydantic-ai model string (default `google:gemini-2.5-flash`;
-also `deepseek:*`, `anthropic:*`). Set `WISEN_SYNTH_MODEL=claude-cli:<model>` to run
-synthesis through the Claude Code CLI on a Claude subscription instead of API billing.
+## Configuration
 
-## Evals
+Copy `config.example.toml` to `~/.wisen/config.toml`. Environment variables (or a
+repo-root `.env`) always override the file.
 
-The reflection layer recommends config changes; the eval layer exists to stop that from
-being a self-graded loop. Real user corrections (rejected tool calls, interruptions,
-"no, that's not what I meant") are mined into a personal case bank with the
-correction as ground truth:
+**Model** — any pydantic-ai model string works; set the provider's API key:
 
-```bash
-wisen eval mine                  # scan transcripts → case bank (one JSON per case)
-wisen eval list                  # inspect the bank
-wisen eval review <id> --confirm|--reject
-wisen eval metrics               # corrections/100 turns, friction half-life,
-                                 # alignment-score-vs-reality correlation
-wisen eval replay <id>           # re-run one case headlessly, judge the outcome
-wisen eval compare --a A.md --b B.md   # run the suite under two config variants
+```toml
+[model]
+model = "google:gemini-2.5-flash"     # GEMINI_API_KEY   (default)
+# model = "deepseek:deepseek-v4-flash"  # DEEPSEEK_API_KEY
+# model = "openai:gpt-5.6-terra"        # OPENAI_API_KEY
+# model = "anthropic:claude-sonnet-5"   # ANTHROPIC_API_KEY
 ```
 
-The case bank stays local (gitignored) — it contains verbatim excerpts of your own
-sessions. Full design in `docs/plan/eval-loop.md`.
+**Synthesis on a Claude subscription** — the nightly synthesis is the big token
+spend. If you have a Claude Pro/Max plan, route it through the Claude Code CLI
+instead of API billing (chat keeps using `model` above):
 
-## Tests
-
-Script-style tests in `tests/`, run from the repo root:
-
-```bash
-python3 -m tests.test_evals      # synthetic, no side effects
-python3 -m tests.test_sources    # reads real local session data
-python3 -m tests.test_synthesis  # end-to-end: calls the LLM, writes MongoDB
+```toml
+synth_model = "claude-cli:claude-sonnet-5"
 ```
+
+**Paths** — where wisen looks for your data:
+
+```toml
+[paths]
+root_dir = "~"                  # dir containing the agents' dot-dirs (.claude, .codex, …);
+                                # point at a synced copy to reflect on another machine
+git_scan_dirs = "~/Developer"   # comma-separated dirs (or specific repos) scanned for
+                                # commits and harness files (CLAUDE.md, AGENTS.md, …)
+```
+
+## What a reflection contains
+
+One document per day: a weighted **mind map** of topics, **your mood** and the
+**agents' mood** (each with evidence quotes), the implicit question each side was
+really asking, an **alignment score**, typed **friction points**, up to four
+targeted **recommendations** (aimed at a specific file: CLAUDE.md, MCP config,
+prompt style…), a **delta layer** (friction resolved/persisting/new, config diffs,
+which of yesterday's recommendations you actually followed), and
+`synthesis_context` — a 3-paragraph morning briefing that the dashboard shows,
+the chat agent grounds itself in, and the voice agent reads aloud.
+
+## Chat
+
+`POST /chat` (SSE) talks to an agent grounded in your latest reflection, with
+four tools: fetch any day's reflection, the last 7 days of trends, grep-first
+search over your raw session history across all agents, and search over your
+harness configs. Ask "how was my week?" and it investigates — reflections, then
+transcripts, then configs — before answering with dates and quotes.
 
 ## Deployment shape
 
-Everything runs locally except the dashboard, which lives on a VPS. launchd jobs on
-the Mac run nightly synthesis, export reflections + usage snapshots, and sync them to
-the VPS; the dashboard queues manual reflection requests for the Mac to pick up when
-awake.
+Everything runs on your machine. The optional dashboard (`wisen/dashboard/`,
+stdlib-only) lives on a VPS and serves *exported* reflection JSON synced via
+rsync — the server never sees raw transcripts, MongoDB, or an API key. Manual
+reflection requests queue as files that your machine picks up when awake.
+`scripts/` has the thin wrappers meant for launchd/cron.
+
+## Extras
+
+| Extra | Adds |
+|---|---|
+| `pip install -e ".[server]"` | FastAPI + uvicorn (`wisen serve`) |
+| `pip install -e ".[voice]"` | LiveKit voice agent — the morning briefing, out loud |
+| `pip install -e ".[dev]"` | pytest + ruff |
+
+## Tests
+
+Script-style tests, run from the repo root:
+
+```bash
+python3 -m tests.test_ingest     # reads your real local session data
+python3 -m tests.test_sources    # per-connector, real local data
+python3 -m tests.test_claude_cli # subscription-synthesis adapter (no live call)
+python3 -m tests.test_synthesis  # end-to-end: calls the LLM, writes MongoDB
+```
+
+## Adding a connector
+
+Connectors are deliberately dumb: find files → parse tolerantly (skip anything
+malformed, silently) → emit `NormalizedSession`. Copy the shape of
+`wisen/connectors/claude_code.py` (each connector's docstring shows annotated
+examples of its raw on-disk format), add the source name to the `Literal` in
+`wisen/ingestion/normalizer.py`, and register it in `wisen/ingestion/pipeline.py`.
+A connector that dies takes down nothing — errors are collected, not raised.
+
+## License
+
+MIT
