@@ -33,17 +33,16 @@ Example API payloads:
 import json
 import os
 import ssl
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import AsyncIterator
 from urllib.request import Request, urlopen
-from urllib.parse import urlencode
 
 import certifi
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from wisen.ingestion.normalizer import (
+from wisen.ingestion.normalizer import (  # noqa: E402
     NormalizedSession, Turn, compute_metadata, truncate_content,
 )
 

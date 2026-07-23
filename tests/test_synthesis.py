@@ -5,7 +5,6 @@ End-to-end synthesis test. Run from the repo root:
 """
 import asyncio
 import sys
-import json
 from wisen.db import ensure_indexes
 from wisen.ingestion.pipeline import ingest_all
 from wisen.synthesis.agent import synthesize
@@ -45,7 +44,7 @@ async def main():
         for f in reflection.friction_points:
             print(f"  [{f.type}] {f.description}")
     if reflection.recommendations:
-        print(f"\nRecommendations:")
+        print("\nRecommendations:")
         for r in reflection.recommendations:
             print(f"  → [{r.target}] {r.action}")
     print(f"\nSynthesis context:\n{reflection.synthesis_context}")

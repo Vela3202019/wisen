@@ -4,7 +4,6 @@ Two-stage synthesis pipeline:
   Stage 2 — Synthesizer: reads DayObservation + past 7 days → Reflection (saved to MongoDB)
 """
 import asyncio
-import json
 from datetime import datetime, timezone
 
 from pydantic import BaseModel

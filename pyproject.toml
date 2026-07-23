@@ -27,6 +27,9 @@ wisen = "wisen.cli:main"
 [project.urls]
 Homepage = "https://github.com/Bella3202019/wisen"
 
+[tool.ruff.lint]
+ignore = ["E731", "E741"]
+
 [tool.setuptools.packages.find]
 include = ["wisen*"]
 

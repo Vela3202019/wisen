@@ -42,7 +42,6 @@ Note the outer "type" and inner "role" disagree on purpose (a tool result is
 type=user); we trust message.role. sessionId groups lines after /resume.
 """
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator

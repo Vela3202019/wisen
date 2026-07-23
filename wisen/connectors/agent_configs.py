@@ -15,7 +15,6 @@ Common harness files searched in every project:
   soul.md, SOUL.md,
   .mcp.json, mcp.json, mcp_config.json
 """
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
