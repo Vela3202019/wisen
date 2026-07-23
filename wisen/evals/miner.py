@@ -7,8 +7,7 @@ Detectors:
   tool-rejection      user declined a tool call (harness marker in tool_result)
   interruption        user hit escape mid-turn ("[Request interrupted by user")
   explicit-correction user message opens with a correction marker (no/stop/revert/…)
-  rephrase-storm      second user message within 60s (same signal as
-                      ingestion.normalizer's user_rephrases, at moment level)
+  rephrase-storm      second user message within 60s
 """
 import re
 from dataclasses import dataclass, field

@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Literal
-import re
 
 
 class Turn(BaseModel):
@@ -17,10 +16,6 @@ class SessionMetadata(BaseModel):
     user_turns: int
     assistant_turns: int
     session_length_minutes: float
-    user_rephrases: int       # user sent near-duplicate prompt within 3 turns
-    agent_clarifications: int # assistant asked user to clarify
-    agent_hedges: int         # "I think", "I'm not sure", "you might want to"
-    agent_contradictions: int # assistant reversed its own answer
 
 
 class NormalizedSession(BaseModel):
@@ -50,25 +45,13 @@ class NormalizedSession(BaseModel):
         }
 
 
-_CLARIFICATION_PATTERNS = re.compile(
-    r"\b(could you clarify|what do you mean|can you be more specific"
-    r"|could you elaborate|what exactly|which one do you mean)\b",
-    re.IGNORECASE,
-)
-_HEDGE_PATTERNS = re.compile(
-    r"\b(I think|I believe|I'm not sure|you might want to|it's possible"
-    r"|I'm unsure|I'm not certain|this may|this might)\b",
-    re.IGNORECASE,
-)
-
-
 def compute_metadata(turns: list[Turn]) -> SessionMetadata:
+    """Objective session facts only. Qualitative friction signals (rephrases,
+    hedges, clarifications) are the Observer LLM's job — it reads the turns."""
     if not turns:
         return SessionMetadata(
             total_turns=0, user_turns=0, assistant_turns=0,
             session_length_minutes=0.0,
-            user_rephrases=0, agent_clarifications=0,
-            agent_hedges=0, agent_contradictions=0,
         )
 
     user_turns = [t for t in turns if t.role == "user"]
@@ -76,32 +59,11 @@ def compute_metadata(turns: list[Turn]) -> SessionMetadata:
 
     duration = (turns[-1].timestamp - turns[0].timestamp).total_seconds() / 60
 
-    # User rephrases: cosine similarity would be ideal but too slow here.
-    # Proxy: user sent messages within 60s of each other (rapid correction).
-    rephrases = 0
-    for i in range(1, len(user_turns)):
-        gap = (user_turns[i].timestamp - user_turns[i - 1].timestamp).total_seconds()
-        if gap < 60:
-            rephrases += 1
-
-    clarifications = sum(
-        1 for t in assistant_turns
-        if _CLARIFICATION_PATTERNS.search(t.content)
-    )
-    hedges = sum(
-        1 for t in assistant_turns
-        if _HEDGE_PATTERNS.search(t.content)
-    )
-
     return SessionMetadata(
         total_turns=len(turns),
         user_turns=len(user_turns),
         assistant_turns=len(assistant_turns),
         session_length_minutes=round(duration, 2),
-        user_rephrases=rephrases,
-        agent_clarifications=clarifications,
-        agent_hedges=hedges,
-        agent_contradictions=0,  # computed by synthesis agent from content
     )
 
 

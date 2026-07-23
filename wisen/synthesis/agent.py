@@ -29,10 +29,7 @@ def _format_session(s: NormalizedSession) -> str:
     lines = [
         f"[{s.source}] {s.project_name} — {s.date}",
         f"Duration: {s.metadata.session_length_minutes:.0f}min  "
-        f"Turns: {s.metadata.total_turns}  "
-        f"Rephrases: {s.metadata.user_rephrases}  "
-        f"Hedges: {s.metadata.agent_hedges}  "
-        f"Clarifications: {s.metadata.agent_clarifications}",
+        f"Turns: {s.metadata.total_turns}",
     ]
     for t in s.turns:
         prefix = "You" if t.role == "user" else "Agent"
