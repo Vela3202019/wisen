@@ -211,6 +211,7 @@ async def voice_token():
 _MODEL_KEY_ENV = {
     "google": "GEMINI_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
 }
 
@@ -221,14 +222,15 @@ async def health():
 
     from wisen.llm import get_model
 
-    status = {"gemini": False, "mongodb": False}
+    import asyncio
+
+    status = {"mongodb": False}
     try:
         db = get_db()
-        await db.command("ping")
+        await asyncio.wait_for(db.command("ping"), timeout=2.0)
         status["mongodb"] = True
     except Exception:
         pass
-    status["gemini"] = bool(os.getenv("GEMINI_API_KEY"))
     model = get_model()
     provider = model.split(":", 1)[0]
     status["model"] = model
