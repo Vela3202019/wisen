@@ -18,10 +18,26 @@ from wisen import __version__
 from wisen import config
 
 
+async def _check_mongo() -> None:
+    """Fail fast with a friendly message if MongoDB is unreachable."""
+    from wisen.db import get_client
+
+    uri = config.get("storage", "mongodb_uri", "MONGODB_URI", "mongodb://127.0.0.1:27017")
+    try:
+        await asyncio.wait_for(get_client().admin.command("ping"), timeout=5)
+    except Exception:
+        raise SystemExit(
+            f"MongoDB unreachable at {uri} — is it running?\n"
+            "  brew services start mongodb-community    # macOS\n"
+            "  docker run -d -p 27017:27017 mongo       # anywhere with Docker"
+        )
+
+
 async def _synthesize(date: str) -> None:
     from wisen.ingestion.pipeline import ingest_all
     from wisen.synthesis.agent import synthesize
 
+    await _check_mongo()
     print(f"[{datetime.now(timezone.utc).isoformat()}] synthesizing {date}")
     result = await ingest_all(date)
     reflection = await synthesize(result, date)
@@ -31,6 +47,7 @@ async def _synthesize(date: str) -> None:
 async def _export(out_dir: Path) -> None:
     from wisen.db import get_db
 
+    await _check_mongo()
     out_dir.mkdir(parents=True, exist_ok=True)
     db = get_db()
     count = 0
