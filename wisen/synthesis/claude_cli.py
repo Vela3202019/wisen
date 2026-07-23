@@ -3,9 +3,9 @@ Structured-output LLM call routed through the Claude Code CLI (`claude -p`).
 
 Lets synthesis run on a Claude subscription model with no ANTHROPIC_API_KEY and no
 per-token API billing — subscription auth only works inside the CLI, not through
-pydantic-ai (see llm.py). This is the DEFAULT synthesis path (claude-cli:claude-sonnet-5);
-set WISEN_SYNTH_MODEL to any non claude-cli value (e.g. "api") to route synthesis
-through [model].model instead. Only synthesis reads this var; chat is unaffected.
+pydantic-ai (see llm.py). Opt in with WISEN_SYNTH_MODEL=claude-cli:<model> (requires
+the `claude` CLI installed and logged in); by default synthesis runs on [model].model
+like everything else. Only synthesis reads this var; chat is unaffected.
 
 `claude -p` is an agent, not a single-shot structured-output API: run inside the project
 it loads MCP servers/skills/tools and wanders instead of answering. So we run it in a
@@ -26,9 +26,9 @@ from wisen import config
 T = TypeVar("T", bound=BaseModel)
 
 CLI_PREFIX = "claude-cli:"
-# Default: synthesis (the big nightly token spend) runs on a Claude subscription.
-# Set WISEN_SYNTH_MODEL=api (any non claude-cli value) to use [model].model instead.
-DEFAULT_SYNTH_MODEL = "claude-cli:claude-sonnet-5"
+# Default: synthesis runs on the same API model as chat ([model].model). Set
+# WISEN_SYNTH_MODEL=claude-cli:<model> to route it through a Claude subscription.
+DEFAULT_SYNTH_MODEL = "api"
 _TIMEOUT_S = 300
 # Disable agentic tools so the model answers directly instead of exploring.
 _DISALLOWED = (
@@ -98,6 +98,12 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
             proc = subprocess.run(
                 cmd, input=user_prompt, capture_output=True, text=True,
                 env=env, timeout=_TIMEOUT_S, cwd=tempfile.gettempdir(),
+            )
+        except FileNotFoundError:
+            raise SystemExit(
+                "`claude` CLI not found but synthesis is set to claude-cli. "
+                "Install Claude Code and log in, or unset WISEN_SYNTH_MODEL "
+                "(or set it to \"api\") to synthesize on the chat model instead."
             )
         except subprocess.TimeoutExpired as e:
             last_err = e

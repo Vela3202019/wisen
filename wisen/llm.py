@@ -10,8 +10,8 @@ providers (pydantic-ai model strings):
 Any other provider pydantic-ai supports works the same way — pass its model
 string and set that provider's API key env var.
 
-Synthesis defaults separately to claude-cli:claude-sonnet-5 (Claude subscription
-via the Claude Code CLI) — see synthesis/claude_cli.py.
+Synthesis uses the same model by default; set WISEN_SYNTH_MODEL=claude-cli:<model>
+to run it on a Claude subscription via the Claude Code CLI — see synthesis/claude_cli.py.
 
 Note: Claude Pro/Max subscription auth only works inside the Claude Code CLI —
 it cannot back an API integration like this one. Anthropic access here
