@@ -1,10 +1,11 @@
 """
 Structured-output LLM call routed through the Claude Code CLI (`claude -p`).
 
-Lets synthesis run on a Claude subscription model (e.g. claude-sonnet-4-6) with no
-ANTHROPIC_API_KEY and no per-token API billing — subscription auth only works inside
-the CLI, not through pydantic-ai (see llm.py). Selected by setting
-WISEN_SYNTH_MODEL=claude-cli:<model>. Only synthesis reads this var; chat is unaffected.
+Lets synthesis run on a Claude subscription model with no ANTHROPIC_API_KEY and no
+per-token API billing — subscription auth only works inside the CLI, not through
+pydantic-ai (see llm.py). This is the DEFAULT synthesis path (claude-cli:claude-sonnet-5);
+set WISEN_SYNTH_MODEL to any non claude-cli value (e.g. "api") to route synthesis
+through [model].model instead. Only synthesis reads this var; chat is unaffected.
 
 `claude -p` is an agent, not a single-shot structured-output API: run inside the project
 it loads MCP servers/skills/tools and wanders instead of answering. So we run it in a
@@ -25,6 +26,9 @@ from wisen import config
 T = TypeVar("T", bound=BaseModel)
 
 CLI_PREFIX = "claude-cli:"
+# Default: synthesis (the big nightly token spend) runs on a Claude subscription.
+# Set WISEN_SYNTH_MODEL=api (any non claude-cli value) to use [model].model instead.
+DEFAULT_SYNTH_MODEL = "claude-cli:claude-sonnet-5"
 _TIMEOUT_S = 300
 # Disable agentic tools so the model answers directly instead of exploring.
 _DISALLOWED = (
@@ -34,7 +38,7 @@ _DISALLOWED = (
 
 
 def _synth_model() -> str:
-    return config.get("model", "synth_model", "WISEN_SYNTH_MODEL")
+    return config.get("model", "synth_model", "WISEN_SYNTH_MODEL", DEFAULT_SYNTH_MODEL)
 
 
 def is_cli_model() -> bool:

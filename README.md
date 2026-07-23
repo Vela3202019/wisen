@@ -60,22 +60,23 @@ wisen export [dir]              # dump reflections to JSON files
 Copy `config.example.toml` to `~/.wisen/config.toml`. Environment variables (or a
 repo-root `.env`) always override the file.
 
-**Model** — any pydantic-ai model string works; set the provider's API key:
+**Chat model** — any pydantic-ai model string works; set the provider's API key:
 
 ```toml
 [model]
-model = "google:gemini-2.5-flash"     # GEMINI_API_KEY   (default)
+model = "openai:gpt-5.6-terra"        # OPENAI_API_KEY   (default)
 # model = "deepseek:deepseek-v4-flash"  # DEEPSEEK_API_KEY
-# model = "openai:gpt-5.6-terra"        # OPENAI_API_KEY
+# model = "google:gemini-2.5-flash"     # GEMINI_API_KEY
 # model = "anthropic:claude-sonnet-5"   # ANTHROPIC_API_KEY
 ```
 
-**Synthesis on a Claude subscription** — the nightly synthesis is the big token
-spend. If you have a Claude Pro/Max plan, route it through the Claude Code CLI
-instead of API billing (chat keeps using `model` above):
+**Synthesis model** — the nightly synthesis is the big token spend, so it
+defaults to **Claude Sonnet 5 on a Claude Pro/Max subscription** via the Claude
+Code CLI (`claude` must be installed and logged in — no API billing). To run
+synthesis on the API model above instead:
 
 ```toml
-synth_model = "claude-cli:claude-sonnet-5"
+synth_model = "api"    # any non claude-cli value falls back to `model`
 ```
 
 **Paths** — where wisen looks for your data:

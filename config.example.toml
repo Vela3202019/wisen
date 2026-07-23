@@ -2,16 +2,17 @@
 # Environment variables (in parentheses) always override these values.
 
 [model]
-# pydantic-ai model string for synthesis + chat (WISEN_MODEL)
-# google:* needs GEMINI_API_KEY, deepseek:* needs DEEPSEEK_API_KEY,
-# openai:* needs OPENAI_API_KEY, anthropic:* needs ANTHROPIC_API_KEY.
+# pydantic-ai model string for chat (WISEN_MODEL)
+# openai:* needs OPENAI_API_KEY, deepseek:* needs DEEPSEEK_API_KEY,
+# google:* needs GEMINI_API_KEY, anthropic:* needs ANTHROPIC_API_KEY.
 # Any other pydantic-ai provider works the same way. Examples:
-#   deepseek:deepseek-v4-flash · openai:gpt-5.6-terra · anthropic:claude-sonnet-5
-model = "google:gemini-2.5-flash"
+#   deepseek:deepseek-v4-flash · google:gemini-2.5-flash · anthropic:claude-sonnet-5
+model = "openai:gpt-5.6-terra"
 
-# Optional: run synthesis through the Claude Code CLI on a Claude
-# subscription instead of API billing (WISEN_SYNTH_MODEL).
-# Only synthesis reads this; chat always uses `model` above.
+# Synthesis model (WISEN_SYNTH_MODEL). Defaults to claude-cli:claude-sonnet-5 —
+# the Claude Code CLI on a Claude Pro/Max subscription, no API billing
+# (requires `claude` installed and logged in). Set to any non claude-cli
+# value (e.g. "api") to run synthesis on `model` above instead.
 # synth_model = "claude-cli:claude-sonnet-5"
 
 [storage]
