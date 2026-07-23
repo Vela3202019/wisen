@@ -12,11 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
+from wisen import config
 from wisen.ingestion.normalizer import (
     NormalizedSession, Turn, compute_metadata, truncate_content
 )
 
-_DB_PATH = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+_DB_PATH = config.root() / ".local" / "share" / "opencode" / "opencode.db"
 
 
 def _ts(ms: int | None) -> datetime:

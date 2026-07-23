@@ -4,13 +4,15 @@
 [model]
 # pydantic-ai model string for synthesis + chat (WISEN_MODEL)
 # google:* needs GEMINI_API_KEY, deepseek:* needs DEEPSEEK_API_KEY,
-# anthropic:* needs ANTHROPIC_API_KEY
+# openai:* needs OPENAI_API_KEY, anthropic:* needs ANTHROPIC_API_KEY.
+# Any other pydantic-ai provider works the same way. Examples:
+#   deepseek:deepseek-v4-flash · openai:gpt-5.6-terra · anthropic:claude-sonnet-5
 model = "google:gemini-2.5-flash"
 
 # Optional: run synthesis through the Claude Code CLI on a Claude
 # subscription instead of API billing (WISEN_SYNTH_MODEL).
 # Only synthesis reads this; chat always uses `model` above.
-# synth_model = "claude-cli:claude-sonnet-4-6"
+# synth_model = "claude-cli:claude-sonnet-5"
 
 [storage]
 mongodb_uri = "mongodb://127.0.0.1:27017"   # (MONGODB_URI)
@@ -19,3 +21,13 @@ mongodb_db = "wisen"                        # (MONGODB_DB)
 [paths]
 # Where `wisen export` writes reflection JSON files (WISEN_EXPORT_DIR)
 export_dir = "~/.wisen/exports/reflections"
+
+# Base dir containing the agents' dot-dirs — .claude, .codex, .gemini,
+# .cursor, .config/opencode (WISEN_ROOT_DIR). Point it at a synced copy of
+# another machine's dotfiles to run wisen against that machine's history.
+root_dir = "~"
+
+# Comma-separated dirs scanned for git repos and their harness files
+# (CLAUDE.md, AGENTS.md, …). Entries may be parent dirs or specific repo
+# paths (GIT_SCAN_DIRS).
+git_scan_dirs = "~/Developer"

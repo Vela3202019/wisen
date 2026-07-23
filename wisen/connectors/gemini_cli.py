@@ -26,11 +26,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
+from wisen import config
 from wisen.ingestion.normalizer import (
     NormalizedSession, Turn, compute_metadata, truncate_content,
 )
 
-_GEMINI_DIR = Path.home() / ".gemini"
+_GEMINI_DIR = config.root() / ".gemini"
 
 # Role mapping: Gemini CLI uses "model" for assistant
 _ROLE_MAP = {

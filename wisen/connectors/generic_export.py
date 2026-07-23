@@ -13,11 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
+from wisen import config
 from wisen.ingestion.normalizer import (
     NormalizedSession, Turn, compute_metadata, truncate_content
 )
 
-_DEFAULT_EXPORT_FOLDER = Path.home() / ".wisen" / "exports"
+_DEFAULT_EXPORT_FOLDER = config.root() / ".wisen" / "exports"
 
 
 def _now() -> datetime:

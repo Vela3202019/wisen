@@ -27,11 +27,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
+from wisen import config
 from wisen.ingestion.normalizer import (
     NormalizedSession, Turn, compute_metadata, truncate_content,
 )
 
-_DEFAULT_PI_EXPORT_DIR = Path.home() / ".wisen" / "exports" / "pi"
+_DEFAULT_PI_EXPORT_DIR = config.root() / ".wisen" / "exports" / "pi"
 
 _ROLE_MAP = {
     "human": "user",

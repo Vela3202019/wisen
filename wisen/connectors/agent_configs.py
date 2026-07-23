@@ -20,11 +20,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
-_CLAUDE_DIR   = Path.home() / ".claude"
-_CODEX_DIR    = Path.home() / ".codex"
-_GEMINI_DIR   = Path.home() / ".gemini"
-_CURSOR_DIR   = Path.home() / ".cursor"
-_OPENCODE_DIR = Path.home() / ".config" / "opencode"
+from wisen import config
+
+_CLAUDE_DIR   = config.root() / ".claude"
+_CODEX_DIR    = config.root() / ".codex"
+_GEMINI_DIR   = config.root() / ".gemini"
+_CURSOR_DIR   = config.root() / ".cursor"
+_OPENCODE_DIR = config.root() / ".config" / "opencode"
 
 # All config file names to look for in every git repo / project dir
 _PROJECT_CONFIG_FILES: list[tuple[str, str]] = [
@@ -129,10 +131,14 @@ def iter_config_files() -> list[tuple[str, Path, int]]:
             for source, fname in _PROJECT_CONFIG_FILES:
                 _add(source, project_path / fname)
 
-    # ── Scan GIT_SCAN_DIRS for repos not in ~/.claude/projects ──────────────
+    # ── Scan git_scan_dirs for repos not in ~/.claude/projects ──────────────
+    # Comma-separated parent dirs or direct repo paths ([paths].git_scan_dirs
+    # in config.toml, or GIT_SCAN_DIRS env).
     scan_dirs = [
-        Path(d.strip())
-        for d in os.getenv("GIT_SCAN_DIRS", str(Path.home() / "Developer")).split(",")
+        Path(d.strip()).expanduser()
+        for d in config.get(
+            "paths", "git_scan_dirs", "GIT_SCAN_DIRS", str(Path.home() / "Developer")
+        ).split(",")
         if d.strip()
     ]
     for base in scan_dirs:

@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from wisen import config
+
 SourceName = Literal["claude-code", "codex", "gemini-cli", "cursor", "opencode"]
 
 _EXCERPT_CHARS = 500   # chars per matched turn
@@ -400,18 +402,18 @@ async def _scan_opencode(compiled: re.Pattern, max_results: int) -> list[SearchM
 # Public API
 # ---------------------------------------------------------------------------
 
-_PI_EXPORT_DIR = Path(os.getenv("PI_EXPORT_DIR", str(Path.home() / ".wisen" / "exports" / "pi")))
+_PI_EXPORT_DIR = Path(os.getenv("PI_EXPORT_DIR", str(config.root() / ".wisen" / "exports" / "pi")))
 
 _GREP_SOURCE_MAP: dict[str, list[tuple[Path, str, object]]] = {
     "claude-code": [
-        (Path.home() / ".claude" / "projects", "*.jsonl", _parse_claude_code_file),
+        (config.root() / ".claude" / "projects", "*.jsonl", _parse_claude_code_file),
     ],
     "codex": [
-        (Path.home() / ".codex" / "sessions", "*.jsonl", _parse_codex_file),
-        (Path.home() / ".codex" / "archived_sessions", "*.jsonl", _parse_codex_file),
+        (config.root() / ".codex" / "sessions", "*.jsonl", _parse_codex_file),
+        (config.root() / ".codex" / "archived_sessions", "*.jsonl", _parse_codex_file),
     ],
     "gemini-cli": [
-        (Path.home() / ".gemini" / "tmp", "*.json", _parse_gemini_cli_file),
+        (config.root() / ".gemini" / "tmp", "*.json", _parse_gemini_cli_file),
     ],
     "pi": [
         (_PI_EXPORT_DIR, "*.json", _parse_pi_json_file),

@@ -3,9 +3,12 @@ LLM model configuration, shared by the chat and synthesis agents.
 
 Set WISEN_MODEL (env/.env) or [model].model in ~/.wisen/config.toml to switch
 providers (pydantic-ai model strings):
-  google:gemini-2.5-flash    (default — needs GEMINI_API_KEY)
-  deepseek:deepseek-chat     (needs DEEPSEEK_API_KEY)
-  anthropic:claude-opus-4-8  (needs ANTHROPIC_API_KEY)
+  google:gemini-2.5-flash      (default — needs GEMINI_API_KEY)
+  deepseek:deepseek-v4-flash   (needs DEEPSEEK_API_KEY; OpenAI-compatible API)
+  openai:gpt-5.6-terra         (needs OPENAI_API_KEY)
+  anthropic:claude-sonnet-5    (needs ANTHROPIC_API_KEY)
+Any other provider pydantic-ai supports works the same way — pass its model
+string and set that provider's API key env var.
 
 Note: Claude Pro/Max subscription auth only works inside the Claude Code CLI —
 it cannot back an API integration like this one. Anthropic access here
