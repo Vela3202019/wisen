@@ -9,3 +9,7 @@ venv/
 # private: mined transcript case bank + personal spec docs
 wisen/evals/cases/
 docs/superpowers/
+
+# fixture agent dot-dirs — users often ignore .claude/.codex globally
+!tests/fixtures/.claude/
+!tests/fixtures/.codex/

@@ -1,0 +1,10 @@
+{"type": "user", "sessionId": "fixture-claude-1", "cwd": "/Users/dev/demo-app", "timestamp": "2026-01-15T10:00:00.000Z", "message": {"role": "user", "content": "add pagination to the /items endpoint"}}
+{"type": "assistant", "sessionId": "fixture-claude-1", "timestamp": "2026-01-15T10:00:12.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "I'll add cursor-based pagination. Reading the handler first."}, {"type": "tool_use", "id": "toolu_fixture01", "name": "Read", "input": {"file_path": "/Users/dev/demo-app/api/items.py"}}]}}
+{"type": "user", "sessionId": "fixture-claude-1", "timestamp": "2026-01-15T10:00:14.000Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_fixture01", "content": [{"type": "text", "text": "def list_items():\n    return db.items.find()"}]}]}}
+{"type": "permission-mode", "permissionMode": "default", "sessionId": "fixture-claude-1"}
+{"type": "assistant", "sessionId": "fixture-claude-1", "timestamp": "2026-01-15T10:00:40.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Added a cursor query param and a next_cursor field to the response."}, {"type": "tool_use", "id": "toolu_fixture02", "name": "Edit", "input": {"file_path": "/Users/dev/demo-app/api/items.py"}}]}}
+{"type": "user", "sessionId": "fixture-claude-1", "timestamp": "2026-01-15T10:00:42.000Z", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_fixture02", "content": [{"type": "text", "text": "File updated successfully."}]}]}}
+{"type": "permission-mode", "permissionMode": "acceptEdits", "sessionId": "fixture-claude-1"}
+{"type": "user", "sessionId": "fixture-claude-1", "timestamp": "2026-01-15T10:02:00.000Z", "message": {"role": "user", "content": "looks good, also cap the page size at 100"}}
+{"type": "assistant", "sessionId": "fixture-claude-1", "timestamp": "2026-01-15T10:02:20.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Done — limit is clamped to 100 and documented in the docstring."}]}}
+{"type": "ai-title", "title": "Add pagination", "sessionId": "fixture-claude-1"}
