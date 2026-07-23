@@ -2,6 +2,22 @@
 Reads Cursor chat sessions from workspace SQLite databases.
 Each workspace at ~/Library/Application Support/Cursor/User/workspaceStorage/[id]/state.vscdb
 has an ItemTable (key/value) and cursorDiskKV table containing chat history.
+
+Example rows (both tables are key/value; value is a JSON blob):
+
+  # ItemTable — chat state keyed by feature name
+  key   = "workbench.panel.aichat.view.aichat.chatdata"
+  value = {"tabs": [{"tabId": "abc…", "chatTitle": "fix auth bug",
+           "bubbles": [{"type": "user", "text": "why does login 401?"},
+                       {"type": "ai",   "text": "The token refresh…"}]}]}
+
+  # cursorDiskKV — composer (agent-mode) conversations
+  key   = "composerData:xyz…"
+  value = {"conversation": [{"type": 1, "text": "add a retry"},    # 1 = user
+                            {"type": 2, "text": "I'll wrap the…"}]} # 2 = assistant
+
+The blob shape varies by Cursor version — _parse_chat_blob tries each known
+shape (tabs/bubbles, conversation, messages) and yields whatever matches.
 """
 import sqlite3
 import json
@@ -9,12 +25,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
+from wisen import config
 from wisen.ingestion.normalizer import (
     NormalizedSession, Turn, compute_metadata, truncate_content
 )
 
 _WORKSPACE_ROOT = (
-    Path.home()
+    config.root()
     / "Library"
     / "Application Support"
     / "Cursor"

@@ -12,6 +12,23 @@ Requires env vars:
   GITHUB_USERNAME — optional, auto-detected from token if not set
   GITHUB_EMAILS   — comma-separated emails to match
                     e.g.  you@work.com,you@personal.com
+
+Example API payloads:
+
+  # /users/{me}/events → PushEvent (head/before SHAs, no commit messages yet)
+  {"type": "PushEvent", "repo": {"name": "Bella3202019/wisen"},
+   "created_at": "2026-07-21T22:14:05Z",
+   "payload": {"before": "39a5dbd…", "head": "9ba7535…", "size": 1}}
+
+  # /repos/{repo}/compare/{before}...{head} → the actual commits
+  {"commits": [{"sha": "9ba7535…",
+    "commit": {"author": {"email": "velapod@gmail.com",
+                          "date": "2026-07-21T22:13:58Z"},
+               "message": "feat: package wisen as installable CLI"}}]}
+
+  # → one NormalizedSession per (repo, local-date); each commit becomes a
+  #   turn pair (message → user Turn, changed-files summary → assistant Turn)
+  #   — commits are the "what actually shipped" signal.
 """
 import json
 import os

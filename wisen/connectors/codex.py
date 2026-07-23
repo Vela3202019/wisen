@@ -9,17 +9,43 @@ Relevant types:
   session_meta   — session id, cwd, model
   response_item  — { type:"message", role:"user"|"assistant"|"developer", content:[{type,text}] }
   event_msg      — user_message events with plain text
+
+Example events:
+
+  # Session header — one per file; supplies session_id + project_path
+  {"timestamp": "2026-07-21T09:12:01.000Z", "type": "session_meta",
+   "payload": {"id": "0198f2…", "cwd": "/Users/me/proj", "model": "gpt-5.6-terra"}}
+
+  # Conversation messages — nested under payload, content is a block list
+  {"timestamp": "…", "type": "response_item",
+   "payload": {"type": "message", "role": "user",
+     "content": [{"type": "input_text", "text": "add pagination"}]}}
+  {"timestamp": "…", "type": "response_item",
+   "payload": {"type": "message", "role": "assistant",
+     "content": [{"type": "output_text", "text": "I'll add cursor-based…"}]}}
+
+  # Codex logs its own scaffolding as ordinary messages — dropped via
+  # _SKIP_ROLES, else every session would "start" with Codex's system prompt
+  {"timestamp": "…", "type": "response_item",
+   "payload": {"type": "message", "role": "developer",
+     "content": [{"type": "input_text", "text": "# Instructions\\nYou are Codex…"}]}}
+
+  # Duplicate channel — user prompts ALSO appear as event_msg; we read one
+  # channel so each prompt counts once
+  {"timestamp": "…", "type": "event_msg",
+   "payload": {"type": "user_message", "message": "add pagination"}}
 """
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
+from wisen import config
 from wisen.ingestion.normalizer import (
     NormalizedSession, Turn, compute_metadata, truncate_content,
 )
 
-_CODEX_DIR = Path.home() / ".codex"
+_CODEX_DIR = config.root() / ".codex"
 _SESSION_DIRS = ["sessions", "archived_sessions"]
 
 # Roles to skip (system/developer instructions injected by Codex itself)

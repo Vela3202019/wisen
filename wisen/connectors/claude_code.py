@@ -2,6 +2,44 @@
 Reads Claude Code session transcripts from ~/.claude/projects/.
 Each project directory is named as the encoded cwd (slashes → dashes).
 Each session is a JSONL file; we stream it line by line.
+
+Example events (one JSON object per line):
+
+  # Plain user message — content is a string
+  {"type": "user", "sessionId": "7f5a…", "cwd": "/Users/me/proj",
+   "timestamp": "2026-07-21T14:03:22.511Z",
+   "message": {"role": "user", "content": "fix the failing test"}}
+
+  # Assistant message — content is a LIST of typed blocks; tool_use
+  # contributes only its name (args dropped)
+  {"type": "assistant", "sessionId": "7f5a…", "timestamp": "…",
+   "message": {"role": "assistant", "content": [
+     {"type": "text", "text": "The fixture path moved. Fixing it."},
+     {"type": "tool_use", "id": "toolu_01AB…", "name": "Edit", "input": {…}}]}}
+
+  # Tool RESULT returns as a *user*-role event (that's how the API models
+  # it) — kept, prefixed "[tool_result] …" so synthesis sees outcomes.
+  # A rejection carries is_error + a harness marker (evals/miner greps it).
+  {"type": "user", "sessionId": "7f5a…", "timestamp": "…",
+   "message": {"role": "user", "content": [
+     {"type": "tool_result", "tool_use_id": "toolu_01AB…",
+      "content": [{"type": "text", "text": "File updated successfully."}]}]}}
+
+  # Permission-mode switch — KEPT as a synthetic user turn ("[permission-mode]
+  # switched to acceptEdits"): mode changes are a trust signal (acceptEdits =
+  # trusting, plan = cautious). Consecutive re-logs of the same mode are deduped;
+  # the first log is baseline, not a switch. No timestamp — reuses the previous turn's.
+  {"type": "permission-mode", "permissionMode": "acceptEdits", "sessionId": "7f5a…"}
+
+  # Harness bookkeeping — no conversational signal; dropped via _SKIP_TYPES
+  {"type": "file-history-snapshot", "snapshot": {…}}   # pre-edit file copies (rewind)
+  {"type": "ai-title", "title": "Fix failing test"}    # UI tab title
+  {"type": "last-prompt", "prompt": "fix the…"}        # input-box cache (dupes real msg)
+  {"type": "queue-operation", "operation": "enqueue"}  # queued-message plumbing
+  {"type": "attachment", "attachment": {…}}            # pasted-file metadata
+
+Note the outer "type" and inner "role" disagree on purpose (a tool result is
+type=user); we trust message.role. sessionId groups lines after /resume.
 """
 import json
 import re
@@ -9,14 +47,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
+from wisen import config
 from wisen.ingestion.normalizer import (
     NormalizedSession, Turn, compute_metadata, truncate_content
 )
 
-_CLAUDE_DIR = Path.home() / ".claude" / "projects"
+_CLAUDE_DIR = config.root() / ".claude" / "projects"
 
 _SKIP_TYPES = {
-    "permission-mode", "file-history-snapshot", "attachment",
+    "file-history-snapshot", "attachment",
     "ai-title", "last-prompt", "queue-operation",
 }
 
@@ -82,9 +121,27 @@ def _group_by_session(events: list[dict]) -> dict[str, list[dict]]:
 
 def _events_to_turns(events: list[dict]) -> list[Turn]:
     turns = []
+    last_ts = datetime.now(timezone.utc)
+    last_mode = None
     for e in events:
         etype = e.get("type")
         if etype in _SKIP_TYPES:
+            continue
+
+        # Permission-mode switches are a trust signal (acceptEdits = trusting,
+        # plan = cautious) worth surfacing to the Observer. Claude Code re-logs
+        # the current mode without a change, so only actual switches are kept.
+        # The event has no timestamp — reuse the last turn's so it sorts into place.
+        if etype == "permission-mode":
+            mode = e.get("permissionMode", "")
+            if mode and mode != last_mode:
+                if last_mode is not None:
+                    turns.append(Turn(
+                        role="user",
+                        content=f"[permission-mode] switched to {mode}",
+                        timestamp=last_ts,
+                    ))
+                last_mode = mode
             continue
 
         msg = e.get("message", {})
@@ -99,6 +156,7 @@ def _events_to_turns(events: list[dict]) -> list[Turn]:
             ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         except Exception:
             ts = datetime.now(timezone.utc)
+        last_ts = ts
 
         text = truncate_content(_extract_text(content))
         if not text.strip():
