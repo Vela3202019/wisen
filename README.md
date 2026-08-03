@@ -7,6 +7,8 @@ Claude Code, Codex, Cursor, opencode, Gemini CLI, Pi — and synthesizes a night
 *reflection* on how you and your agents actually worked together. A chat agent
 answers questions about any of it.
 
+![wisen dashboard flow with fictional demo data](docs/assets/wisen-dashboard-flow.gif)
+
 A real reflection, abridged:
 
 ```jsonc
