@@ -51,7 +51,7 @@ def _model_name() -> str:
 
 def _extract_json_object(text: str) -> str:
     """Return the outermost {...} JSON object from a model text response."""
-    m = re.search(r"\{.*\}", text, re.S)
+    m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:
         raise ValueError("no JSON object in claude -p result")
     return m.group(0)
@@ -98,6 +98,7 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
             proc = subprocess.run(
                 cmd, input=user_prompt, capture_output=True, text=True,
                 env=env, timeout=_TIMEOUT_S, cwd=tempfile.gettempdir(),
+                check=False,
             )
         except FileNotFoundError:
             raise SystemExit(

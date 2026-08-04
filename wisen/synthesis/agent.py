@@ -4,20 +4,20 @@ Two-stage synthesis pipeline:
   Stage 2 — Synthesizer: reads DayObservation + past 7 days → Reflection (saved to MongoDB)
 """
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from dotenv import load_dotenv
 
-from wisen.db import get_db
-from wisen.llm import get_model
-from wisen.ingestion.pipeline import IngestResult
-from wisen.ingestion.normalizer import NormalizedSession
 from wisen.connectors.agent_configs import AgentConfig
-from wisen.synthesis.schema import DayObservation, Reflection
-from wisen.synthesis.prompt import OBSERVER_PROMPT, SYNTHESIZER_PROMPT
+from wisen.db import get_db
+from wisen.ingestion.normalizer import NormalizedSession
+from wisen.ingestion.pipeline import IngestResult
+from wisen.llm import get_model
 from wisen.synthesis.claude_cli import is_cli_model, run_structured
+from wisen.synthesis.prompt import OBSERVER_PROMPT, SYNTHESIZER_PROMPT
+from wisen.synthesis.schema import DayObservation, Reflection
 
 load_dotenv()
 
@@ -27,8 +27,8 @@ load_dotenv()
 def _format_session(s: NormalizedSession) -> str:
     lines = [
         f"[{s.source}] {s.project_name} — {s.date}",
-        f"Duration: {s.metadata.session_length_minutes:.0f}min  "
-        f"Turns: {s.metadata.total_turns}",
+        (f"Duration: {s.metadata.session_length_minutes:.0f}min  "
+         f"Turns: {s.metadata.total_turns}"),
     ]
     for t in s.turns:
         prefix = "You" if t.role == "user" else "Agent"
@@ -145,7 +145,7 @@ async def _generate(
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 async def synthesize(result: IngestResult, date: str | None = None) -> Reflection:
-    target_date = date or datetime.now(timezone.utc).date().isoformat()
+    target_date = date or datetime.now(UTC).date().isoformat()
 
     db = get_db()
 
@@ -183,7 +183,7 @@ async def synthesize(result: IngestResult, date: str | None = None) -> Reflectio
 
     # ── Save to MongoDB ───────────────────────────────────────────────────────
     doc = reflection.model_dump()
-    doc["synthesized_at"] = datetime.now(timezone.utc)
+    doc["synthesized_at"] = datetime.now(UTC)
     await db.reflections.update_one(
         {"date": target_date},
         {"$set": doc},

@@ -33,8 +33,9 @@ Example API payloads:
 import json
 import os
 import ssl
-from datetime import datetime, timezone
-from typing import AsyncIterator
+import urllib.error
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from urllib.request import Request, urlopen
 
 import certifi
@@ -42,8 +43,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from wisen.ingestion.normalizer import (  # noqa: E402
-    NormalizedSession, Turn, compute_metadata, truncate_content,
+from wisen.ingestion.normalizer import (
+    NormalizedSession,
+    Turn,
+    compute_metadata,
+    truncate_content,
 )
 
 _API = "https://api.github.com"
@@ -63,7 +67,7 @@ def _get(url: str, token: str) -> dict | list | None:
         req = Request(url, headers=_headers(token))
         with urlopen(req, timeout=10, context=_SSL_CTX) as resp:
             return json.loads(resp.read().decode())
-    except Exception:
+    except (OSError, json.JSONDecodeError, urllib.error.URLError):
         return None
 
 
@@ -74,9 +78,9 @@ def _get_username(token: str) -> str | None:
 
 def _parse_ts(raw: str) -> datetime:
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except Exception:
-        return datetime.now(timezone.utc)
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return datetime.now(UTC)
 
 
 def _fetch_push_events(username: str, token: str) -> list[dict]:

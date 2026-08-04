@@ -10,19 +10,22 @@ Detectors:
   rephrase-storm      second user message within 60s
 """
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from wisen.connectors.claude_code import (
-    _CLAUDE_DIR, _decode_project_path, _group_by_session, _parse_jsonl,
+    _CLAUDE_DIR,
+    _decode_project_path,
+    _group_by_session,
+    _parse_jsonl,
 )
-from wisen.ingestion.normalizer import truncate_content
 from wisen.evals.cases import Case, ContextTurn, Detector, assign_split
+from wisen.ingestion.normalizer import truncate_content
 from wisen.llm import get_model
 
 TOOL_REJECTION_MARKER = "The user doesn't want to proceed with this tool use"
@@ -79,7 +82,7 @@ def _tool_rejection_text(content) -> str:
 
 def _parse_ts(e: dict) -> datetime | None:
     try:
-        return datetime.fromisoformat(e.get("timestamp", "").replace("Z", "+00:00"))
+        return datetime.fromisoformat(e.get("timestamp", ""))
     except ValueError:
         return None
 

@@ -9,26 +9,29 @@ Use this for Pi, ChatGPT exports, or any agent without a local connector.
 """
 import json
 import os
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from wisen import config
 from wisen.ingestion.normalizer import (
-    NormalizedSession, Turn, compute_metadata, truncate_content
+    NormalizedSession,
+    Turn,
+    compute_metadata,
+    truncate_content,
 )
 
 _DEFAULT_EXPORT_FOLDER = config.root() / ".wisen" / "exports"
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _parse_json_export(path: Path) -> NormalizedSession | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return None
 
     source_label = data.get("source", path.stem)
@@ -44,7 +47,7 @@ def _parse_json_export(path: Path) -> NormalizedSession | None:
         ts_raw = t.get("timestamp", t.get("created_at", None))
         try:
             ts = datetime.fromisoformat(str(ts_raw)) if ts_raw else _now()
-        except Exception:
+        except ValueError:
             ts = _now()
         turns.append(Turn(role=role, content=content, timestamp=ts))
 
@@ -71,7 +74,7 @@ def _parse_text_export(path: Path) -> NormalizedSession | None:
     content = path.read_text(encoding="utf-8", errors="replace").strip()
     if not content:
         return None
-    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
     turns = [Turn(role="user", content=truncate_content(content), timestamp=mtime)]
     return NormalizedSession(
         session_id=f"export:{path.stem}",

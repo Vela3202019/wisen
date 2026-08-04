@@ -12,9 +12,9 @@ _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 os.environ["WISEN_ROOT_DIR"] = str(_FIXTURES)
 os.environ["GIT_SCAN_DIRS"] = str(_FIXTURES / "repos")  # empty on purpose
 
-import asyncio  # noqa: E402
+import asyncio
 
-from wisen.ingestion.pipeline import ingest_all  # noqa: E402
+from wisen.ingestion.pipeline import ingest_all
 
 FIXTURE_DATE = "2026-01-15"
 

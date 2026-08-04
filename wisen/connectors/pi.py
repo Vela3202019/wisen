@@ -23,13 +23,16 @@ Supported export formats:
 import json
 import os
 import re
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from wisen import config
 from wisen.ingestion.normalizer import (
-    NormalizedSession, Turn, compute_metadata, truncate_content,
+    NormalizedSession,
+    Turn,
+    compute_metadata,
+    truncate_content,
 )
 
 _DEFAULT_PI_EXPORT_DIR = config.root() / ".wisen" / "exports" / "pi"
@@ -45,11 +48,11 @@ _ROLE_MAP = {
 
 def _parse_ts(raw: str | None) -> datetime:
     if not raw:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except Exception:
-        return datetime.now(timezone.utc)
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return datetime.now(UTC)
 
 
 def _from_official_export(data: list) -> list[NormalizedSession]:
@@ -129,7 +132,7 @@ def _from_plain_text(text: str, filename: str) -> NormalizedSession | None:
     """
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     turns = []
-    ts_base = datetime.now(timezone.utc)
+    ts_base = datetime.now(UTC)
     from datetime import timedelta
 
     you_pattern = re.compile(r"^(you|me|human)\s*:\s*", re.IGNORECASE)
@@ -196,7 +199,7 @@ async def ingest(
         if f.suffix == ".json":
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 continue
 
             # Official Pi export: top-level list of conversations
@@ -212,7 +215,7 @@ async def ingest(
                 s = _from_plain_text(f.read_text(encoding="utf-8"), str(f))
                 if s:
                     sessions = [s]
-            except Exception:
+            except OSError:
                 continue
 
         for session in sessions:

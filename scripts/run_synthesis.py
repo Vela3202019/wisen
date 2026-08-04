@@ -5,7 +5,7 @@ Meant to be run daily by launchd (com.vela.wisen-daily).
 """
 import asyncio
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -18,8 +18,8 @@ async def main() -> None:
     if len(sys.argv) > 1:
         date = sys.argv[1]
     else:
-        date = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
-    print(f"[{datetime.now(timezone.utc).isoformat()}] synthesizing {date}")
+        date = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
+    print(f"[{datetime.now(UTC).isoformat()}] synthesizing {date}")
     result = await ingest_all(date)
     reflection = await synthesize(result, date)
     print(f"done — reflection saved for {reflection.date}")

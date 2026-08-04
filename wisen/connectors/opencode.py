@@ -6,15 +6,18 @@ Schema (v1.17+):
   message  — id, session_id, time_created, data (JSON: {role, ...})
   part     — id, message_id, session_id, time_created, data (JSON: {type, text, ...})
 """
-import sqlite3
 import json
-from datetime import datetime, timezone
+import sqlite3
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from wisen import config
 from wisen.ingestion.normalizer import (
-    NormalizedSession, Turn, compute_metadata, truncate_content
+    NormalizedSession,
+    Turn,
+    compute_metadata,
+    truncate_content,
 )
 
 _DB_PATH = config.root() / ".local" / "share" / "opencode" / "opencode.db"
@@ -22,8 +25,8 @@ _DB_PATH = config.root() / ".local" / "share" / "opencode" / "opencode.db"
 
 def _ts(ms: int | None) -> datetime:
     if ms is None:
-        return datetime.now(timezone.utc)
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+        return datetime.now(UTC)
+    return datetime.fromtimestamp(ms / 1000, tz=UTC)
 
 
 def _read_sessions(db_path: Path) -> list[dict]:
@@ -47,7 +50,7 @@ def _read_sessions(db_path: Path) -> list[dict]:
 
         conn.close()
         return _assemble(sessions, messages, parts)
-    except Exception:
+    except sqlite3.Error:
         return []
 
 
@@ -56,7 +59,7 @@ def _parse_data(raw) -> dict:
         return raw
     try:
         return json.loads(raw) if raw else {}
-    except Exception:
+    except json.JSONDecodeError:
         return {}
 
 

@@ -71,13 +71,13 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 try:
                     logs.append(json.loads(f.read_text()))
-                except Exception:
+                except (OSError, json.JSONDecodeError):
                     continue
             self._json(logs)
         elif self.path == "/api/usage":
             try:
                 self._json(json.loads((DATA_DIR / "usage.json").read_text()))
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 self._json({})
         elif self.path == "/api/queue":
             self._json(sorted(f.stem for f in QUEUE_DIR.glob("*.req")))
@@ -92,7 +92,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             date = json.loads(self.rfile.read(length)).get("date", "")
-        except Exception:
+        except (ValueError, json.JSONDecodeError):
             date = ""
         if not _DATE_RE.match(date):
             return self._json({"error": "date must be YYYY-MM-DD"}, 400)

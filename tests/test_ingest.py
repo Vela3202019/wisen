@@ -5,7 +5,8 @@ Test ingestion pipeline. Run from the repo root:
 """
 import asyncio
 import sys
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
+
 from wisen.ingestion.pipeline import ingest_all
 
 
@@ -13,7 +14,7 @@ async def main():
     if len(sys.argv) > 1:
         dates = [sys.argv[1]]
     else:
-        today = date.today()
+        today = datetime.now(UTC).date()
         dates = [(today - timedelta(days=i)).isoformat() for i in range(7)]
 
     total_sessions = 0

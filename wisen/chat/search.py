@@ -71,6 +71,7 @@ def _grep_candidate_files(query: str, root: Path, file_glob: str) -> list[Path]:
             capture_output=True,
             text=True,
             timeout=15,
+            check=False,
         )
         # returncode 0 = matches found, 1 = no matches, other = error
         if result.returncode not in (0, 1):
@@ -156,7 +157,7 @@ def _parse_claude_code_file(path: Path, compiled: re.Pattern) -> list[SearchMatc
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             events = [json.loads(line) for line in f if line.strip()]
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return []
 
     # Group events by sessionId
@@ -168,7 +169,7 @@ def _parse_claude_code_file(path: Path, compiled: re.Pattern) -> list[SearchMatc
     try:
         project_name = "/" + path.parent.name.lstrip("-").replace("-", "/")
         project_name = Path(project_name).name
-    except Exception:
+    except (OSError, ValueError):
         project_name = path.stem
 
     results = []
@@ -197,7 +198,7 @@ def _parse_codex_file(path: Path, compiled: re.Pattern) -> list[SearchMatch]:
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             events = [json.loads(line) for line in f if line.strip()]
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return []
 
     cwd = ""
@@ -250,7 +251,7 @@ def _parse_gemini_cli_file(path: Path, compiled: re.Pattern) -> list[SearchMatch
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             data = json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return []
 
     history = data.get("conversationHistory", [])
@@ -282,7 +283,7 @@ _PI_PI_RE  = re.compile(r"^(pi|assistant|ai)\s*:\s*", re.IGNORECASE)
 def _parse_pi_json_file(path: Path, compiled: re.Pattern) -> list[SearchMatch]:
     try:
         data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return []
 
     def _turns_from_messages(messages: list, title: str) -> list[dict]:
@@ -321,7 +322,7 @@ def _parse_pi_json_file(path: Path, compiled: re.Pattern) -> list[SearchMatch]:
 def _parse_pi_txt_file(path: Path, compiled: re.Pattern) -> list[SearchMatch]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
+    except OSError:
         return []
 
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -448,7 +449,7 @@ def _search_agent_configs_sync(query: str, max_results: int) -> list[dict]:
             break
         try:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except Exception:
+        except OSError:
             continue
         hits = [i for i, line in enumerate(lines) if compiled.search(line)]
         if not hits:

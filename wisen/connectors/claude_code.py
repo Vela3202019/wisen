@@ -42,13 +42,16 @@ Note the outer "type" and inner "role" disagree on purpose (a tool result is
 type=user); we trust message.role. sessionId groups lines after /resume.
 """
 import json
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from wisen import config
 from wisen.ingestion.normalizer import (
-    NormalizedSession, Turn, compute_metadata, truncate_content
+    NormalizedSession,
+    Turn,
+    compute_metadata,
+    truncate_content,
 )
 
 _CLAUDE_DIR = config.root() / ".claude" / "projects"
@@ -120,7 +123,7 @@ def _group_by_session(events: list[dict]) -> dict[str, list[dict]]:
 
 def _events_to_turns(events: list[dict]) -> list[Turn]:
     turns = []
-    last_ts = datetime.now(timezone.utc)
+    last_ts = datetime.now(UTC)
     last_mode = None
     for e in events:
         etype = e.get("type")
@@ -152,9 +155,9 @@ def _events_to_turns(events: list[dict]) -> list[Turn]:
             continue
 
         try:
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        except Exception:
-            ts = datetime.now(timezone.utc)
+            ts = datetime.fromisoformat(ts_str)
+        except ValueError:
+            ts = datetime.now(UTC)
         last_ts = ts
 
         text = truncate_content(_extract_text(content))

@@ -15,9 +15,9 @@ Common harness files searched in every project:
   soul.md, SOUL.md,
   .mcp.json, mcp.json, mcp_config.json
 """
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from wisen import config
 
@@ -47,7 +47,7 @@ class AgentConfig:
         self.path = path
         self.content = content
         self.date = date
-        self.snapshot_at = datetime.now(timezone.utc)
+        self.snapshot_at = datetime.now(UTC)
 
     def to_dict(self) -> dict:
         return {
@@ -63,7 +63,7 @@ def _read(path: Path, max_chars: int = 8000) -> str | None:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
         return text[:max_chars] if len(text) > max_chars else text
-    except Exception:
+    except OSError:
         return None
 
 

@@ -13,9 +13,9 @@ import asyncio
 import json
 from pathlib import Path
 
-from wisen.evals.cases import CASES_DIR, Case, case_path, load_cases, save_case
 from wisen.evals import metrics as metrics_mod
 from wisen.evals import miner
+from wisen.evals.cases import CASES_DIR, Case, case_path, load_cases, save_case
 
 
 async def _mine(since: str | None, no_enrich: bool) -> None:
@@ -30,7 +30,7 @@ async def _mine(since: str | None, no_enrich: bool) -> None:
         if not no_enrich:
             try:
                 case = await miner.enrich(case)
-            except Exception as e:
+            except (ValueError, RuntimeError) as e:
                 print(f"  enrich failed for {case.id}: {e}")
         save_case(case)
         print(f"  [{case.detector}] {case.id} ({case.split})")

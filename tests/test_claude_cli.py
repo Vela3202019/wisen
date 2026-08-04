@@ -4,7 +4,7 @@ Run: python3 -m tests.test_claude_cli
 """
 import json
 
-from wisen.synthesis.claude_cli import _parse_result, _extract_json_object, _model_name
+from wisen.synthesis.claude_cli import _extract_json_object, _model_name, _parse_result
 from wisen.synthesis.schema import DayObservation
 
 
@@ -66,7 +66,7 @@ def test_parse_schema_violation():
     del bad["day_summary"]  # required field
     try:
         _parse_result(_envelope(json.dumps(bad)), DayObservation)
-    except Exception as e:
+    except ValueError as e:
         assert "day_summary" in str(e)
         print("✓ parse: schema violation raises")
     else:

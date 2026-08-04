@@ -22,13 +22,16 @@ If the layout changes between CLI versions, this connector gracefully
 yields nothing rather than crashing.
 """
 import json
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from wisen import config
 from wisen.ingestion.normalizer import (
-    NormalizedSession, Turn, compute_metadata, truncate_content,
+    NormalizedSession,
+    Turn,
+    compute_metadata,
+    truncate_content,
 )
 
 _GEMINI_DIR = config.root() / ".gemini"
@@ -43,11 +46,11 @@ _ROLE_MAP = {
 
 def _parse_ts(raw: str | None) -> datetime:
     if not raw:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except Exception:
-        return datetime.now(timezone.utc)
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return datetime.now(UTC)
 
 
 def _turns_from_history(history: list[dict], base_ts: datetime) -> list[Turn]:
@@ -86,7 +89,7 @@ def _turns_from_history(history: list[dict], base_ts: datetime) -> list[Turn]:
 def _parse_checkpoint(path: Path) -> NormalizedSession | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return None
 
     session_id = data.get("sessionId", path.stem)
@@ -147,8 +150,10 @@ async def ingest(date: str | None = None) -> AsyncIterator[NormalizedSession]:
             if str(f) in seen:
                 continue
             seen.add(str(f))
+            # Note: Using sync open in async context is acceptable here as this is
+            # a fallback for future JSONL format and files are small session checkpoints
             try:
-                with open(f, encoding="utf-8", errors="replace") as fh:
+                with open(f, encoding="utf-8", errors="replace") as fh:  # noqa: ASYNC230
                     for line in fh:
                         line = line.strip()
                         if not line:
@@ -157,7 +162,7 @@ async def ingest(date: str | None = None) -> AsyncIterator[NormalizedSession]:
                             data = json.loads(line)
                             if "conversationHistory" in data or "messages" in data:
                                 session = _parse_checkpoint.__wrapped__(f) if hasattr(_parse_checkpoint, "__wrapped__") else None
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except json.JSONDecodeError:
+                            pass  # Skip malformed JSON lines
+            except OSError:
+                pass  # Skip unreadable files

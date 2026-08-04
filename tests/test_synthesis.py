@@ -5,6 +5,7 @@ End-to-end synthesis test. Run from the repo root:
 """
 import asyncio
 import sys
+
 from wisen.db import ensure_indexes
 from wisen.ingestion.pipeline import ingest_all
 from wisen.synthesis.agent import synthesize

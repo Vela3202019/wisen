@@ -6,15 +6,22 @@ Returns:
   IngestResult.sessions — NormalizedSession objects from all connectors
   IngestResult.configs  — AgentConfig objects (CLAUDE.md, AGENTS.md, MCP, etc.)
 """
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
-from wisen.ingestion.normalizer import NormalizedSession
-from wisen.connectors.agent_configs import AgentConfig
 from wisen.connectors import (
-    claude_code, agent_configs, opencode, cursor,
-    codex, gemini_cli, pi, generic_export, git_commits,
+    agent_configs,
+    claude_code,
+    codex,
+    cursor,
+    gemini_cli,
+    generic_export,
+    git_commits,
+    opencode,
+    pi,
 )
+from wisen.connectors.agent_configs import AgentConfig
+from wisen.ingestion.normalizer import NormalizedSession
 
 
 @dataclass
@@ -37,7 +44,7 @@ class IngestResult:
 
 async def ingest_all(date: str | None = None) -> IngestResult:
     result = IngestResult()
-    today = date or datetime.now(timezone.utc).date().isoformat()
+    today = date or datetime.now(UTC).date().isoformat()
 
     session_connectors = [
         ("claude-code",  claude_code.ingest(date)),
@@ -54,13 +61,13 @@ async def ingest_all(date: str | None = None) -> IngestResult:
         try:
             async for session in gen:
                 result.sessions.append(session)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             result.errors.append(f"{source_name}: {e}")
 
     try:
         async for config in agent_configs.ingest(today):
             result.configs.append(config)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         result.errors.append(f"agent_configs: {e}")
 
     return result

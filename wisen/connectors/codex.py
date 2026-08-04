@@ -36,13 +36,16 @@ Example events:
    "payload": {"type": "user_message", "message": "add pagination"}}
 """
 import json
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from wisen import config
 from wisen.ingestion.normalizer import (
-    NormalizedSession, Turn, compute_metadata, truncate_content,
+    NormalizedSession,
+    Turn,
+    compute_metadata,
+    truncate_content,
 )
 
 _CODEX_DIR = config.root() / ".codex"
@@ -67,7 +70,7 @@ def _parse_session_file(path: Path) -> list[NormalizedSession]:
                     events.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-    except Exception:
+    except OSError:
         return []
 
     if not events:
@@ -90,9 +93,9 @@ def _parse_session_file(path: Path) -> list[NormalizedSession]:
         ts_str = e.get("timestamp", "")
 
         try:
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        except Exception:
-            ts = datetime.now(timezone.utc)
+            ts = datetime.fromisoformat(ts_str)
+        except ValueError:
+            ts = datetime.now(UTC)
 
         # response_item: assistant or user message
         if etype == "response_item":
@@ -110,7 +113,7 @@ def _parse_session_file(path: Path) -> list[NormalizedSession]:
             ).strip()
 
             # Skip Codex-injected system context blocks
-            if text.startswith("<environment_context>") or text.startswith("<permissions"):
+            if text.startswith(("<environment_context>", "<permissions")):
                 continue
             if not text:
                 continue

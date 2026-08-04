@@ -5,7 +5,7 @@ behavior. Reports land in evals/reports/.
 """
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from wisen.evals.cases import Case, load_cases
@@ -40,7 +40,7 @@ async def run_suite(claude_md_a: Path | None, claude_md_b: Path | None = None,
     if limit:
         cases = cases[:limit]
     report: dict = {
-        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "ran_at": datetime.now(UTC).isoformat(),
         "cases": len(cases),
         "configs": {},
     }

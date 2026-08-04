@@ -11,11 +11,10 @@ import argparse
 import asyncio
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from wisen import __version__
-from wisen import config
+from wisen import __version__, config
 
 
 async def _check_mongo() -> None:
@@ -25,7 +24,7 @@ async def _check_mongo() -> None:
     uri = config.get("storage", "mongodb_uri", "MONGODB_URI", "mongodb://127.0.0.1:27017")
     try:
         await asyncio.wait_for(get_client().admin.command("ping"), timeout=5)
-    except Exception:
+    except (TimeoutError, OSError):
         raise SystemExit(
             f"MongoDB unreachable at {uri} — is it running?\n"
             "  brew services start mongodb-community    # macOS\n"
@@ -38,7 +37,7 @@ async def _synthesize(date: str) -> None:
     from wisen.synthesis.agent import synthesize
 
     await _check_mongo()
-    print(f"[{datetime.now(timezone.utc).isoformat()}] synthesizing {date}")
+    print(f"[{datetime.now(UTC).isoformat()}] synthesizing {date}")
     result = await ingest_all(date)
     reflection = await synthesize(result, date)
     print(f"done — reflection saved for {reflection.date}")
@@ -91,7 +90,7 @@ def main() -> None:
     args = p.parse_args()
 
     if args.cmd == "synthesize":
-        date = args.date or (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+        date = args.date or (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
         asyncio.run(_synthesize(date))
     elif args.cmd == "serve":
         _serve(args.host, args.port, args.reload)

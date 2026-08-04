@@ -19,15 +19,18 @@ Example rows (both tables are key/value; value is a JSON blob):
 The blob shape varies by Cursor version — _parse_chat_blob tries each known
 shape (tabs/bubbles, conversation, messages) and yields whatever matches.
 """
-import sqlite3
 import json
-from datetime import datetime, timezone
+import sqlite3
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import AsyncIterator
 
 from wisen import config
 from wisen.ingestion.normalizer import (
-    NormalizedSession, Turn, compute_metadata, truncate_content
+    NormalizedSession,
+    Turn,
+    compute_metadata,
+    truncate_content,
 )
 
 _WORKSPACE_ROOT = (
@@ -50,7 +53,7 @@ _CHAT_KEYS = {
 def _open_db(path: Path):
     try:
         return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    except Exception:
+    except sqlite3.Error:
         return None
 
 
@@ -74,10 +77,10 @@ def _extract_chats_from_db(db_path: Path) -> list[dict]:
                         value = json.loads(row["value"])
                         if isinstance(value, dict):
                             chats.append({"key": key, "value": value, "source": "ItemTable"})
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except json.JSONDecodeError:
+                        pass  # Skip malformed JSON values
+        except sqlite3.Error:
+            pass  # Table might not exist in this database
 
         # Try cursorDiskKV
         try:
@@ -92,10 +95,10 @@ def _extract_chats_from_db(db_path: Path) -> list[dict]:
                         or "tabs" in value
                     ):
                         chats.append({"key": key, "value": value, "source": "cursorDiskKV"})
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except json.JSONDecodeError:
+                    pass  # Skip malformed JSON values
+        except sqlite3.Error:
+            pass  # Table might not exist in this database
 
     finally:
         conn.close()
@@ -162,9 +165,9 @@ def _conv_to_turns(conv: list) -> list[Turn]:
         # Cursor often omits timestamps — use epoch 0 as placeholder
         ts_raw = msg.get("timestamp", msg.get("createdAt", 0))
         try:
-            ts = datetime.fromtimestamp(float(ts_raw) / 1000, tz=timezone.utc)
-        except Exception:
-            ts = datetime.now(timezone.utc)
+            ts = datetime.fromtimestamp(float(ts_raw) / 1000, tz=UTC)
+        except (ValueError, OSError):
+            ts = datetime.now(UTC)
 
         turns.append(Turn(role=role, content=content, timestamp=ts))
 

@@ -9,10 +9,11 @@ Requires livekit-server running locally:
 """
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from dotenv import load_dotenv
 from livekit import agents
-from livekit.agents import AgentServer, AgentSession, Agent, ConversationItemAddedEvent
+from livekit.agents import Agent, AgentServer, AgentSession, ConversationItemAddedEvent
 from livekit.plugins import google
 
 from wisen.db import get_db
@@ -71,7 +72,7 @@ async def wisen_voice(ctx: agents.JobContext):
 
     db = get_db()
     room_name = ctx.room.name
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     await db.voice_sessions.update_one(
         {"room_name": room_name},
@@ -90,8 +91,8 @@ async def wisen_voice(ctx: agents.JobContext):
             db.voice_sessions.update_one(
                 {"room_name": room_name},
                 {
-                    "$push": {"messages": {"role": role, "content": text, "at": datetime.now(timezone.utc)}},
-                    "$set": {"updated_at": datetime.now(timezone.utc)},
+                    "$push": {"messages": {"role": role, "content": text, "at": datetime.now(UTC)}},
+                    "$set": {"updated_at": datetime.now(UTC)},
                 },
             )
         )

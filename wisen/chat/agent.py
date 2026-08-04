@@ -12,22 +12,30 @@ Designed to be called via POST /chat (SSE streaming).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
 
 from dotenv import load_dotenv
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import (
-    ModelMessage, ModelRequest, ModelResponse, UserPromptPart, TextPart,
-    PartStartEvent, PartDeltaEvent, TextPartDelta,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    PartDeltaEvent,
+    PartStartEvent,
+    TextPart,
+    TextPartDelta,
+    UserPromptPart,
 )
 from pydantic_ai.settings import ModelSettings
-from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from wisen.chat.search import search_agent_configs as _search_configs
+from wisen.chat.search import search_chat_history as _search
 from wisen.db import get_db
 from wisen.llm import get_model
-from wisen.chat.search import search_chat_history as _search, search_agent_configs as _search_configs
 
 load_dotenv()
 
@@ -112,7 +120,7 @@ def _resolve_date(raw: str) -> str:
 
     raw = raw.strip().lower()
     # UTC to match how reflections and sessions are dated everywhere else
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
 
     if raw in ("today",):
         return today.isoformat()
@@ -241,7 +249,7 @@ def _to_history(messages: list[dict]) -> list[ModelMessage]:
         else:
             history.append(ModelResponse(
                 parts=[TextPart(content=m["content"])],
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 model_name=model,
             ))
     return history
@@ -321,7 +329,7 @@ async def stream_chat(
                             started_this_node = True
                             emitted_text = True
                             await queue.put({"type": "token", "data": text})
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             await queue.put({"type": "error", "message": str(e)})
         finally:
             await queue.put(None)

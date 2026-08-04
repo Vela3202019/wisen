@@ -1,6 +1,7 @@
-from pydantic import BaseModel
 from datetime import datetime
 from typing import Literal
+
+from pydantic import BaseModel
 
 
 class Turn(BaseModel):

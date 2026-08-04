@@ -3,10 +3,21 @@ Test each connector individually and report what it finds.
 Run from the repo root:  python3 -m tests.test_sources
 """
 import asyncio
-from datetime import date, timedelta
-from wisen.connectors import claude_code, opencode, cursor, codex, gemini_cli, pi, generic_export, git_commits, agent_configs
+from datetime import UTC, datetime, timedelta
 
-DATES = [(date.today() - timedelta(days=i)).isoformat() for i in range(7)]
+from wisen.connectors import (
+    agent_configs,
+    claude_code,
+    codex,
+    cursor,
+    gemini_cli,
+    generic_export,
+    git_commits,
+    opencode,
+    pi,
+)
+
+DATES = [(datetime.now(UTC).date() - timedelta(days=i)).isoformat() for i in range(7)]
 
 
 async def probe(name, gen_fn):
@@ -14,7 +25,7 @@ async def probe(name, gen_fn):
     try:
         async for s in gen_fn:
             sessions.append(s)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"  [{name}] ERROR: {e}")
         return
 
@@ -56,7 +67,7 @@ async def main():
         for d in DATES:
             async for c in agent_configs.ingest(d):
                 configs.append(c)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"  [agent-configs] ERROR: {e}")
     else:
         sources = list({c.source for c in configs})

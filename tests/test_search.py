@@ -7,9 +7,10 @@ import sys
 
 # Load env so connector paths resolve
 from dotenv import load_dotenv
+
 load_dotenv()
 
-from wisen.chat.search import search_chat_history  # noqa: E402
+from wisen.chat.search import search_chat_history
 
 
 async def main():

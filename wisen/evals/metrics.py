@@ -14,7 +14,7 @@ import math
 from collections import defaultdict
 from pathlib import Path
 
-from wisen.evals.miner import scan_all, _CLAUDE_DIR
+from wisen.evals.miner import _CLAUDE_DIR, scan_all
 
 REFLECTION_DIR = Path.home() / ".wisen" / "exports" / "reflections"
 

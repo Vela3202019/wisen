@@ -15,7 +15,7 @@ import json
 import subprocess
 import sys
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -23,7 +23,7 @@ def claude_usage() -> dict | None:
     try:
         raw = subprocess.run(
             ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, check=False,
         ).stdout
         token = json.loads(raw)["claudeAiOauth"]["accessToken"]
         req = urllib.request.Request(
@@ -38,7 +38,7 @@ def claude_usage() -> dict | None:
             "seven_day_pct": data["seven_day"]["utilization"],
             "seven_day_resets_at": data["seven_day"]["resets_at"],
         }
-    except Exception:
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, urllib.error.URLError):
         return None
 
 
@@ -56,16 +56,16 @@ def codex_usage() -> dict | None:
                         continue
                     try:
                         e = json.loads(line)
-                    except Exception:
+                    except json.JSONDecodeError:
                         continue
                     rl = (e.get("payload") or {}).get("rate_limits")
                     if rl:
                         last = (e.get("timestamp", ""), rl)
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             continue
         if last:
             ts, rl = last
-            iso = lambda epoch: datetime.fromtimestamp(epoch, timezone.utc).isoformat() if epoch else None
+            iso = lambda epoch: datetime.fromtimestamp(epoch, UTC).isoformat() if epoch else None
             return {
                 "five_hour_pct": (rl.get("primary") or {}).get("used_percent"),
                 "five_hour_resets_at": iso((rl.get("primary") or {}).get("resets_at")),
@@ -81,7 +81,7 @@ def main() -> None:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "~/.wisen/exports/reflections/usage.json").expanduser()
     out.parent.mkdir(parents=True, exist_ok=True)
     usage = {
-        "collected_at": datetime.now(timezone.utc).isoformat(),
+        "collected_at": datetime.now(UTC).isoformat(),
         "claude": claude_usage(),
         "codex": codex_usage(),
     }

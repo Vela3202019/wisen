@@ -48,7 +48,7 @@ def stage_config(claude_md: Path | None, staging: Path) -> None:
     if not cred.exists():
         r = subprocess.run(
             ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
         if r.returncode == 0 and r.stdout.strip():
             cred.write_text(r.stdout)
@@ -61,7 +61,7 @@ def commit_near(project: Path, date: str) -> str | None:
     """SHA of the last commit on or before the case date, if project is a repo."""
     r = subprocess.run(
         ["git", "-C", str(project), "rev-list", "-1", f"--before={date}T23:59:59", "HEAD"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     sha = r.stdout.strip()
     return sha or None
@@ -109,6 +109,7 @@ def run_replay(case: Case, claude_md: Path | None = None) -> ReplayResult:
                  "--allowedTools", _ALLOWED_TOOLS],
                 cwd=worktree, capture_output=True, text=True, timeout=_TIMEOUT_S,
                 env={**__import__("os").environ, "CLAUDE_CONFIG_DIR": str(staging)},
+                check=False,
             )
             try:
                 data = json.loads(r.stdout)
@@ -122,7 +123,7 @@ def run_replay(case: Case, claude_md: Path | None = None) -> ReplayResult:
             final_text = data.get("result", "")
             diff = subprocess.run(
                 ["git", "-C", str(worktree), "diff"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, check=False,
             ).stdout
             return ReplayResult(final_text=final_text, diff=diff)
         except subprocess.TimeoutExpired:
@@ -130,5 +131,5 @@ def run_replay(case: Case, claude_md: Path | None = None) -> ReplayResult:
         finally:
             subprocess.run(
                 ["git", "-C", str(project), "worktree", "remove", "--force", str(worktree)],
-                capture_output=True, text=True,
+                capture_output=True, text=True, check=False,
             )

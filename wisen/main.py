@@ -1,18 +1,18 @@
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 import json
 import uuid
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from wisen.db import get_db, ensure_indexes
+from wisen.chat.agent import stream_chat
+from wisen.db import ensure_indexes, get_db
 from wisen.ingestion.pipeline import ingest_all
 from wisen.synthesis.agent import synthesize
 from wisen.synthesis.schema import Reflection
-from wisen.chat.agent import stream_chat
 
 
 @asynccontextmanager
@@ -50,14 +50,14 @@ async def _run_synthesis(job_id: str, date: str):
         result = await ingest_all(date)
         reflection = await synthesize(result, date)
         _jobs[job_id] = {"status": "done", "date": date, "reflection": reflection.model_dump()}
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         _jobs[job_id] = {"status": "error", "date": date, "error": str(e)}
 
 
 @app.post("/synthesize", response_model=JobStatus)
 async def trigger_synthesis(req: SynthesizeRequest, background_tasks: BackgroundTasks):
-    date = req.date or datetime.now(timezone.utc).date().isoformat()
-    job_id = f"{date}-{datetime.now(timezone.utc).strftime('%H%M%S')}"
+    date = req.date or datetime.now(UTC).date().isoformat()
+    job_id = f"{date}-{datetime.now(UTC).strftime('%H%M%S')}"
     _jobs[job_id] = {"status": "running", "date": date}
     background_tasks.add_task(_run_synthesis, job_id, date)
     return JobStatus(job_id=job_id, status="running", date=date)
@@ -114,7 +114,7 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Last message must be role=user")
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
     db = get_db()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Resolve or create session
     session_id = req.session_id
@@ -150,7 +150,7 @@ async def chat(req: ChatRequest):
                     if event.get("type") == "token":
                         assistant_tokens.append(event["data"])
                     yield f"data: {json.dumps(event)}\n\n"
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
             if assistant_tokens:
@@ -158,8 +158,8 @@ async def chat(req: ChatRequest):
                 await db.chat_sessions.update_one(
                     {"session_id": session_id},
                     {
-                        "$push": {"messages": {"role": "assistant", "content": full, "at": datetime.now(timezone.utc)}},
-                        "$set": {"updated_at": datetime.now(timezone.utc)},
+                        "$push": {"messages": {"role": "assistant", "content": full, "at": datetime.now(UTC)}},
+                        "$set": {"updated_at": datetime.now(UTC)},
                     },
                 )
             yield f"data: {json.dumps({'done': True})}\n\n"
@@ -201,7 +201,7 @@ async def get_chat_session(session_id: str):
 async def voice_token():
     """Return a LiveKit JWT for the renderer to join the voice room."""
     try:
-        from wisen.voice.token import create_participant_token, LIVEKIT_URL
+        from wisen.voice.token import LIVEKIT_URL, create_participant_token
     except ImportError:
         raise HTTPException(status_code=501, detail="voice extra not installed: pip install 'wisen[voice]'")
     token, room_name = create_participant_token()
@@ -218,19 +218,18 @@ _MODEL_KEY_ENV = {
 
 @app.get("/health")
 async def health():
+    import asyncio
     import os
 
     from wisen.llm import get_model
-
-    import asyncio
 
     status = {"mongodb": False}
     try:
         db = get_db()
         await asyncio.wait_for(db.command("ping"), timeout=2.0)
         status["mongodb"] = True
-    except Exception:
-        pass
+    except (TimeoutError, OSError):
+        pass  # MongoDB ping failed, status already False
     model = get_model()
     provider = model.split(":", 1)[0]
     status["model"] = model
