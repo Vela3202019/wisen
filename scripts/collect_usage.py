@@ -12,20 +12,69 @@ Usage: python3 scripts/collect_usage.py [output.json]
        (default: ~/.wisen/exports/reflections/usage.json)
 """
 import json
+import re
 import subprocess
 import sys
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
+_CLAUDE_SVC = "Claude Code-credentials"
+
+
+def _claude_access_token() -> str | None:
+    """Find the Claude Code OAuth access token in the macOS Keychain.
+
+    Multiple keychain entries can share the "Claude Code-credentials" service
+    name (e.g. a per-user account plus a generic "unknown" one holding only
+    MCP OAuth state). ``find-generic-password`` without an account returns an
+    arbitrary entry, which may be the one without the token. Try the default
+    lookup first, then enumerate every account for the service until one
+    yields a ``claudeAiOauth.accessToken``.
+    """
+
+    def extract(raw: str) -> str | None:
+        try:
+            return json.loads(raw).get("claudeAiOauth", {}).get("accessToken")
+        except (json.JSONDecodeError, AttributeError):
+            return None
+
+    raw = subprocess.run(
+        ["security", "find-generic-password", "-s", _CLAUDE_SVC, "-w"],
+        capture_output=True, text=True, timeout=10, check=False,
+    ).stdout
+    token = extract(raw)
+    if token:
+        return token
+
+    # Enumerate accounts for the service via dump-keychain and try each.
+    dump = subprocess.run(
+        ["security", "dump-keychain"],
+        capture_output=True, text=True, timeout=15, check=False,
+    ).stdout
+    accounts: list[str] = []
+    for entry in dump.split("keychain:"):
+        if _CLAUDE_SVC not in entry:
+            continue
+        m = re.search(r'"acct"<blob>="([^"]*)"', entry)
+        if m:
+            accounts.append(m.group(1))
+    for acct in accounts:
+        raw = subprocess.run(
+            ["security", "find-generic-password", "-s", _CLAUDE_SVC, "-a", acct, "-w"],
+            capture_output=True, text=True, timeout=10, check=False,
+        ).stdout
+        token = extract(raw)
+        if token:
+            return token
+    return None
+
 
 def claude_usage() -> dict | None:
     try:
-        raw = subprocess.run(
-            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-            capture_output=True, text=True, timeout=10, check=False,
-        ).stdout
-        token = json.loads(raw)["claudeAiOauth"]["accessToken"]
+        token = _claude_access_token()
+        if not token:
+            return None
         req = urllib.request.Request(
             "https://api.anthropic.com/api/oauth/usage",
             headers={"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20"},
@@ -66,14 +115,23 @@ def codex_usage() -> dict | None:
         if last:
             ts, rl = last
             iso = lambda epoch: datetime.fromtimestamp(epoch, UTC).isoformat() if epoch else None
-            return {
-                "five_hour_pct": (rl.get("primary") or {}).get("used_percent"),
-                "five_hour_resets_at": iso((rl.get("primary") or {}).get("resets_at")),
-                "weekly_pct": (rl.get("secondary") or {}).get("used_percent"),
-                "weekly_resets_at": iso((rl.get("secondary") or {}).get("resets_at")),
-                "plan": rl.get("plan_type"),
-                "as_of": ts,
-            }
+            # Codex reports `primary` and `secondary` rate-limit windows, but
+            # which is the 5-hour vs weekly limit depends on the plan. Identify
+            # each window by its `window_minutes` (300 = 5h, 10080 = 7d) rather
+            # than assuming primary is always the short window.
+            out: dict = {"plan": rl.get("plan_type"), "as_of": ts}
+            for slot in ("primary", "secondary"):
+                win = rl.get(slot)
+                if not win:
+                    continue
+                mins = win.get("window_minutes")
+                if mins is not None and mins <= 360:
+                    out["five_hour_pct"] = win.get("used_percent")
+                    out["five_hour_resets_at"] = iso(win.get("resets_at"))
+                else:
+                    out["weekly_pct"] = win.get("used_percent")
+                    out["weekly_resets_at"] = iso(win.get("resets_at"))
+            return out
     return None
 
 
