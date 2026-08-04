@@ -118,6 +118,9 @@ class Reflection(BaseModel):
     # The one takeaway worth remembering a month from now
     insight: str = ""
 
+    # 3 scannable bullets, each "<emoji> <max 8 simple words>" (defaulted: old docs lack it)
+    tldr: list[str] = []
+
     # Alignment
     alignment_score: float = Field(ge=0.0, le=1.0)
     alignment_label: Literal["aligned", "mild-friction", "friction", "misaligned"]
@@ -129,6 +132,7 @@ class Reflection(BaseModel):
     friction_deltas: list[FrictionDelta]
     model_usage: list[ModelUsage]
     acted_on_recommendations: list[str]   # which of yesterday's recs were followed
+    ignored_recommendations: list[str] = []  # yesterday's recs not acted on (defaulted: pre-existing docs lack it)
 
     # History + voice context
     seven_day_pattern: list[DayPattern]

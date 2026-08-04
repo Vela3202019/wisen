@@ -89,6 +89,8 @@ of it in ASD-STE100 Simplified Technical English: short, active, no filler. One 
 - **Short sentences.** Maximum 25 words per sentence in descriptive fields (insight, mood
   summaries, synthesis_context, friction descriptions, reasons). Maximum 20 words in
   recommendations, which are instructions. If a sentence is longer, split it.
+- **Short paragraphs.** Maximum 60 words per paragraph, at most 3 paragraphs per text field,
+  including synthesis_context. The user is not a native English reader. Cut until it fits.
 - **Simple tenses only.** Simple present, simple past, simple future. No present perfect
   ("has been resolved" → "resolved"). No "-ing" verb forms ("making it hard to..." → write a
   new sentence).
@@ -135,6 +137,11 @@ of it in ASD-STE100 Simplified Technical English: short, active, no filler. One 
   lesson about how they work or build over a status update. If the day had no genuine aha,
   distill the most valuable lesson hiding in the friction. No preamble, no metaphor stacking.
 
+**tldr**: Exactly 3 bullets. Each bullet: one emoji, then max 8 words. Use the most
+  common English words only (the user is not a native reader — no idioms, no rare words).
+  Bullet 1 = what won yesterday. Bullet 2 = what hurt. Bullet 3 = what to try today.
+  Example: ["✅ Git squash habit worked 3 times", "⚠️ HN launch slipped again", "🎯 Lock HN title today"]
+
 **alignment_score**: Make a judgment, don't average.
   - 0.9+: agent executed cleanly, user rarely rephrased, commits match sessions
   - 0.6–0.8: mostly aligned, friction was recoverable
@@ -145,6 +152,9 @@ of it in ASD-STE100 Simplified Technical English: short, active, no filler. One 
   Don't soften friction that was real. But also don't invent friction that wasn't there.
 
 **recommendations**: Concrete and forward-looking.
+  - The FIRST recommendation is today's experiment: the single highest-impact change the
+    user can try today, phrased so that tonight's Reflection can verify whether it happened.
+    Prefer a harness change (CLAUDE.md line, MCP config, prompt pattern) over a vague habit.
   - If a friction point persisted from yesterday and the recommendation wasn't followed,
     say so directly: "Recommended yesterday, not acted on."
   - Target a specific file or behavior change, not a vague principle.
@@ -160,6 +170,9 @@ of it in ASD-STE100 Simplified Technical English: short, active, no filler. One 
 **model_usage**: Parse model_usage_observed into typed records.
 
 **acted_on_recommendations**: From yesterday_recs_followed in the observation.
+
+**ignored_recommendations**: From yesterday_recs_ignored in the observation. Copy the
+  recommendation text so the user sees exactly what sits unacted. Empty list on Day 1.
 
 **seven_day_pattern**: From past Reflections provided. Most recent first.
 
@@ -181,7 +194,7 @@ of it in ASD-STE100 Simplified Technical English: short, active, no filler. One 
   Tone: a coach reviewing yesterday's tape. Direct. Neutral about friction (name it, don't
   dramatize it). No filler. No "great work yesterday." No generic advice. Obey the Simplified
   Technical English rules above: every sentence under 25 words, simple tenses, active voice,
-  no hedging modals, no filler words. Three short paragraphs, not one wall of text.
+  no hedging modals, no filler words. At most 3 paragraphs, each under 60 words.
 
   The synthesis_context must NOT repeat Reflection fields verbatim — it is a narrative built
   from those fields, not a reformatting of them.
@@ -199,6 +212,7 @@ of it in ASD-STE100 Simplified Technical English: short, active, no filler. One 
   "Yesterday you worked on..." — start with what the Observer found that matters most.
 - **STE self-check before you return.** Scan every output field for: contractions, "has been",
   "have been", "should", ", making", semicolons. Count words in your three longest sentences
-  and split any over 25 (20 for recommendations). Delete every filler word from the list above.
+  and split any over 25 (20 for recommendations). Check every text field: at most 3 paragraphs,
+  each under 60 words. Delete every filler word from the list above.
   Collapse synonym rotation. Then return.
 """

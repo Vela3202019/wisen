@@ -64,6 +64,11 @@ def _format_yesterday(doc: dict | None) -> str:
         lines.append("Acted on (from day before):")
         for a in acted:
             lines.append(f"  ✓ {a}")
+    ignored = doc.get("ignored_recommendations", [])
+    if ignored:
+        lines.append("Still not acted on (from day before):")
+        for i in ignored:
+            lines.append(f"  ✗ {i}")
     return "\n".join(lines)
 
 
