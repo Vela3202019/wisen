@@ -58,12 +58,19 @@
   .urow .bar { flex:1; margin:0; }
   .urow .pct { width:44px; text-align:right; font-variant-numeric:tabular-nums; }
   .usage .asof { color:var(--dim); font-size:11px; margin-top:6px; }
+  .chart { background:var(--card); border:1px solid var(--border); border-radius:12px;
+           padding:12px 16px; margin-bottom:16px; }
+  .chart h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em;
+              color:var(--dim); margin:0 0 8px; }
+  .chart .tip { font-size:12px; color:var(--dim); height:16px; margin-top:4px; }
+  .chart svg { display:block; width:100%; height:auto; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>🫡 hi boss</h1>
   <div class="usage" id="usage" style="display:none"></div>
+  <div class="chart" id="chart" style="display:none"></div>
   <div class="trigger">
     <input type="date" id="date">
     <button onclick="trigger()">Reflect</button>
@@ -103,6 +110,45 @@ function renderUsage(u) {
   el.style.display = "block";
 }
 
+function renderChart(logs) {
+  const el = document.getElementById("chart");
+  const days = [...logs].filter(l => l.date).sort((a, b) => a.date < b.date ? -1 : 1);
+  if (days.length < 2) { el.style.display = "none"; return; }
+
+  const W = 688, H = 150, PAD = { l: 30, r: 8, t: 12, b: 22 };
+  const w = W - PAD.l - PAD.r, h = H - PAD.t - PAD.b;
+  const x = i => PAD.l + (days.length === 1 ? w / 2 : i * w / (days.length - 1));
+  const y = score => PAD.t + (1 - (score ?? 0)) * h;
+
+  let out = "";
+  // gridlines + y labels (0 / 50 / 100%)
+  for (const v of [0, 0.5, 1]) {
+    out += `<line x1="${PAD.l}" y1="${y(v)}" x2="${W - PAD.r}" y2="${y(v)}" stroke="var(--border)" stroke-width="1"${v ? "" : ' stroke-dasharray="3 3"'}/>
+            <text x="${PAD.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="var(--dim)">${v * 100}</text>`;
+  }
+  // area + line
+  const pts = days.map((d, i) => [x(i), y(d.alignment_score)]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  out += `<path d="${line} L ${pts[pts.length - 1][0].toFixed(1)} ${y(0)} L ${pts[0][0].toFixed(1)} ${y(0)} Z" fill="var(--aligned)" opacity="0.08"/>
+          <path d="${line}" fill="none" stroke="var(--dim)" stroke-width="1.5"/>`;
+  // x labels: first, middle, last
+  const labelIdx = [...new Set([0, Math.floor((days.length - 1) / 2), days.length - 1])];
+  for (const i of labelIdx)
+    out += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="var(--dim)">${esc(days[i].date.slice(5))}</text>`;
+  // dots (colored by alignment label) + hover details
+  days.forEach((d, i) => {
+    const c = COLORS[d.alignment_label] || "var(--dim)";
+    const n = (d.friction_points || []).length;
+    out += `<circle cx="${x(i)}" cy="${y(d.alignment_score)}" r="3.5" fill="${c}">
+      <title>${esc(d.date)} — ${Math.round((d.alignment_score || 0) * 100)}% ${esc(d.alignment_label)}${n ? ` · ${n} friction point${n > 1 ? "s" : ""}` : ""}</title></circle>`;
+  });
+
+  el.innerHTML = `<h2>Alignment over time</h2>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Alignment score over time">${out}</svg>
+    <div class="tip">dot = day · hover for details</div>`;
+  el.style.display = "block";
+}
+
 async function load() {
   const [logs, queue, usage] = await Promise.all([
     fetch("/api/logs").then(r => r.json()),
@@ -110,6 +156,7 @@ async function load() {
     fetch("/api/usage").then(r => r.json()).catch(() => null),
   ]);
   renderUsage(usage);
+  renderChart(logs);
   document.getElementById("queued").textContent =
     queue.length ? "Queued for reflection (runs when laptop is awake): " + queue.join(", ") : "";
   const el = document.getElementById("logs");
