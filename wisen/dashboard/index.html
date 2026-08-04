@@ -135,18 +135,40 @@ function renderChart(logs) {
   const labelIdx = [...new Set([0, Math.floor((days.length - 1) / 2), days.length - 1])];
   for (const i of labelIdx)
     out += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="var(--dim)">${esc(days[i].date.slice(5))}</text>`;
-  // dots (colored by alignment label) + hover details
+  // crosshair (hidden until hover)
+  out += `<line id="crosshair" y1="${PAD.t}" y2="${H - PAD.b}" stroke="var(--dim)"
+          stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>`;
+  // dots (colored by alignment label)
   days.forEach((d, i) => {
     const c = COLORS[d.alignment_label] || "var(--dim)";
-    const n = (d.friction_points || []).length;
-    out += `<circle cx="${x(i)}" cy="${y(d.alignment_score)}" r="3.5" fill="${c}">
-      <title>${esc(d.date)} — ${Math.round((d.alignment_score || 0) * 100)}% ${esc(d.alignment_label)}${n ? ` · ${n} friction point${n > 1 ? "s" : ""}` : ""}</title></circle>`;
+    out += `<circle cx="${x(i)}" cy="${y(d.alignment_score)}" r="3.5" fill="${c}"/>`;
   });
+  // full-width hover capture layer
+  out += `<rect id="hoverzone" x="${PAD.l}" y="${PAD.t}" width="${w}" height="${h}" fill="transparent"/>`;
 
   el.innerHTML = `<h2>Alignment over time</h2>
     <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Alignment score over time">${out}</svg>
-    <div class="tip">dot = day · hover for details</div>`;
+    <div class="tip" id="chart-tip">dot = day · hover for details</div>`;
   el.style.display = "block";
+
+  const svg = el.querySelector("svg");
+  const cross = el.querySelector("#crosshair");
+  const tip = el.querySelector("#chart-tip");
+  const defaultTip = tip.textContent;
+
+  el.querySelector("#hoverzone").addEventListener("mousemove", e => {
+    const r = svg.getBoundingClientRect();
+    const mx = (e.clientX - r.left) * (W / r.width);
+    const i = Math.max(0, Math.min(days.length - 1, Math.round((mx - PAD.l) / (w / (days.length - 1)))));
+    const d = days[i], n = (d.friction_points || []).length;
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i));
+    cross.setAttribute("visibility", "visible");
+    tip.textContent = `${d.date} — ${Math.round((d.alignment_score || 0) * 100)}% ${d.alignment_label}${n ? ` · ${n} friction point${n > 1 ? "s" : ""}` : ""}`;
+  });
+  el.querySelector("#hoverzone").addEventListener("mouseleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    tip.textContent = defaultTip;
+  });
 }
 
 async function load() {
