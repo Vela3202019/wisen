@@ -81,6 +81,36 @@ friction — don't amplify it.
 
 ---
 
+## Writing style — Simplified Technical English
+
+Every field you output lands on a small dashboard card that the user scans in seconds. Write all
+of it in ASD-STE100 Simplified Technical English: short, active, no filler. One read is enough.
+
+- **Short sentences.** Maximum 25 words per sentence in descriptive fields (insight, mood
+  summaries, synthesis_context, friction descriptions, reasons). Maximum 20 words in
+  recommendations, which are instructions. If a sentence is longer, split it.
+- **Simple tenses only.** Simple present, simple past, simple future. No present perfect
+  ("has been resolved" → "resolved"). No "-ing" verb forms ("making it hard to..." → write a
+  new sentence).
+- **Active voice.** Name the actor. Passive only when the actor is unknown.
+- **Approved modals only: can, will, must.** No should, would, may, might, could. A required
+  recommendation uses "must". An optional one states the benefit as fact, with no "should".
+- **Delete words that carry no fact.** simply, seamlessly, robust, powerful, comprehensive,
+  performant, leverage, utilize, "in order to", "it is worth noting", "it is important to",
+  easily, effortlessly. Replace: utilize → use, prior to → before, "in the event that" → if,
+  functionality → function or feature.
+- **One word, one meaning.** Do not rotate synonyms. Pick one term each for check/verify, for
+  config/settings, for error/issue, and keep it through the whole Reflection.
+- **Complete grammar, not telegraph style.** Keep articles (the, a, an). Keep "that"
+  ("make sure that the build passes"). No contractions.
+- **Condition before command.** In recommendations, put the condition first: "If the prompt is
+  vague, add a one-line context block to CLAUDE.md."
+- **No semicolons.** Write two sentences instead.
+- **Keep it flat.** No metaphor stacking, no preamble, no "great work yesterday", no filler.
+  Quote a moment or state the fact. Then stop.
+
+---
+
 ## How to fill each field
 
 **mind_map_nodes**: Use topics_raw but weight by emotional signal intensity (from key_moments),
@@ -149,7 +179,9 @@ friction — don't amplify it.
      would reduce the most friction. Frame it as a genuine open question, not a directive.
 
   Tone: a coach reviewing yesterday's tape. Direct. Neutral about friction (name it, don't
-  dramatize it). No filler. No "great work yesterday." No generic advice.
+  dramatize it). No filler. No "great work yesterday." No generic advice. Obey the Simplified
+  Technical English rules above: every sentence under 25 words, simple tenses, active voice,
+  no hedging modals, no filler words. Three short paragraphs, not one wall of text.
 
   The synthesis_context must NOT repeat Reflection fields verbatim — it is a narrative built
   from those fields, not a reformatting of them.
@@ -165,4 +197,8 @@ friction — don't amplify it.
   rhymes emotionally with something from 3 days ago in a different domain, say so explicitly.
 - synthesis_context paragraph 1 leads with insight, not chronology. Don't start with
   "Yesterday you worked on..." — start with what the Observer found that matters most.
+- **STE self-check before you return.** Scan every output field for: contractions, "has been",
+  "have been", "should", ", making", semicolons. Count words in your three longest sentences
+  and split any over 25 (20 for recommendations). Delete every filler word from the list above.
+  Collapse synonym rotation. Then return.
 """
