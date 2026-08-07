@@ -2,12 +2,17 @@
 
 **You generate hours of coding-agent transcripts every day — corrections,
 rephrases, rejected tool calls, the occasional flow state. Then it all
-evaporates.** wisen is the missing feedback loop: it reads your real sessions —
-Claude Code, Codex, Cursor, opencode, Gemini CLI, Pi — and synthesizes a nightly
-*reflection* on how you and your agents actually worked together. A chat agent
-answers questions about any of it.
+evaporates.** wisen turns that exhaust into a daily feedback loop: it reads your
+real sessions from Claude Code, Codex, Cursor, opencode, Gemini CLI, Pi, exports,
+and git commits; synthesizes one private *reflection*; then lets you inspect it
+through the dashboard, chat, or a voice briefing.
 
-![wisen dashboard flow with fictional demo data](docs/assets/wisen-dashboard-flow.gif)
+![wisen local reflection flow](docs/assets/wisen-flow.gif)
+
+Run `wisen synthesize`, and wisen walks your local agent history, normalizes the
+sessions, finds the charged moments, and writes one reflection for the day. Raw
+transcripts stay where they already live; MongoDB stores only the synthesized
+reflection.
 
 A real reflection, abridged:
 
