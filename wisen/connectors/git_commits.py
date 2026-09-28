@@ -16,7 +16,7 @@ Requires env vars:
 Example API payloads:
 
   # /users/{me}/events → PushEvent (head/before SHAs, no commit messages yet)
-  {"type": "PushEvent", "repo": {"name": "Bella3202019/wisen"},
+  {"type": "PushEvent", "repo": {"name": "Vela3202019/wisen"},
    "created_at": "2026-07-21T22:14:05Z",
    "payload": {"before": "39a5dbd…", "head": "9ba7535…", "size": 1}}
 

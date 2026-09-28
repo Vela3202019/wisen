@@ -25,7 +25,7 @@ dev = ["pytest>=8.0", "ruff>=0.5"]
 wisen = "wisen.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Bella3202019/wisen"
+Homepage = "https://github.com/Vela3202019/wisen"
 
 [tool.ruff.lint]
 ignore = ["E731", "E741"]

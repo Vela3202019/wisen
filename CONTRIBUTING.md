@@ -3,7 +3,7 @@
 ## Dev setup
 
 ```bash
-git clone https://github.com/Bella3202019/wisen && cd wisen
+git clone https://github.com/Vela3202019/wisen && cd wisen
 pip install -e ".[server,dev]"       # editable install + FastAPI + pytest/ruff
 ```
 
