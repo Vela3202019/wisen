@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ── Sub-models ────────────────────────────────────────────────────────────────
 
@@ -137,3 +137,35 @@ class Reflection(BaseModel):
     # History + voice context
     seven_day_pattern: list[DayPattern]
     synthesis_context: str                # 2-3 paragraph voice briefing
+
+
+# ── Cloud export: the allow-list of what may leave the machine ────────────────
+# Remote dashboards get reflections only through this model. Fields are listed
+# explicitly (not inherited from Reflection) so a new Reflection field stays
+# local until someone decides it may egress. Anything else stored on a
+# reflection document (synthesized_at, legacy or extra keys, Stage-1 output) is
+# dropped. Short evidence quotes are synthesized results and stay in.
+
+class CloudReflection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    date: str
+    mind_map_nodes: list[MindMapNode]
+    mind_map_edges: list[tuple[str, str]]
+    your_mood: MoodSignal
+    your_question: ImplicitQuestion
+    agent_mood: MoodSignal
+    agent_question: ImplicitQuestion
+    insight: str = ""
+    tldr: list[str] = []
+    alignment_score: float = Field(ge=0.0, le=1.0)
+    alignment_label: Literal["aligned", "mild-friction", "friction", "misaligned"]
+    friction_points: list[FrictionPoint]
+    recommendations: list[Recommendation]
+    config_diffs: list[ConfigDiff]
+    friction_deltas: list[FrictionDelta]
+    model_usage: list[ModelUsage]
+    acted_on_recommendations: list[str]
+    ignored_recommendations: list[str] = []
+    seven_day_pattern: list[DayPattern]
+    synthesis_context: str

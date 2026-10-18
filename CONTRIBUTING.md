@@ -13,9 +13,10 @@ ingestion — the fixture test runs entirely offline:
 ```bash
 python3 -m tests.test_fixtures       # committed sample sessions in tests/fixtures/
 python3 -m tests.test_claude_cli     # claude -p adapter parsing (no live call)
+python3 -m tests.test_egress         # cloud export leaks nothing off the allow-list
 ```
 
-CI runs exactly `ruff check .` plus those two tests, so if they pass locally
+CI runs exactly `ruff check .` plus those three tests, so if they pass locally
 you're green.
 
 The other tests read *your* real local data and are useful once you actually

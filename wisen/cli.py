@@ -9,7 +9,6 @@ wisen command-line interface.
 """
 import argparse
 import asyncio
-import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -45,18 +44,10 @@ async def _synthesize(date: str) -> None:
 
 async def _export(out_dir: Path) -> None:
     from wisen.db import get_db
+    from wisen.export import export_reflections
 
     await _check_mongo()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    db = get_db()
-    count = 0
-    async for doc in db.reflections.find({}):
-        doc.pop("_id", None)
-        date = doc.get("date")
-        if not date:
-            continue
-        (out_dir / f"{date}.json").write_text(json.dumps(doc, indent=2, default=str))
-        count += 1
+    count = await export_reflections(get_db(), out_dir)
     print(f"exported {count} reflections to {out_dir}")
 
 
