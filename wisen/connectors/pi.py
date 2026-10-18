@@ -267,7 +267,7 @@ def _session_turns(path: list[dict]) -> list[Turn]:
         else:
             continue
 
-        text = truncate_content(text.strip())
+        text = text.strip()
         if not text:
             continue
         turns.append(Turn(
@@ -328,6 +328,8 @@ async def _ingest_sessions(date: str | None) -> AsyncIterator[NormalizedSession]
         for jsonl_file in project_dir.glob("*.jsonl"):
             session = _parse_session_file(jsonl_file, project_dir)
             if session and (not date or session.date == date):
+                for turn in session.turns:
+                    turn.content = truncate_content(turn.content)
                 yield session
 
 

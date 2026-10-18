@@ -64,6 +64,10 @@ async def main():
         ("demo-cli", FIXTURE_DATE, "user"),
     ], hits
     assert not await search_chat_history("Abandoned approach", sources=["pi"])
+    tool_result = next(c for c in contents if c.startswith("[tool_result]"))
+    assert "[truncated" in tool_result and "importLimitSentinel" not in tool_result, tool_result[-80:]
+    hits = await search_chat_history("importLimitSentinel", sources=["pi"])
+    assert [h["role"] for h in hits] == ["user"], hits
 
     print("OK")
 
