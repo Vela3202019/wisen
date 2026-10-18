@@ -11,8 +11,8 @@ through the dashboard, chat, or a voice briefing.
 
 Run `wisen synthesize`, and wisen walks your local agent history, normalizes the
 sessions, finds the charged moments, and writes one reflection for the day. Raw
-transcripts stay where they already live; MongoDB stores only the synthesized
-reflection.
+transcripts stay where they already live; MongoDB stores the synthesized
+reflection (plus your chat and voice conversations with wisen).
 
 A real reflection, abridged:
 
@@ -71,22 +71,64 @@ The pipeline is modeled on sleep, and the metaphor is load-bearing:
 
 ```mermaid
 flowchart LR
-    subgraph sources["Your machine (never leaves it)"]
+    subgraph sources["Your machine (raw transcripts stored here)"]
         A["8 connectors<br/>Claude Code · Codex · Cursor<br/>opencode · Gemini CLI · Pi<br/>exports · git commits"]
     end
     A --> N["Normalizer<br/>one shared session shape"]
     N --> O["Observer (NREM)<br/>charged moments, quotes"]
     O --> S["Synthesizer (REM)<br/>patterns, insight, briefing"]
-    S --> M[("MongoDB<br/>reflections only")]
+    S --> M[("MongoDB<br/>reflections + chats")]
     M --> C["Chat agent"]
     M --> D["Dashboard"]
     M --> V["Voice briefing"]
 ```
 
 **Local-first by construction:** transcripts flow *through* wisen but are never
-stored *by* it. MongoDB receives only the synthesized reflection; raw content
-stays wherever your agents put it. Search happens by re-reading the original
-files (grep-first) at question time.
+stored *by* it. MongoDB receives the synthesized reflections (plus your chat
+and voice conversations with wisen); raw content stays wherever your agents
+put it. Search happens by re-reading the original files (grep-first) at
+question time. Local storage is not the same as fully
+offline: the model calls send excerpts out. See below.
+
+## What leaves your machine
+
+There are three tiers. The numbers are the truncation limits in the code.
+
+**1. Data at rest: local.** Raw transcripts, git history, and agent configs stay
+where your agents put them. wisen does not copy them. MongoDB runs locally and
+holds reflections (plus chat and voice session records).
+
+**2. Model inference: excerpts go to the model provider you configure.**
+
+- **Synthesis** (`wisen/synthesis/agent.py`): the Observer receives every turn
+  of the day's sessions, each turn cut to 400 characters. A turn can include
+  tool output (for example Claude Code's `[tool_result]` blocks). It also
+  receives up to 20 agent config files (CLAUDE.md, AGENTS.md, MCP configs, …),
+  each cut to 1,000 characters, plus the day's git commit messages and
+  changed-file lists (via the GitHub API). The Synthesizer then receives the
+  Observer's notes, which include short quotes, and earlier reflections.
+- **Chat** (`wisen/chat/search.py`): each search returns up to 20 matches. A
+  match is the matched turn cut to 500 characters, plus one turn before and
+  after it, each cut to 200 characters. Config search returns snippets of up
+  to 500 characters. These results, and any reflection the agent fetches, go
+  to the chat model.
+- **Voice** (`[voice]` extra): your speech goes to Google's Gemini realtime
+  model.
+
+Pick the provider with `model` and `synth_model`. That provider's data terms
+apply to these excerpts. If `synth_model` is `claude-cli:…`, synthesis runs
+through the Claude Code CLI and sends the same excerpts to Anthropic under
+your own Claude account. The terms of that account apply.
+
+**3. Cloud: derived results only, which can include short quotes.** The
+optional dashboard receives what `scripts/export_reflections.py` writes: each
+reflection document from MongoDB, complete. Its `evidence` fields and
+summaries can quote short pieces of your sessions word for word. Raw
+transcripts, the full turn excerpts, MongoDB, and API keys never go to the
+dashboard. `scripts/collect_usage.py` adds subscription usage percentages and
+reset times. To get the Claude percentages, it reads your Claude OAuth token
+from the Keychain and calls Anthropic's usage endpoint. Only the percentages and
+reset times reach the dashboard, not the token.
 
 ## Configuration
 
@@ -112,7 +154,10 @@ transcripts, then configs — before answering with dates and quotes.
 
 ## Deployment shape
 
-Everything runs on your machine. The optional dashboard (`wisen/dashboard/`,
+wisen runs on your machine. Network calls go to the model providers (see
+[What leaves your machine](#what-leaves-your-machine)), the GitHub API (the
+git commits connector reads your pushes), Anthropic's usage endpoint (the usage
+collector), and the optional dashboard sync. The optional dashboard (`wisen/dashboard/`,
 stdlib-only) lives on a VPS and serves *exported* reflection JSON synced via
 rsync — the server never sees raw transcripts, MongoDB, or an API key.
 `scripts/` has the thin wrappers meant for launchd/cron.
