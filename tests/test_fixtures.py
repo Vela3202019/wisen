@@ -14,6 +14,7 @@ os.environ["GIT_SCAN_DIRS"] = str(_FIXTURES / "repos")  # empty on purpose
 
 import asyncio
 
+from wisen.chat.search import search_chat_history
 from wisen.ingestion.pipeline import ingest_all
 
 FIXTURE_DATE = "2026-01-15"
@@ -48,15 +49,21 @@ async def main():
     # Active branch only: the sibling reply abandoned via /tree is gone
     assert not any("Abandoned approach" in c for c in contents), contents
     assert any("state machine" in c for c in contents), contents
-    # Compaction: entries before firstKeptEntryId count once, as the summary
-    assert not any("write a csv parser" in c for c in contents), contents
-    assert sum("[compaction summary]" in c for c in contents) == 1, contents
-    assert contents[0] == "[tool_result] export function runImport() {}", contents
+    # Compaction: full history kept, summary not counted a second time
+    assert contents[0] == "write a csv parser for the import command", contents
+    assert not any("parseCsv was added" in c for c in contents), contents
+    assert pi.started_at.isoformat() == "2026-01-15T16:00:01+00:00", pi.started_at
     assert not any("expert coding assistant" in c for c in contents), "system prompt leaked"
     assert [t.role for t in pi.turns] == [
-        "user", "assistant", "assistant", "user", "assistant", "user", "assistant",
+        "user", "assistant", "user", "assistant", "user", "assistant", "user", "assistant",
     ], [(t.role, t.content) for t in pi.turns]
     assert pi.turns[-1].tool_names == ["bash"], pi.turns[-1]
+
+    hits = await search_chat_history("csv parser", sources=["pi"])
+    assert [(h["project"], h["date"], h["role"]) for h in hits] == [
+        ("demo-cli", FIXTURE_DATE, "user"),
+    ], hits
+    assert not await search_chat_history("Abandoned approach", sources=["pi"])
 
     print("OK")
 

@@ -31,12 +31,12 @@ entry appended) back to the root.
    "message": {"role": "toolResult", "toolName": "bash",
      "content": [{"type": "text", "text": "1 passed"}], "isError": false}}
 
-  # Compaction — the summary replaces every path entry before firstKeptEntryId,
-  # so summarized history is counted once (as the summary), not twice
+  # Compaction — Pi keeps the full history in the file, so the summary is
+  # dropped: the summarized entries are already on the path and count once
   {"type": "compaction", "id": "f6g7h8i9", "parentId": "e5f6g7h8", "timestamp": "…",
    "summary": "User discussed X…", "firstKeptEntryId": "c3d4e5f6"}
 
-  # model_change, thinking_level_change, usage, label, session_info, custom,
+  # compaction, model_change, thinking_level_change, usage, label, session_info, custom,
   # custom_message, branch_summary, context_edit — no conversational turn; dropped
 
 ── 2. pi.ai exports ──
@@ -222,7 +222,7 @@ def _decode_project_path(encoded: str) -> str:
 
 
 def _active_branch(entries: list[dict]) -> list[dict]:
-    """Root→leaf path of the tree, with compacted history replaced by its summary."""
+    """Root→leaf path of the tree."""
     by_id = {e["id"]: e for e in entries if e.get("id")}
     path: list[dict] = []
     node = entries[-1] if entries else None
@@ -230,19 +230,7 @@ def _active_branch(entries: list[dict]) -> list[dict]:
         path.append(node)
         node = by_id.get(node.get("parentId"))
     path.reverse()
-
-    compaction_idx = next(
-        (i for i in range(len(path) - 1, -1, -1) if path[i].get("type") == "compaction"),
-        None,
-    )
-    if compaction_idx is None:
-        return path
-    first_kept = path[compaction_idx].get("firstKeptEntryId")
-    kept_idx = next(
-        (i for i, e in enumerate(path[:compaction_idx]) if e.get("id") == first_kept),
-        compaction_idx,  # retain-none compaction (or kept entry missing)
-    )
-    return path[kept_idx:]
+    return path
 
 
 def _block_text(content) -> str:
@@ -259,10 +247,7 @@ def _block_text(content) -> str:
 def _session_turns(path: list[dict]) -> list[Turn]:
     turns = []
     for e in path:
-        etype = e.get("type")
-        if etype == "compaction":
-            role, text, tool_names = "assistant", f"[compaction summary] {e.get('summary', '')}", []
-        elif etype == "message":
+        if e.get("type") == "message":
             msg = e.get("message") or {}
             content = msg.get("content")
             role = msg.get("role")
