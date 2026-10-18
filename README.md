@@ -125,7 +125,9 @@ reflection document from MongoDB, complete. Its `evidence` fields and
 summaries can quote short pieces of your sessions word for word. Raw
 transcripts, the full turn excerpts, MongoDB, and API keys never go to the
 dashboard. `scripts/collect_usage.py` adds subscription usage percentages and
-reset times. It does not add tokens.
+reset times. To get the Claude percentages, it reads your Claude OAuth token
+from the Keychain and calls Anthropic's usage endpoint. Only the percentages and
+reset times reach the dashboard, not the token.
 
 ## Configuration
 
@@ -151,8 +153,10 @@ transcripts, then configs — before answering with dates and quotes.
 
 ## Deployment shape
 
-wisen runs on your machine. The only network calls are to the model
-providers (see [What leaves your machine](#what-leaves-your-machine)). The optional dashboard (`wisen/dashboard/`,
+wisen runs on your machine. Network calls go to the model providers (see
+[What leaves your machine](#what-leaves-your-machine)), the GitHub API (the
+git commits connector reads your pushes), Anthropic's usage endpoint (the usage
+collector), and the optional dashboard sync. The optional dashboard (`wisen/dashboard/`,
 stdlib-only) lives on a VPS and serves *exported* reflection JSON synced via
 rsync — the server never sees raw transcripts, MongoDB, or an API key.
 `scripts/` has the thin wrappers meant for launchd/cron.
