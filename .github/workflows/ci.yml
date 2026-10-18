@@ -17,3 +17,4 @@ jobs:
       - run: ruff check .
       - run: python -m tests.test_claude_cli
       - run: python -m tests.test_fixtures
+      - run: python -m tests.test_egress
