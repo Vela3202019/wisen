@@ -39,6 +39,25 @@ async def main():
     user_turns = [t for t in cx.turns if t.role == "user"]
     assert len(user_turns) == 2, f"developer/system turns leaked or user turns dropped: {cx.turns}"
 
+    assert by_source.get("pi") == 1, f"expected 1 pi session, got {by_source}"
+    pi = next(s for s in result.sessions if s.source == "pi")
+    assert pi.session_id == "pi:/Users/dev/demo-cli:fixture-pi-1", pi.session_id
+    assert pi.project_name == "demo-cli", pi.project_name
+    assert pi.date == FIXTURE_DATE, pi.date
+    contents = [t.content for t in pi.turns]
+    # Active branch only: the sibling reply abandoned via /tree is gone
+    assert not any("Abandoned approach" in c for c in contents), contents
+    assert any("state machine" in c for c in contents), contents
+    # Compaction: entries before firstKeptEntryId count once, as the summary
+    assert not any("write a csv parser" in c for c in contents), contents
+    assert sum("[compaction summary]" in c for c in contents) == 1, contents
+    assert contents[0] == "[tool_result] export function runImport() {}", contents
+    assert not any("expert coding assistant" in c for c in contents), "system prompt leaked"
+    assert [t.role for t in pi.turns] == [
+        "user", "assistant", "assistant", "user", "assistant", "user", "assistant",
+    ], [(t.role, t.content) for t in pi.turns]
+    assert pi.turns[-1].tool_names == ["bash"], pi.turns[-1]
+
     print("OK")
 
 
