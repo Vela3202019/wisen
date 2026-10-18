@@ -14,6 +14,7 @@ os.environ["GIT_SCAN_DIRS"] = str(_FIXTURES / "repos")  # empty on purpose
 
 import asyncio
 
+from wisen.chat.search import search_chat_history
 from wisen.ingestion.pipeline import ingest_all
 
 FIXTURE_DATE = "2026-01-15"
@@ -38,6 +39,35 @@ async def main():
     assert cx.date == FIXTURE_DATE, cx.date
     user_turns = [t for t in cx.turns if t.role == "user"]
     assert len(user_turns) == 2, f"developer/system turns leaked or user turns dropped: {cx.turns}"
+
+    assert by_source.get("pi") == 1, f"expected 1 pi session, got {by_source}"
+    pi = next(s for s in result.sessions if s.source == "pi")
+    assert pi.session_id == "pi:/Users/dev/demo-cli:fixture-pi-1", pi.session_id
+    assert pi.project_name == "demo-cli", pi.project_name
+    assert pi.date == FIXTURE_DATE, pi.date
+    contents = [t.content for t in pi.turns]
+    # Active branch only: the sibling reply abandoned via /tree is gone
+    assert not any("Abandoned approach" in c for c in contents), contents
+    assert any("state machine" in c for c in contents), contents
+    # Compaction: full history kept, summary not counted a second time
+    assert contents[0] == "write a csv parser for the import command", contents
+    assert not any("parseCsv was added" in c for c in contents), contents
+    assert pi.started_at.isoformat() == "2026-01-15T16:00:01+00:00", pi.started_at
+    assert not any("expert coding assistant" in c for c in contents), "system prompt leaked"
+    assert [t.role for t in pi.turns] == [
+        "user", "assistant", "user", "assistant", "user", "assistant", "user", "assistant",
+    ], [(t.role, t.content) for t in pi.turns]
+    assert pi.turns[-1].tool_names == ["bash"], pi.turns[-1]
+
+    hits = await search_chat_history("csv parser", sources=["pi"])
+    assert [(h["project"], h["date"], h["role"]) for h in hits] == [
+        ("demo-cli", FIXTURE_DATE, "user"),
+    ], hits
+    assert not await search_chat_history("Abandoned approach", sources=["pi"])
+    tool_result = next(c for c in contents if c.startswith("[tool_result]"))
+    assert "[truncated" in tool_result and "importLimitSentinel" not in tool_result, tool_result[-80:]
+    hits = await search_chat_history("importLimitSentinel", sources=["pi"])
+    assert [h["role"] for h in hits] == ["user"], hits
 
     print("OK")
 

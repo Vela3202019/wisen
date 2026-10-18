@@ -345,6 +345,19 @@ def _parse_pi_txt_file(path: Path, compiled: re.Pattern) -> list[SearchMatch]:
     return _match_turns(turns, compiled, "pi", path, path.stem)
 
 
+def _parse_pi_session_file(path: Path, compiled: re.Pattern) -> list[SearchMatch]:
+    from wisen.connectors.pi import _parse_session_file
+
+    session = _parse_session_file(path, path.parent)
+    if session is None:
+        return []
+    turns = [
+        {"role": t.role, "content": t.content, "timestamp": t.timestamp.isoformat()}
+        for t in session.turns
+    ]
+    return _match_turns(turns, compiled, "pi", path, session.project_name)
+
+
 # ---------------------------------------------------------------------------
 # SQLite source scanners (in-memory via existing connectors)
 # ---------------------------------------------------------------------------
@@ -417,6 +430,7 @@ _GREP_SOURCE_MAP: dict[str, list[tuple[Path, str, object]]] = {
         (config.root() / ".gemini" / "tmp", "*.json", _parse_gemini_cli_file),
     ],
     "pi": [
+        (config.root() / ".pi" / "agent" / "sessions", "*.jsonl", _parse_pi_session_file),
         (_PI_EXPORT_DIR, "*.json", _parse_pi_json_file),
         (_PI_EXPORT_DIR, "*.txt",  _parse_pi_txt_file),
     ],
