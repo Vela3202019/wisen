@@ -11,8 +11,8 @@ through the dashboard, chat, or a voice briefing.
 
 Run `wisen synthesize`, and wisen walks your local agent history, normalizes the
 sessions, finds the charged moments, and writes one reflection for the day. Raw
-transcripts stay where they already live; MongoDB stores only the synthesized
-reflection.
+transcripts stay where they already live; MongoDB stores the synthesized
+reflection (plus your chat and voice conversations with wisen).
 
 A real reflection, abridged:
 
@@ -77,16 +77,17 @@ flowchart LR
     A --> N["Normalizer<br/>one shared session shape"]
     N --> O["Observer (NREM)<br/>charged moments, quotes"]
     O --> S["Synthesizer (REM)<br/>patterns, insight, briefing"]
-    S --> M[("MongoDB<br/>reflections only")]
+    S --> M[("MongoDB<br/>reflections + chats")]
     M --> C["Chat agent"]
     M --> D["Dashboard"]
     M --> V["Voice briefing"]
 ```
 
 **Local-first by construction:** transcripts flow *through* wisen but are never
-stored *by* it. MongoDB receives only the synthesized reflection; raw content
-stays wherever your agents put it. Search happens by re-reading the original
-files (grep-first) at question time. Local storage is not the same as fully
+stored *by* it. MongoDB receives the synthesized reflections (plus your chat
+and voice conversations with wisen); raw content stays wherever your agents
+put it. Search happens by re-reading the original files (grep-first) at
+question time. Local storage is not the same as fully
 offline: the model calls send excerpts out. See below.
 
 ## What leaves your machine
@@ -103,9 +104,9 @@ holds reflections (plus chat and voice session records).
   of the day's sessions, each turn cut to 400 characters. A turn can include
   tool output (for example Claude Code's `[tool_result]` blocks). It also
   receives up to 20 agent config files (CLAUDE.md, AGENTS.md, MCP configs, …),
-  each cut to 1,000 characters, plus the day's git commit messages. The
-  Synthesizer then receives the Observer's notes, which include short quotes,
-  and earlier reflections.
+  each cut to 1,000 characters, plus the day's git commit messages and
+  changed-file lists (via the GitHub API). The Synthesizer then receives the
+  Observer's notes, which include short quotes, and earlier reflections.
 - **Chat** (`wisen/chat/search.py`): each search returns up to 20 matches. A
   match is the matched turn cut to 500 characters, plus one turn before and
   after it, each cut to 200 characters. Config search returns snippets of up
