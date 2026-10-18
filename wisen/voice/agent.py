@@ -16,7 +16,7 @@ from livekit import agents
 from livekit.agents import Agent, AgentServer, AgentSession, ConversationItemAddedEvent
 from livekit.plugins import google
 
-from wisen.db import get_db
+from wisen.store import get_store
 
 load_dotenv()
 os.environ.setdefault("GOOGLE_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
@@ -70,15 +70,10 @@ async def wisen_voice(ctx: agents.JobContext):
         )
     )
 
-    db = get_db()
+    store = get_store()
     room_name = ctx.room.name
-    now = datetime.now(UTC)
 
-    await db.voice_sessions.update_one(
-        {"room_name": room_name},
-        {"$setOnInsert": {"room_name": room_name, "started_at": now, "messages": []}},
-        upsert=True,
-    )
+    await store.start_voice_session(room_name, datetime.now(UTC))
 
     @session.on("conversation_item_added")
     def _on_item(event: ConversationItemAddedEvent) -> None:
@@ -87,15 +82,7 @@ async def wisen_voice(ctx: agents.JobContext):
         role = getattr(msg, "role", None)
         if not text or role not in ("user", "assistant"):
             return
-        asyncio.ensure_future(
-            db.voice_sessions.update_one(
-                {"room_name": room_name},
-                {
-                    "$push": {"messages": {"role": role, "content": text, "at": datetime.now(UTC)}},
-                    "$set": {"updated_at": datetime.now(UTC)},
-                },
-            )
-        )
+        asyncio.ensure_future(store.append_voice_message(room_name, role, text, datetime.now(UTC)))
 
     await session.start(room=ctx.room, agent=WisenVoiceAgent())
 

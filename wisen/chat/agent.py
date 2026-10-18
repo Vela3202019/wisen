@@ -2,7 +2,7 @@
 Wisen chat agent — answers questions about your coding sessions and reflections.
 
 Backed by the WISEN_MODEL-configured model (see llm.py) with four tools:
-  get_reflection        → fetch a specific day's Reflection from MongoDB
+  get_reflection        → fetch a specific day's Reflection from the local store
   list_reflections      → last 7 days of alignment scores
   search_chat_history  → grep raw session files across all coding agents
   search_agent_configs → search harness/config files (CLAUDE.md, MCP, skills…)
@@ -18,7 +18,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import (
     ModelMessage,
@@ -34,8 +33,8 @@ from pydantic_ai.settings import ModelSettings
 
 from wisen.chat.search import search_agent_configs as _search_configs
 from wisen.chat.search import search_chat_history as _search
-from wisen.db import get_db
 from wisen.llm import get_model
+from wisen.store import Store, get_store
 
 load_dotenv()
 
@@ -76,7 +75,7 @@ what you need — the text you write is the final answer.
 
 @dataclass
 class ChatDeps:
-    db: AsyncIOMotorDatabase
+    db: Store
     synthesis_context: str
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
 
@@ -158,15 +157,12 @@ async def get_reflection(ctx: RunContext[ChatDeps], date: str) -> dict:
     """
     resolved = _resolve_date(date)
     await ctx.deps.events.put({"type": "tool_call", "name": "get_reflection", "label": f"Looking up reflection for {resolved}"})
-    doc = await ctx.deps.db.reflections.find_one({"date": resolved})
+    doc = await ctx.deps.db.get_reflection(resolved)
     if not doc:
-        available = await ctx.deps.db.reflections.find(
-            {}, {"date": 1}
-        ).sort("date", -1).limit(14).to_list(14)
+        available = await ctx.deps.db.list_reflections(limit=14)
         dates = [d["date"] for d in available]
         await ctx.deps.events.put({"type": "tool_result", "name": "get_reflection", "summary": "not found"})
         return {"error": f"No reflection for {resolved}", "available_dates": dates}
-    doc.pop("_id", None)
     alignment = doc.get("alignment_score")
     summary = f"alignment {alignment:.0f}" if isinstance(alignment, (int, float)) else "loaded"
     await ctx.deps.events.put({"type": "tool_result", "name": "get_reflection", "summary": summary})
@@ -180,19 +176,11 @@ async def list_reflections(ctx: RunContext[ChatDeps]) -> list[dict]:
     Use this to answer trend questions or "how was my week".
     """
     await ctx.deps.events.put({"type": "tool_call", "name": "list_reflections", "label": "Loading last 7 days"})
-    docs = await ctx.deps.db.reflections.find(
-        {},
-        {
-            "date": 1,
-            "alignment_score": 1,
-            "alignment_label": 1,
-            "your_mood": 1,
-            "agent_mood": 1,
-            "synthesis_context": 1,
-        },
-    ).sort("date", -1).limit(7).to_list(7)
-    for d in docs:
-        d.pop("_id", None)
+    fields = ("date", "alignment_score", "alignment_label", "your_mood", "agent_mood", "synthesis_context")
+    docs = [
+        {k: d[k] for k in fields if k in d}
+        for d in await ctx.deps.db.list_reflections(limit=7)
+    ]
     count = len(docs)
     await ctx.deps.events.put({"type": "tool_result", "name": "list_reflections", "summary": f"{count} day{'s' if count != 1 else ''}"})
     await ctx.deps.events.put({"type": "status", "text": "Looking for patterns across the week..."})
@@ -276,14 +264,12 @@ async def stream_chat(
     if not messages or messages[-1]["role"] != "user":
         raise ValueError("Last message must be role=user")
 
-    db = get_db()
+    db = get_store()
 
-    query_filter = {"date": context_date} if context_date else {}
-    log_doc = await db.reflections.find_one(
-        query_filter,
-        {"synthesis_context": 1},
-        sort=[("date", -1)],
-    )
+    if context_date:
+        log_doc = await db.get_reflection(context_date)
+    else:
+        log_doc = next(iter(await db.list_reflections(limit=1)), None)
     synthesis_context = (
         log_doc.get("synthesis_context", "") if log_doc
         else "No reflection available yet."

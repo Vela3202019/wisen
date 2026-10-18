@@ -7,16 +7,17 @@ git clone https://github.com/Vela3202019/wisen && cd wisen
 pip install -e ".[server,dev]"       # editable install + FastAPI + pytest/ruff
 ```
 
-You don't need MongoDB, API keys, or any real agent history to work on
-ingestion — the fixture test runs entirely offline:
+You don't need API keys or any real agent history to work on ingestion —
+the fixture test runs entirely offline:
 
 ```bash
 python3 -m tests.test_fixtures       # committed sample sessions in tests/fixtures/
 python3 -m tests.test_claude_cli     # claude -p adapter parsing (no live call)
 python3 -m tests.test_egress         # cloud export leaks nothing off the allow-list
+python3 -m tests.test_store          # SQLite store on a temp file
 ```
 
-CI runs exactly `ruff check .` plus those three tests, so if they pass locally
+CI runs exactly `ruff check .` plus those four tests, so if they pass locally
 you're green.
 
 The other tests read *your* real local data and are useful once you actually
@@ -25,7 +26,7 @@ use wisen:
 ```bash
 python3 -m tests.test_ingest         # your real session history (nothing written)
 python3 -m tests.test_sources        # per-connector, real local data
-python3 -m tests.test_synthesis      # end-to-end: calls the LLM, writes MongoDB
+python3 -m tests.test_synthesis      # end-to-end: calls the LLM, writes SQLite
 ```
 
 Tests are deliberately script-style (`python3 -m tests.<name>` from the repo
@@ -53,7 +54,7 @@ machine.
 
 - **Grep-first search**: search tools find candidate files with `grep -ril`
   first, then parse only those. Keep new sources on that pattern for speed.
-- **Local-first**: raw transcripts are never written to MongoDB — only the
+- **Local-first**: raw transcripts are never written to the SQLite store — only the
   synthesized reflection. Don't add code paths that persist session content.
 - **Lint**: `ruff check .` must pass.
 - **Commits**: conventional commits — `<type>(<scope>): <subject>`, imperative

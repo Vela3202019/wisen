@@ -1,7 +1,7 @@
 """
 Two-stage synthesis pipeline:
   Stage 1 — Observer: reads raw sessions + configs + yesterday's Reflection → DayObservation
-  Stage 2 — Synthesizer: reads DayObservation + past 7 days → Reflection (saved to MongoDB)
+  Stage 2 — Synthesizer: reads DayObservation + past 7 days → Reflection (saved to the local store)
 """
 import asyncio
 from datetime import UTC, datetime
@@ -11,10 +11,10 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from wisen.connectors.agent_configs import AgentConfig
-from wisen.db import get_db
 from wisen.ingestion.normalizer import NormalizedSession
 from wisen.ingestion.pipeline import IngestResult
 from wisen.llm import get_model
+from wisen.store import get_store
 from wisen.synthesis.claude_cli import is_cli_model, run_structured
 from wisen.synthesis.prompt import OBSERVER_PROMPT, SYNTHESIZER_PROMPT
 from wisen.synthesis.schema import DayObservation, Reflection
@@ -152,19 +152,11 @@ async def _generate(
 async def synthesize(result: IngestResult, date: str | None = None) -> Reflection:
     target_date = date or datetime.now(UTC).date().isoformat()
 
-    db = get_db()
+    store = get_store()
 
-    # Yesterday's full Reflection for diff analysis
-    yesterday_doc = await db.reflections.find_one(
-        {"date": {"$lt": target_date}},
-        sort=[("date", -1)],
-    )
-
-    # Past 7 days (lightweight) for trend
-    past_docs = await db.reflections.find(
-        {"date": {"$lt": target_date}},
-        {"date": 1, "alignment_score": 1, "alignment_label": 1},
-    ).sort("date", -1).limit(7).to_list(7)
+    # Past 7 days for trend; the newest is yesterday's full Reflection for diff analysis
+    past_docs = await store.list_reflections(limit=7, before=target_date)
+    yesterday_doc = past_docs[0] if past_docs else None
 
     model = get_model()
 
@@ -186,13 +178,9 @@ async def synthesize(result: IngestResult, date: str | None = None) -> Reflectio
     reflection.date = target_date
     print(f"  [Stage 2] Done. Alignment: {reflection.alignment_score:.2f} ({reflection.alignment_label})")
 
-    # ── Save to MongoDB ───────────────────────────────────────────────────────
+    # ── Save to the local store ───────────────────────────────────────────────
     doc = reflection.model_dump()
     doc["synthesized_at"] = datetime.now(UTC)
-    await db.reflections.update_one(
-        {"date": target_date},
-        {"$set": doc},
-        upsert=True,
-    )
+    await store.upsert_reflection(doc)
 
     return reflection

@@ -3,7 +3,8 @@ wisen command-line interface.
 
   wisen synthesize [YYYY-MM-DD]   ingest + synthesize one day (default: yesterday)
   wisen serve [--host] [--port]   run the API server (needs the [server] extra)
-  wisen export [dir]              dump reflections from Mongo to JSON files
+  wisen export [dir]              dump reflections from the local store to JSON files
+  wisen migrate-mongo             one-off copy of a pre-SQLite MongoDB into SQLite
   wisen eval <args...>            case-bank commands (mine, list, review,
                                   metrics, replay, compare)
 """
@@ -16,26 +17,10 @@ from pathlib import Path
 from wisen import __version__, config
 
 
-async def _check_mongo() -> None:
-    """Fail fast with a friendly message if MongoDB is unreachable."""
-    from wisen.db import get_client
-
-    uri = config.get("storage", "mongodb_uri", "MONGODB_URI", "mongodb://127.0.0.1:27017")
-    try:
-        await asyncio.wait_for(get_client().admin.command("ping"), timeout=5)
-    except (TimeoutError, OSError):
-        raise SystemExit(
-            f"MongoDB unreachable at {uri} — is it running?\n"
-            "  brew services start mongodb-community    # macOS\n"
-            "  docker run -d -p 27017:27017 mongo       # anywhere with Docker"
-        )
-
-
 async def _synthesize(date: str) -> None:
     from wisen.ingestion.pipeline import ingest_all
     from wisen.synthesis.agent import synthesize
 
-    await _check_mongo()
     print(f"[{datetime.now(UTC).isoformat()}] synthesizing {date}")
     result = await ingest_all(date)
     reflection = await synthesize(result, date)
@@ -43,11 +28,10 @@ async def _synthesize(date: str) -> None:
 
 
 async def _export(out_dir: Path) -> None:
-    from wisen.db import get_db
     from wisen.export import export_reflections
+    from wisen.store import get_store
 
-    await _check_mongo()
-    count = await export_reflections(get_db(), out_dir)
+    count = await export_reflections(get_store(), out_dir)
     print(f"exported {count} reflections to {out_dir}")
 
 
@@ -75,6 +59,8 @@ def main() -> None:
     ex = sub.add_parser("export", help="dump reflections to JSON files")
     ex.add_argument("dir", nargs="?", help="output dir (default: paths.export_dir)")
 
+    sub.add_parser("migrate-mongo", help="copy a pre-SQLite MongoDB into SQLite (needs [migrate])")
+
     ev = sub.add_parser("eval", help="case-bank commands (mine, list, review, …)")
     ev.add_argument("args", nargs=argparse.REMAINDER)
 
@@ -88,6 +74,9 @@ def main() -> None:
     elif args.cmd == "export":
         default_dir = config.get("paths", "export_dir", "WISEN_EXPORT_DIR", "~/.wisen/exports/reflections")
         asyncio.run(_export(Path(args.dir or default_dir).expanduser()))
+    elif args.cmd == "migrate-mongo":
+        from wisen.migrate_mongo import main as migrate_main
+        migrate_main()
     elif args.cmd == "eval":
         from wisen.evals.cli import main as eval_main
         sys.argv = ["wisen eval"] + args.args

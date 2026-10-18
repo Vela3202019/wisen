@@ -6,7 +6,6 @@ End-to-end synthesis test. Run from the repo root:
 import asyncio
 import sys
 
-from wisen.db import ensure_indexes
 from wisen.ingestion.pipeline import ingest_all
 from wisen.synthesis.agent import synthesize
 
@@ -15,7 +14,6 @@ async def main():
     date = sys.argv[1] if len(sys.argv) > 1 else None
     print(f"Ingesting for date={date or 'today'}...")
 
-    await ensure_indexes()
     result = await ingest_all(date)
     summary = result.summary()
     print(f"  sessions={summary['total_sessions']}  configs={summary['total_configs']}  by_source={summary['by_source']}")
@@ -50,7 +48,7 @@ async def main():
             print(f"  → [{r.target}] {r.action}")
     print(f"\nSynthesis context:\n{reflection.synthesis_context}")
     print(f"{'='*60}")
-    print("\nSaved to MongoDB reflections.")
+    print("\nSaved to the local store's reflections.")
 
 
 asyncio.run(main())

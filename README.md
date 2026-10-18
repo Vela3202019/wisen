@@ -11,8 +11,9 @@ through the dashboard, chat, or a voice briefing.
 
 Run `wisen synthesize`, and wisen walks your local agent history, normalizes the
 sessions, finds the charged moments, and writes one reflection for the day. Raw
-transcripts stay where they already live; MongoDB stores the synthesized
-reflection (plus your chat and voice conversations with wisen).
+transcripts stay where they already live; one local SQLite file
+(`~/.wisen/wisen.db`) stores the synthesized reflection (plus your chat and
+voice conversations with wisen).
 
 A real reflection, abridged:
 
@@ -41,11 +42,11 @@ A real reflection, abridged:
 
 ## Quickstart
 
-You need a local MongoDB and one LLM API key (default model: `openai:gpt-5.6-terra`
-→ `OPENAI_API_KEY`; any pydantic-ai provider works, see Configuration).
+You need one LLM API key (default model: `openai:gpt-5.6-terra`
+→ `OPENAI_API_KEY`; any pydantic-ai provider works, see Configuration). Storage
+is a SQLite file wisen creates on first use — no database server to run.
 
 ```bash
-brew services start mongodb-community   # macOS — or: docker run -d -p 27017:27017 mongo
 pip install -e ".[server]"
 export OPENAI_API_KEY=sk-...            # or put it in a repo-root .env
 wisen synthesize                        # reflect on yesterday (one real LLM call)
@@ -56,7 +57,13 @@ wisen serve                             # API on :8000
 wisen synthesize [YYYY-MM-DD]   # ingest sessions + write one day's reflection
 wisen serve                     # POST /synthesize, GET /reflections, POST /chat (SSE)
 wisen export [dir]              # dump reflections to JSON files
+wisen migrate-mongo             # one-off: copy a pre-SQLite MongoDB into SQLite
 ```
+
+Upgrading from a MongoDB-backed wisen? Run `pip install -e ".[migrate]"` and
+`wisen migrate-mongo` once while MongoDB is still running. It copies your
+reflections and chat/voice sessions into the SQLite file; re-running it is
+safe.
 
 ## How it works
 
@@ -77,14 +84,14 @@ flowchart LR
     A --> N["Normalizer<br/>one shared session shape"]
     N --> O["Observer (NREM)<br/>charged moments, quotes"]
     O --> S["Synthesizer (REM)<br/>patterns, insight, briefing"]
-    S --> M[("MongoDB<br/>reflections + chats")]
+    S --> M[("SQLite<br/>reflections + chats")]
     M --> C["Chat agent"]
     M --> D["Dashboard"]
     M --> V["Voice briefing"]
 ```
 
 **Local-first by construction:** transcripts flow *through* wisen but are never
-stored *by* it. MongoDB receives the synthesized reflections (plus your chat
+stored *by* it. The SQLite file receives the synthesized reflections (plus your chat
 and voice conversations with wisen); raw content stays wherever your agents
 put it. Search happens by re-reading the original files (grep-first) at
 question time. Local storage is not the same as fully
@@ -95,7 +102,7 @@ offline: the model calls send excerpts out. See below.
 There are three tiers. The numbers are the truncation limits in the code.
 
 **1. Data at rest: local.** Raw transcripts, git history, and agent configs stay
-where your agents put them. wisen does not copy them. MongoDB runs locally and
+where your agents put them. wisen does not copy them. A local SQLite file
 holds reflections (plus chat and voice session records).
 
 **2. Model inference: excerpts go to the model provider you configure.**
@@ -122,9 +129,9 @@ your own Claude account. The terms of that account apply.
 
 **3. Cloud: derived results only, which can include short quotes.** The
 optional dashboard receives what `scripts/export_reflections.py` writes: each
-reflection document from MongoDB, complete. Its `evidence` fields and
+reflection document from the SQLite file, complete. Its `evidence` fields and
 summaries can quote short pieces of your sessions word for word. Raw
-transcripts, the full turn excerpts, MongoDB, and API keys never go to the
+transcripts, the full turn excerpts, the SQLite file, and API keys never go to the
 dashboard. `scripts/collect_usage.py` adds subscription usage percentages and
 reset times. To get the Claude percentages, it reads your Claude OAuth token
 from the Keychain and calls Anthropic's usage endpoint. Only the percentages and
@@ -159,7 +166,7 @@ wisen runs on your machine. Network calls go to the model providers (see
 git commits connector reads your pushes), Anthropic's usage endpoint (the usage
 collector), and the optional dashboard sync. The optional dashboard (`wisen/dashboard/`,
 stdlib-only) lives on a VPS and serves *exported* reflection JSON synced via
-rsync — the server never sees raw transcripts, MongoDB, or an API key.
+rsync — the server never sees raw transcripts, the SQLite file, or an API key.
 `scripts/` has the thin wrappers meant for launchd/cron.
 
 ## Extras
@@ -169,6 +176,7 @@ rsync — the server never sees raw transcripts, MongoDB, or an API key.
 | `pip install -e ".[server]"` | FastAPI + uvicorn (`wisen serve`) |
 | `pip install -e ".[voice]"` | LiveKit voice agent — the morning briefing, out loud |
 | `pip install -e ".[dev]"` | pytest + ruff |
+| `pip install -e ".[migrate]"` | pymongo, for the one-off `wisen migrate-mongo` |
 
 ## Tests
 
@@ -177,9 +185,10 @@ Script-style tests, run from the repo root:
 ```bash
 python3 -m tests.test_fixtures   # committed sample data — runs anywhere, what CI runs
 python3 -m tests.test_claude_cli # subscription-synthesis adapter (no live call)
+python3 -m tests.test_store      # SQLite store on a temp file
 python3 -m tests.test_ingest     # reads your real local session data
 python3 -m tests.test_sources    # per-connector, real local data
-python3 -m tests.test_synthesis  # end-to-end: calls the LLM, writes MongoDB
+python3 -m tests.test_synthesis  # end-to-end: calls the LLM, writes SQLite
 ```
 
 ## Contributing

@@ -17,8 +17,11 @@ model = "openai:gpt-5.6-terra"
 # synth_model = "claude-cli:claude-sonnet-5"
 
 [storage]
-mongodb_uri = "mongodb://127.0.0.1:27017"   # (MONGODB_URI)
-mongodb_db = "wisen"                        # (MONGODB_DB)
+sqlite_path = "~/.wisen/wisen.db"           # (WISEN_DB_PATH) created on first use
+user_id = "local"                           # (WISEN_USER_ID) owner of every stored row
+# Only read by the one-off `wisen migrate-mongo` (pre-SQLite installs):
+# mongodb_uri = "mongodb://127.0.0.1:27017" # (MONGODB_URI)
+# mongodb_db = "wisen"                      # (MONGODB_DB)
 
 [paths]
 # Where `wisen export` writes reflection JSON files (WISEN_EXPORT_DIR)
