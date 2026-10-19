@@ -1,6 +1,6 @@
 """
 SQLite store on a temp file: reflection round-trip and upsert-by-date, chat
-history order, per-user isolation, and the idempotent MongoDB import. No
+history order, per-user isolation, and the insert-only MongoDB import. No
 MongoDB needed. Run: python3 -m tests.test_store
 """
 import asyncio
@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from wisen.migrate_mongo import copy_all
-from wisen.store import SqliteStore
+from wisen.store import SqliteStore, iso
 
 T0 = datetime(2026, 10, 17, 9, 0, tzinfo=UTC)
 
@@ -124,9 +124,8 @@ class _FakeMongo:
 
 async def check_migration(path: Path):
     store = SqliteStore(path, "local")
-    for _ in range(2):  # idempotent: a second run changes nothing
-        counts = await copy_all(_FakeMongo(), store)
-        assert counts == {"reflections": 1, "chat_sessions": 1, "voice_sessions": 1}, counts
+    counts = await copy_all(_FakeMongo(), store)
+    assert counts == {"reflections": 1, "chat_sessions": 1, "voice_sessions": 1}, counts
     refl = await store.list_reflections()
     assert len(refl) == 1 and "_id" not in refl[0], refl
     assert refl[0]["synthesized_at"] == "2026-10-01T08:00:00+00:00", refl
@@ -135,7 +134,22 @@ async def check_migration(path: Path):
     assert c1["messages"][0]["at"] == "2026-10-01T08:00:00+00:00", c1
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM voice_messages").fetchone()[0] == 1
-    print("✓ store: MongoDB import is idempotent and normalizes timestamps")
+
+    # Data written to SQLite after the first migration must survive a re-run.
+    later = datetime(2026, 10, 18, 9, 0, tzinfo=timezone.utc)
+    await store.append_chat_message("c1", "user", "follow-up", later)
+    await store.append_voice_message("r1", "user", "spoken", later)
+    await store.upsert_reflection(_reflection("2026-10-01", 0.9))
+
+    counts = await copy_all(_FakeMongo(), store)
+    assert counts == {"reflections": 0, "chat_sessions": 0, "voice_sessions": 0}, counts
+    c1 = await store.get_chat_session("c1")
+    assert [m["content"] for m in c1["messages"]] == ["q", "a", "follow-up"], c1
+    assert c1["updated_at"] == iso(later), c1
+    assert (await store.get_reflection("2026-10-01"))["alignment_score"] == 0.9
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM voice_messages").fetchone()[0] == 2
+    print("✓ store: MongoDB import is insert-only, normalizes timestamps, keeps local data")
 
 
 async def main():

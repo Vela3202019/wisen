@@ -270,33 +270,46 @@ class SqliteStore:
 
     # ── import (used by `wisen migrate-mongo`) ────────────────────────────────
 
-    async def put_chat_session(self, session: dict) -> None:
-        """Replace a whole chat session and its messages — idempotent import."""
-        await self._run(
-            self._put_conversation, session, "chat_sessions", "chat_messages", "session_id",
+    async def import_reflection(self, doc: dict) -> bool:
+        """Insert a reflection unless its date already exists; True if copied."""
+        return await self._run(self._import_reflection, doc)
+
+    def _import_reflection(self, doc: dict) -> bool:
+        with closing(self._connect()) as conn, conn:
+            return conn.execute(
+                "INSERT INTO reflections (user_id, date, doc) VALUES (?, ?, ?) "
+                "ON CONFLICT (user_id, date) DO NOTHING",
+                (self.user_id, doc["date"], json.dumps(doc, default=_json_default)),
+            ).rowcount == 1
+
+    async def import_chat_session(self, session: dict) -> bool:
+        """Insert a chat session and its messages unless it already exists; True if copied."""
+        return await self._run(
+            self._import_conversation, session, "chat_sessions", "chat_messages", "session_id",
             ("kind", "created_at", "updated_at"),
         )
 
-    async def put_voice_session(self, session: dict) -> None:
-        """Replace a whole voice session and its messages — idempotent import."""
-        await self._run(
-            self._put_conversation, session, "voice_sessions", "voice_messages", "room_name",
+    async def import_voice_session(self, session: dict) -> bool:
+        """Insert a voice session and its messages unless it already exists; True if copied."""
+        return await self._run(
+            self._import_conversation, session, "voice_sessions", "voice_messages", "room_name",
             ("started_at", "updated_at"),
         )
 
-    def _put_conversation(self, session: dict, table: str, msg_table: str, key: str, cols: tuple) -> None:
+    def _import_conversation(self, session: dict, table: str, msg_table: str, key: str, cols: tuple) -> bool:
         value = session[key]
         with closing(self._connect()) as conn, conn:
-            conn.execute(f"DELETE FROM {msg_table} WHERE user_id = ? AND {key} = ?", (self.user_id, value))
-            conn.execute(
-                f"INSERT OR REPLACE INTO {table} (user_id, {key}, {', '.join(cols)}) "
-                f"VALUES (?, ?, {', '.join('?' * len(cols))})",
+            inserted = conn.execute(
+                f"INSERT INTO {table} (user_id, {key}, {', '.join(cols)}) "
+                f"VALUES (?, ?, {', '.join('?' * len(cols))}) ON CONFLICT (user_id, {key}) DO NOTHING",
                 (self.user_id, value, *(session.get(c) for c in cols)),
-            )
-            conn.executemany(
-                f"INSERT INTO {msg_table} (user_id, {key}, role, content, at) VALUES (?, ?, ?, ?, ?)",
-                [(self.user_id, value, m["role"], m["content"], m["at"]) for m in session.get("messages", [])],
-            )
+            ).rowcount == 1
+            if inserted:
+                conn.executemany(
+                    f"INSERT INTO {msg_table} (user_id, {key}, role, content, at) VALUES (?, ?, ?, ?, ?)",
+                    [(self.user_id, value, m["role"], m["content"], m["at"]) for m in session.get("messages", [])],
+                )
+            return inserted
 
 
 _store: SqliteStore | None = None

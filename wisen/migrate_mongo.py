@@ -1,7 +1,8 @@
 """
 One-off copy of a pre-SQLite wisen MongoDB (reflections, chat_sessions,
 voice_sessions) into the SQLite store. Opt-in via `wisen migrate-mongo`;
-idempotent — re-running replaces each copied record rather than duplicating it.
+insert-only — a reflection date, chat session or voice room already in SQLite
+is skipped, so re-running never duplicates or overwrites anything.
 Needs pymongo: pip install 'wisen[migrate]'.
 """
 import asyncio
@@ -29,27 +30,24 @@ async def copy_all(mongo_db, store: SqliteStore) -> dict[str, int]:
         doc.pop("_id", None)
         if not doc.get("date"):
             continue
-        await store.upsert_reflection(doc)
-        counts["reflections"] += 1
+        counts["reflections"] += await store.import_reflection(doc)
 
     for doc in mongo_db.chat_sessions.find({}):
-        await store.put_chat_session({
+        counts["chat_sessions"] += await store.import_chat_session({
             "session_id": doc["session_id"],
             "kind": doc.get("kind", "text"),
             "created_at": _ts(doc.get("created_at")),
             "updated_at": _ts(doc.get("updated_at") or doc.get("created_at")),
             "messages": _messages(doc),
         })
-        counts["chat_sessions"] += 1
 
     for doc in mongo_db.voice_sessions.find({}):
-        await store.put_voice_session({
+        counts["voice_sessions"] += await store.import_voice_session({
             "room_name": doc["room_name"],
             "started_at": _ts(doc.get("started_at")),
             "updated_at": _ts(doc.get("updated_at")),
             "messages": _messages(doc),
         })
-        counts["voice_sessions"] += 1
 
     return counts
 

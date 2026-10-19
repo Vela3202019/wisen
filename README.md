@@ -62,8 +62,9 @@ wisen migrate-mongo             # one-off: copy a pre-SQLite MongoDB into SQLite
 
 Upgrading from a MongoDB-backed wisen? Run `pip install -e ".[migrate]"` and
 `wisen migrate-mongo` once while MongoDB is still running. It copies your
-reflections and chat/voice sessions into the SQLite file; re-running it is
-safe.
+reflections and chat/voice sessions into the SQLite file. Re-running it is
+safe: anything already in SQLite (by reflection date, chat session or voice
+room) is skipped, never overwritten.
 
 ## How it works
 
