@@ -18,7 +18,7 @@ model = "openai:gpt-5.6-terra"
 
 [storage]
 sqlite_path = "~/.wisen/wisen.db"           # (WISEN_DB_PATH) created on first use
-user_id = "local"                           # (WISEN_USER_ID) owner of every stored row
+user_id = "local"                           # (WISEN_USER_ID) owner of every stored row and outbound packet
 # Only read by the one-off `wisen migrate-mongo` (pre-SQLite installs):
 # mongodb_uri = "mongodb://127.0.0.1:27017" # (MONGODB_URI)
 # mongodb_db = "wisen"                      # (MONGODB_DB)
@@ -26,6 +26,10 @@ user_id = "local"                           # (WISEN_USER_ID) owner of every sto
 [paths]
 # Where `wisen export` writes reflection JSON files (WISEN_EXPORT_DIR)
 export_dir = "~/.wisen/exports/reflections"
+
+# Egress log: one line per packet that passed the egress gate — hash, size and
+# field names, never content (WISEN_EGRESS_LOG). `wisen egress` reads it.
+egress_log = "~/.wisen/egress.log"
 
 # Base dir containing the agents' dot-dirs — .claude, .codex, .gemini,
 # .cursor, .config/opencode (WISEN_ROOT_DIR). Point it at a synced copy of

@@ -57,6 +57,7 @@ wisen serve                             # API on :8000
 wisen synthesize [YYYY-MM-DD]   # ingest sessions + write one day's reflection
 wisen serve                     # POST /synthesize, GET /reflections, POST /chat (SSE)
 wisen export [dir]              # dump reflections to JSON files
+wisen egress                    # what passed the egress gate today
 wisen migrate-mongo             # one-off: copy a pre-SQLite MongoDB into SQLite
 ```
 
@@ -128,15 +129,29 @@ apply to these excerpts. If `synth_model` is `claude-cli:…`, synthesis runs
 through the Claude Code CLI and sends the same excerpts to Anthropic under
 your own Claude account. The terms of that account apply.
 
-**3. Cloud: derived results only, which can include short quotes.** The
-optional dashboard receives what `scripts/export_reflections.py` writes: each
-reflection document from the SQLite file, complete. Its `evidence` fields and
-summaries can quote short pieces of your sessions word for word. Raw
-transcripts, the full turn excerpts, the SQLite file, and API keys never go to the
-dashboard. `scripts/collect_usage.py` adds subscription usage percentages and
-reset times. To get the Claude percentages, it reads your Claude OAuth token
-from the Keychain and calls Anthropic's usage endpoint. Only the percentages and
-reset times reach the dashboard, not the token.
+**3. Cloud: derived results only, which can include short quotes.** Everything
+bound for a server goes through one egress gate (`wisen/egress.py`) as a typed
+packet (`wisen/packets.py`). The gate rejects any packet type or field that is
+not on the schema, masks secrets (API keys, tokens, private keys), replaces
+email addresses and absolute paths, and caps every text field (quotes at 500
+characters, briefings at 4,000).
+
+- The optional dashboard receives what `scripts/export_reflections.py` writes:
+  one result packet per reflection, cut down to the result fields. Its
+  `evidence` fields and summaries can quote short pieces of your sessions word
+  for word. Raw transcripts, the full turn excerpts, the SQLite file, and API
+  keys never go to the dashboard.
+- `scripts/collect_usage.py` adds a usage packet with subscription usage
+  percentages and reset times. To get the Claude percentages, it reads your
+  Claude OAuth token from the Keychain and calls Anthropic's usage endpoint.
+  Only the percentages and reset times reach the dashboard, not the token.
+
+Every packet that passes the gate is logged in `~/.wisen/egress.log`: time,
+destination, packet type, size, field names and a SHA-256 of the bytes, never
+the content. `wisen egress` shows today's (`--date`, `--list` for one line per
+packet). The export writes packets to a folder that your own sync job (for
+example rsync) uploads, so the log records what was prepared for upload; a
+packet whose content has not changed is not rewritten or logged again.
 
 ## Configuration
 

@@ -4,6 +4,7 @@ wisen command-line interface.
   wisen synthesize [YYYY-MM-DD]   ingest + synthesize one day (default: yesterday)
   wisen serve [--host] [--port]   run the API server (needs the [server] extra)
   wisen export [dir]              dump reflections from the local store to JSON files
+  wisen egress [--date] [--list]  show what passed the egress gate today
   wisen migrate-mongo             one-off copy of a pre-SQLite MongoDB into SQLite
   wisen eval <args...>            case-bank commands (mine, list, review,
                                   metrics, replay, compare)
@@ -59,6 +60,10 @@ def main() -> None:
     ex = sub.add_parser("export", help="dump reflections to JSON files")
     ex.add_argument("dir", nargs="?", help="output dir (default: paths.export_dir)")
 
+    eg = sub.add_parser("egress", help="show what passed the egress gate (today by default)")
+    eg.add_argument("--date", help="YYYY-MM-DD, local time (default: today)")
+    eg.add_argument("--list", action="store_true", help="one line per packet")
+
     sub.add_parser("migrate-mongo", help="copy a pre-SQLite MongoDB into SQLite (needs [migrate])")
 
     ev = sub.add_parser("eval", help="case-bank commands (mine, list, review, …)")
@@ -74,6 +79,10 @@ def main() -> None:
     elif args.cmd == "export":
         default_dir = config.get("paths", "export_dir", "WISEN_EXPORT_DIR", "~/.wisen/exports/reflections")
         asyncio.run(_export(Path(args.dir or default_dir).expanduser()))
+    elif args.cmd == "egress":
+        from wisen import egress
+        day = datetime.fromisoformat(args.date).date() if args.date else datetime.now().astimezone().date()
+        print(egress.report(day, every=args.list))
     elif args.cmd == "migrate-mongo":
         from wisen.migrate_mongo import main as migrate_main
         migrate_main()
