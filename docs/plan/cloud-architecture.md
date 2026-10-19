@@ -225,7 +225,7 @@ one strict:
 3. **Cloud: packets only.** The server receives nothing that is not a packet.
    Results may include short verbatim quotes. The owner's call: "original quote
    is fine i guess bc it's not original transcription". Quotes are capped in
-   length and pass through redaction like every other field.
+   length and redacted like other free-text fields.
 
 A fully local option (an on-laptop model for the Observer, so no provider sees
 raw text) is an open question, not part of this plan.
