@@ -30,12 +30,15 @@ _LABELLED = [
 _URL_CREDENTIALS = re.compile(r"(://)[^/\s:@]+:[^/\s@]+@")
 _EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 # Home dirs collapse to "~"; the user name is part of the path.
-_HOME = re.compile(r"(?<![\w.-])(?:(?:/Users|/home)/[^/\s\"'`]+|/root\b)|\b[A-Za-z]:\\Users\\[^\\\s\"'`]+")
+_HOME = re.compile(r"(?:/Users|/home)/[^/\s\"'`]+|/root\b|\b[A-Za-z]:\\Users\\[^\\\s\"'`]+")
 # Any other absolute path (two or more segments) keeps only its last segment,
 # unless it sits under a system root that says nothing about the user.
 _ABS_PATH = re.compile(r"(?<![\w.~/:\\…-])(?:/[\w.@+-]+){2,}/?")
 _SYSTEM_ROOTS = ("/usr/", "/opt/", "/bin/", "/sbin/", "/etc/", "/dev/", "/proc/", "/tmp/",
                  "/var/", "/private/", "/System/", "/Library/", "/Applications/", "/nix/")
+
+# Web URLs keep their paths; file:// URLs are filesystem paths and get scrubbed.
+_URL = re.compile(r"(\b(?!(?i:file):)[A-Za-z][\w+.-]*://[^\s\"']+)")
 
 SECRET = "<secret>"
 EMAIL = "<email>"
@@ -48,6 +51,11 @@ def redact(text: str) -> str:
         text = pattern.sub(lambda m: m.group(1) + SECRET, text)
     text = _URL_CREDENTIALS.sub(lambda m: m.group(1) + SECRET + "@", text)
     text = _EMAIL.sub(EMAIL, text)
+    parts = _URL.split(text)
+    return "".join(part if i % 2 else _redact_paths(part) for i, part in enumerate(parts))
+
+
+def _redact_paths(text: str) -> str:
     text = _HOME.sub("~", text)
     return _ABS_PATH.sub(_shorten_path, text)
 
