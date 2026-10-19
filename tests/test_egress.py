@@ -8,7 +8,9 @@ No store needed.
 Run: python3 -m tests.test_egress
 """
 import asyncio
+import contextlib
 import hashlib
+import io
 import json
 import os
 import tempfile
@@ -24,7 +26,7 @@ from wisen.packets import PACKETS, observation_packet, result_packet, usage_pack
 from wisen.redact import redact
 from wisen.synthesis.schema import CloudReflection, DayObservation, Reflection
 
-ENVELOPE = {"packet_type", "schema_version", "user_id"}
+ENVELOPE = {"packet_type", "schema_version", "user_id", "packet_id", "created_at"}
 FAKE_KEY = "sk-ant-api03-Zx9Qw8Er7Ty6Ui5Op4As3Df2Gh1Jk0LmNb"
 ABS_PATH = "/Users/alice/clients/acme/secret_plan.py"
 EMAIL = "alice@acme-corp.com"
@@ -156,6 +158,10 @@ def test_redact_patterns():
         "on /srv/acme/app/main.py": "on …/main.py",
         "Add /opt/homebrew/bin to PATH; 2>/dev/null": "Add /opt/homebrew/bin to PATH; 2>/dev/null",
         "https://github.com/Vela3202019/wisen/pull/4": "https://github.com/Vela3202019/wisen/pull/4",
+        "see https://example.com/home/page/x": "see https://example.com/home/page/x",
+        "open file:///Users/alice/notes": "open file://~/notes",
+        "max_tokens=40000000 and tokens: 12345678 used": "max_tokens=40000000 and tokens: 12345678 used",
+        "token: 12345678abc": "token: <secret>",
         "the bearer of bad news, and/or 1/2/3": "the bearer of bad news, and/or 1/2/3",
     }
     for text, expected in cases.items():
@@ -230,6 +236,51 @@ def test_observation_and_usage_packets():
     print("✓ egress: observation and usage packets pass the gate, scrubbed")
 
 
+def test_packet_id_is_stable_content_hash():
+    first, again = result_packet(_reflection()), result_packet(_reflection())
+    assert len(first["packet_id"]) == 64 and first["packet_id"] == again["packet_id"]
+    datetime.fromisoformat(first["created_at"])
+    changed = _reflection()
+    changed["insight"] = "Something else."
+    assert result_packet(changed)["packet_id"] != first["packet_id"]
+    obs = DayObservation(
+        mood_signals_user="terse", mood_signals_agent="careful", topics_raw=[], key_moments=[],
+        commit_drift="none", config_changes_observed=[], friction_observed=[],
+        yesterday_recs_followed=[], yesterday_recs_ignored=[], model_usage_observed=[], day_summary="ok",
+    )
+    usage = {"collected_at": "2026-10-18T00:00:00+00:00", "claude": None, "codex": None}
+    ids = {first["packet_id"], observation_packet(obs, "2026-10-17")["packet_id"], usage_packet(usage)["packet_id"]}
+    assert len(ids) == 3
+    # the id hashes the redacted content, so it reveals nothing the packet does not
+    secret = _reflection()
+    secret["insight"] = f"key {FAKE_KEY}"
+    masked = _reflection()
+    masked["insight"] = "key <secret>"
+    assert result_packet(secret)["packet_id"] == result_packet(masked)["packet_id"]
+    for packet in (first, observation_packet(obs, "2026-10-17"), usage_packet(usage)):
+        for field in ("packet_id", "created_at"):
+            try:
+                egress.check({k: v for k, v in packet.items() if k != field})
+            except egress.EgressRejected:
+                continue
+            raise AssertionError(f"{packet['packet_type']} accepted without {field}")
+    print("✓ egress: every packet carries a stable content-hash packet_id and created_at")
+
+
+def test_rejected_doc_is_skipped_without_its_text():
+    bad = _reflection()
+    bad["date"] = "2026-10-16"
+    bad["tldr"] = [f"CANARY_REJECTED {i}" for i in range(11)]
+    err = io.StringIO()
+    with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(err):
+        count = asyncio.run(export_reflections(_FakeStore([bad, _reflection()]), Path(tmp)))
+        written = sorted(p.name for p in Path(tmp).glob("*.json"))
+    assert count == 1 and written == ["2026-10-17.json"], (count, written)
+    report = err.getvalue()
+    assert "2026-10-16" in report and "tldr" in report and "CANARY_REJECTED" not in report, report
+    print("✓ egress: a rejected reflection is skipped and reported without its text")
+
+
 def test_log_records_sends_without_content():
     log = egress.log_path()
     log.unlink(missing_ok=True)
@@ -238,6 +289,9 @@ def test_log_records_sends_without_content():
         asyncio.run(export_reflections(db, Path(tmp)))
         body = (Path(tmp) / "2026-10-17.json").read_bytes()
         asyncio.run(export_reflections(db, Path(tmp)))  # unchanged: no second send
+        assert (Path(tmp) / "2026-10-17.json").read_bytes() == body
+        later = {**result_packet(_sensitive_doc()), "created_at": "2999-01-01T00:00:00+00:00"}
+        assert not egress.write_file(later, Path(tmp) / "2026-10-17.json")  # only created_at differs
     lines = log.read_text().splitlines()
     assert len(lines) == 1, lines
     entry = json.loads(lines[0])
@@ -261,5 +315,7 @@ if __name__ == "__main__":
     test_text_is_capped()
     test_every_text_field_has_a_max_length()
     test_observation_and_usage_packets()
+    test_packet_id_is_stable_content_hash()
+    test_rejected_doc_is_skipped_without_its_text()
     test_log_records_sends_without_content()
     print("\nall egress tests passed")

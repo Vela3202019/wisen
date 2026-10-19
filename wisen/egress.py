@@ -20,15 +20,10 @@ import json
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from wisen import config
-from wisen.packets import PACKETS
-from wisen.synthesis.schema import EGRESS
-
-
-class EgressRejected(ValueError):
-    pass
+from wisen.packets import PACKETS, EgressRejected, validate
 
 
 def log_path() -> Path:
@@ -40,31 +35,33 @@ def check(data: dict) -> BaseModel:
     model = PACKETS.get(data.get("packet_type"))
     if model is None:
         raise EgressRejected("not a packet: needs a known packet_type")
-    try:
-        return model.model_validate(data, extra="forbid", context=EGRESS)
-    except ValidationError as e:
-        # include_input=False: the rejected values may be what we are protecting
-        problems = "; ".join(f"{'.'.join(map(str, err['loc']))}: {err['msg']}"
-                             for err in e.errors(include_input=False))
-        raise EgressRejected(f"{data['packet_type']} packet rejected: {problems}") from None
+    return validate(model, data, f"{data['packet_type']} packet", extra="forbid")
 
 
 def write_file(data: dict, path: Path) -> bool:
     """Put a packet in an outbox directory that a sync job uploads (the
     dashboard export dir).
 
-    The file is left alone when its content is unchanged, so a sync tool sends
-    nothing new and the log records only packets that actually changed.
+    The file is left alone when it already holds the same packet_id (same
+    content; created_at alone does not count), so a sync tool sends nothing new
+    and the log records only packets that actually changed.
     Returns whether the file was written.
     """
     packet = check(data)
-    body = packet.model_dump_json(indent=2)
-    if path.exists() and path.read_text() == body:
+    if _packet_id(path) == packet.packet_id:
         return False
+    body = packet.model_dump_json(indent=2)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
     _record(packet, body.encode(), f"outbox:{_home_relative(path)}")
     return True
+
+
+def _packet_id(path: Path) -> str | None:
+    try:
+        return json.loads(path.read_text())["packet_id"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def _home_relative(path: Path) -> str:

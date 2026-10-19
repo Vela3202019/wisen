@@ -25,12 +25,12 @@ _SECRETS = [
 # Keep the label, mask the value: "Bearer x", "API_KEY=x", "password: x"
 _LABELLED = [
     re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/=-]{16,}"),
-    re.compile(r"(?i)(\b[\w-]*(?:api[_-]?key|secret|token|passw(?:or)?d)[\w-]*[\"']?\s*[:=]\s*[\"']?)[^\s\"'<>,;]{8,}"),
+    re.compile(r"(?i)(\b[\w-]*(?:api[_-]?key|secret|token|passw(?:or)?d)[\w-]*[\"']?\s*[:=]\s*[\"']?)(?=[^\s\"'<>,;]*[^\d\s\"'<>,;])[^\s\"'<>,;]{8,}"),
 ]
 _URL_CREDENTIALS = re.compile(r"(://)[^/\s:@]+:[^/\s@]+@")
 _EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 # Home dirs collapse to "~"; the user name is part of the path.
-_HOME = re.compile(r"(?:/Users|/home)/[^/\s\"'`]+|/root\b|\b[A-Za-z]:\\Users\\[^\\\s\"'`]+")
+_HOME = re.compile(r"(?<![\w.-])(?:(?:/Users|/home)/[^/\s\"'`]+|/root\b)|\b[A-Za-z]:\\Users\\[^\\\s\"'`]+")
 # Any other absolute path (two or more segments) keeps only its last segment,
 # unless it sits under a system root that says nothing about the user.
 _ABS_PATH = re.compile(r"(?<![\w.~/:\\…-])(?:/[\w.@+-]+){2,}/?")
