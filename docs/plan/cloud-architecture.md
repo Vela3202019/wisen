@@ -261,8 +261,11 @@ packet carries this envelope:
 
 The egress gate on the laptop runs in this order:
 
-1. **Build** the packet from the typed model only (allow-list; unknown fields
-   are a programming error).
+1. **Build** the packet from the typed model only (allow-list). Building from
+   a stored local document may drop keys the packet does not list, as
+   `CloudReflection` does today with `extra="ignore"`; the built packet itself
+   is then validated with `extra="forbid"`, so an unknown field on a packet is
+   a programming error.
 2. **Redact** every string field: API keys and tokens (secret-detector patterns),
    absolute home paths (replaced by a project alias), email addresses.
 3. **Cap** every string and list (`max_length` on the model).
@@ -271,10 +274,10 @@ The egress gate on the laptop runs in this order:
    what left your machine today.
 5. **Send.**
 
-The server validates the same models with `extra="forbid"` and the same caps,
-and **rejects** anything that fails. That is what "enforced at both ends"
-means: a bug on the laptop cannot widen the boundary, because the server will
-not store a field it does not know.
+The server validates the wire packet with the same `extra="forbid"` models and
+the same caps, and **rejects** anything that fails. That is what "enforced at
+both ends" means: a bug on the laptop cannot widen the boundary, because the
+server will not store a field it does not know.
 
 > 中文说明：「包」（packet）就是允许离开笔记本的唯一数据形状。笔记本只能用这些类型去打包，打包时先脱敏（密钥、绝对路径、邮箱）、再截断长度、再记一笔出境账本；服务器用同一份类型定义再检查一遍，不认识的字段直接拒收。所以就算笔记本这边有 bug，也没法把原始日志「顺带」传上去。
 
