@@ -64,7 +64,7 @@ The design changes these parts of the current code:
 | The daily run is a launchd one-shot | `scripts/run_synthesis.py` | Becomes a scheduled job; launchd only keeps the laptop daemon alive (steps 3–4) |
 | A stdlib dashboard on the VPS: exported reflection JSON, a `*.req` file queue for triggers, one shared Basic-auth password | `wisen/dashboard/server.py` | Grows into the server (step 4) |
 | What may leave the machine is one allow-list model, `CloudReflection`, guarded by a canary test | `wisen/synthesis/schema.py`, `wisen/export.py`, `tests/test_egress.py` | Becomes the first packet type (step 2) |
-| The Observer sends each turn cut to 400 characters to the model provider | `wisen/synthesis/agent.py` (`_format_session`) | Cap becomes configurable, up to about 4,000 characters (step 2) |
+| The Observer sends each turn cut to 400 characters to the model provider | `wisen/synthesis/agent.py` (`_format_session`) | Cap may become configurable, up to about 4,000 characters (not yet scheduled; open question 12) |
 | Recommendations are typed (`claude-md`, `agents-md`, …) but nothing acts on them | `wisen/synthesis/schema.py` (`Recommendation`) | The Gardener turns them into proposals (step 5) |
 | The eval-loop plan auto-applies a config change on a branch when the replay eval improves | `docs/plan/eval-loop.md` (Phase 3) | Superseded: replay results become evidence on a proposal; a human still approves |
 
@@ -218,9 +218,10 @@ one strict:
 2. **Model inference: excerpts go to the configured provider.** This is true
    today and stays true for the laptop's model calls. The owner allowed larger
    excerpts when they help: "up to 400 characters of every turn can be bigger if
-   needed like 4000 char". The per-turn cap becomes a setting (default 400,
-   ceiling about 4,000). Raising it is a measured change: run `wisen eval` before
-   and after, and update the README numbers in the same PR.
+   needed like 4000 char". The per-turn cap can become a setting (default 400,
+   ceiling about 4,000). No build step delivers that yet (open question 12).
+   Raising it is a measured change: run `wisen eval` before and after, and
+   update the README numbers in the same PR.
 3. **Cloud: packets only.** The server receives nothing that is not a packet.
    Results may include short verbatim quotes. The owner's call: "original quote
    is fine i guess bc it's not original transcription". Quotes are capped in
@@ -238,12 +239,16 @@ so a new field stays local until someone decides it may leave). Step 2
 generalizes it.
 
 All packet types live in one module that both the laptop and the server import,
-so the two ends can never disagree about the schema. Every packet carries:
+so the two ends can never disagree about the schema. From step 2, every
+packet carries this envelope:
 
+- `packet_type`
 - `schema_version`
+- `user_id`
 - `packet_id`: a deterministic hash of its content, used for idempotent upload
-- `user_id`, `device_id`
 - `created_at`
+
+`device_id` joins the envelope in step 4, together with device tokens.
 
 | Packet | Stage | Carries | Never carries |
 |---|---|---|---|
@@ -262,7 +267,7 @@ The egress gate on the laptop runs in this order:
    absolute home paths (replaced by a project alias), email addresses.
 3. **Cap** every string and list (`max_length` on the model).
 4. **Record** the packet in the local egress ledger: `packet_id`, type, byte
-   size, field names, hash, time sent. `wisen outbox` prints it, so you can see
+   size, field names, hash, time sent. `wisen egress` prints it, so you can see
    what left your machine today.
 5. **Send.**
 
@@ -630,9 +635,9 @@ step.
 |---|---|---|
 | **0. This design doc** | `docs/plan/cloud-architecture.md` with the system, approval-flow and state-machine diagrams | Diagrams render on GitHub; owner review |
 | **1. SQLite on the laptop** | A storage module replacing `wisen/db.py` and every Mongo call site; chats stored as `Conversation`s; `wisen import-mongo`; `motor` removed; README and CLAUDE.md run instructions without MongoDB | All tests pass with no MongoDB running; importing a real Mongo database gives the same reflection count; a resumed chat still sees its earlier tool results |
-| **2. Packet boundary** | Shared packet models (starting from `CloudReflection`); the egress gate (allow-list → redact → cap → ledger → send); `wisen outbox`; configurable Observer per-turn cap | `tests/test_egress.py` extended: a fixture with a fake API key and an absolute path yields a packet with neither; a packet with an extra field fails validation |
+| **2. Packet boundary** | Shared packet models (starting from `CloudReflection`); the packet envelope (`packet_type`, `schema_version`, `user_id`, `packet_id`, `created_at`); the egress gate (allow-list → redact → cap → ledger → send); `wisen egress` | `tests/test_egress.py` extended: a fixture with a fake API key and an absolute path yields a packet with neither; a packet with an extra field fails validation |
 | **3. Job engine + proposal state machine** | `jobs`/`job_steps` with leases, timers, waits and replay policies; `transition()` with audit; `_jobs` in `wisen/main.py` and the launchd synthesis run moved onto it | Kill the process between Observer and Synthesizer, restart: the Observer is not called again and exactly one reflection is stored; a duplicate `idempotency_key` returns the existing job; an illegal transition changes nothing; an expired lease is requeued on startup |
-| **4. Server, stage A** | `wisen cloud serve` replacing `wisen/dashboard/server.py`; login, pairing, device tokens; the mailbox and device-job API; approval inbox; installable web app with Web Push; `wisen worker` on the laptop; `deploy/` samples; backup timer | On the Hetzner box: pair the laptop; a day's reflection arrives and the phone gets a push; a revoked token gets 401; a server restart mid-lease recovers the job; a restored backup serves the same data; the server's environment has no model key; no fixture marker string appears in the server database |
+| **4. Server, stage A** | `wisen cloud serve` replacing `wisen/dashboard/server.py`; login, pairing, device tokens; the mailbox and device-job API; approval inbox; installable web app with Web Push; `device_id` in the packet envelope; `wisen worker` on the laptop; `deploy/` samples; backup timer | On the Hetzner box: pair the laptop; a day's reflection arrives and the phone gets a push; a revoked token gets 401; a server restart mid-lease recovers the job; a restored backup serves the same data; the server's environment has no model key; no fixture marker string appears in the server database |
 | **5. Gardener loop** | The Gardener agent and its `requires_approval` tool; proposals from reflections; the laptop applier (allow-list, branch `wisen/gardener/<id>`); merge detection; the measure timer wired to the eval loop | An approved proposal produces exactly one commit on one branch even if the laptop reconnects mid-apply; a proposal for a disallowed path is refused after approval; a rejection note reaches the next run; a measure job fires after merge and records its result |
 | **6. Telegram** | Bot linking, notifications, approve/reject buttons, history chat (reflections by default, `/search` on the laptop) | Approving in Telegram and then in the web app records one decision; an unlinked chat is ignored; `/search` while the laptop sleeps is answered after it wakes |
 | **7. Stage B** | `ObservationPacket` upload; Synthesizer, Gardener and reflection chat on the server over packets; model key on the server; applying still on the laptop | With the laptop asleep, the morning reflection is produced from packets already uploaded; with a mock model that echoes its prompt, no fixture marker appears in any server-side prompt or row |
@@ -687,3 +692,7 @@ step that needs the answer.
     weeks after merge to measure. *Step 5.*
 11. **Proposal batching.** One approval per proposal, or a daily batch you
     approve item by item? *Step 5.*
+12. **When to make the Observer's per-turn cap configurable.** The owner
+    accepts excerpts up to about 4,000 characters per turn, but no build step
+    delivers the setting yet. Which step should, and what should the default be
+    once `wisen eval` has compared the sizes?
