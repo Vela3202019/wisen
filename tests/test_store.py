@@ -136,7 +136,7 @@ async def check_migration(path: Path):
         assert conn.execute("SELECT COUNT(*) FROM voice_messages").fetchone()[0] == 1
 
     # Data written to SQLite after the first migration must survive a re-run.
-    later = datetime(2026, 10, 18, 9, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 10, 18, 9, 0, tzinfo=UTC)
     await store.append_chat_message("c1", "user", "follow-up", later)
     await store.append_voice_message("r1", "user", "spoken", later)
     await store.upsert_reflection(_reflection("2026-10-01", 0.9))
