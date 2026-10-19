@@ -261,25 +261,27 @@ packet carries this envelope:
 
 The egress gate on the laptop runs in this order:
 
-1. **Build** the packet from the typed model only (allow-list). Building from
-   a stored local document may drop keys the packet does not list, as
-   `CloudReflection` does today with `extra="ignore"`; the built packet itself
-   is then validated with `extra="forbid"`, so an unknown field on a packet is
-   a programming error.
-2. **Redact** every string field: API keys and tokens (secret-detector patterns),
-   absolute home paths (replaced by a project alias), email addresses.
-3. **Cap** every string and list (`max_length` on the model).
-4. **Record** the packet in the local egress ledger: `packet_id`, type, byte
+1. **Select** only the fields the packet type lists (allow-list). Selecting
+   from a stored local document may drop keys the packet does not list, as
+   `CloudReflection` does today with `extra="ignore"`.
+2. **Redact** every string value: API keys and tokens (secret-detector
+   patterns), absolute home paths (replaced by a project alias), email
+   addresses.
+3. **Truncate** every string and list to its cap.
+4. **Validate** by constructing the strict packet model (`extra="forbid"`,
+   `max_length` on every string and list). Validation only rejects, never
+   shortens: an unknown field or an over-cap value here is a programming error.
+5. **Record** the packet in the local egress ledger: `packet_id`, type, byte
    size, field names, hash, time sent. `wisen egress` prints it, so you can see
    what left your machine today.
-5. **Send.**
+6. **Send.**
 
 The server validates the wire packet with the same `extra="forbid"` models and
 the same caps, and **rejects** anything that fails. That is what "enforced at
 both ends" means: a bug on the laptop cannot widen the boundary, because the
 server will not store a field it does not know.
 
-> 中文说明：「包」（packet）就是允许离开笔记本的唯一数据形状。笔记本只能用这些类型去打包，打包时先脱敏（密钥、绝对路径、邮箱）、再截断长度、再记一笔出境账本；服务器用同一份类型定义再检查一遍，不认识的字段直接拒收。所以就算笔记本这边有 bug，也没法把原始日志「顺带」传上去。
+> 中文说明：「包」（packet）就是允许离开笔记本的唯一数据形状。笔记本只能用这些类型去打包，打包时先脱敏（密钥、绝对路径、邮箱）、再截断长度、再用严格类型校验、再记一笔出境账本；服务器用同一份类型定义再检查一遍，不认识的字段直接拒收。所以就算笔记本这边有 bug，也没法把原始日志「顺带」传上去。
 
 Durable journals are an egress risk of their own. A job step's saved output is
 a stored copy of whatever the step returned. So the Observer step journals its
@@ -638,7 +640,7 @@ step.
 |---|---|---|
 | **0. This design doc** | `docs/plan/cloud-architecture.md` with the system, approval-flow and state-machine diagrams | Diagrams render on GitHub; owner review |
 | **1. SQLite on the laptop** | A storage module replacing `wisen/db.py` and every Mongo call site; chats stored as `Conversation`s; `wisen import-mongo`; `motor` removed; README and CLAUDE.md run instructions without MongoDB | All tests pass with no MongoDB running; importing a real Mongo database gives the same reflection count; a resumed chat still sees its earlier tool results |
-| **2. Packet boundary** | Shared packet models (starting from `CloudReflection`); the packet envelope (`packet_type`, `schema_version`, `user_id`, `packet_id`, `created_at`); the egress gate (allow-list → redact → cap → ledger → send); `wisen egress` | `tests/test_egress.py` extended: a fixture with a fake API key and an absolute path yields a packet with neither; a packet with an extra field fails validation |
+| **2. Packet boundary** | Shared packet models (starting from `CloudReflection`); the packet envelope (`packet_type`, `schema_version`, `user_id`, `packet_id`, `created_at`); the egress gate (allow-list → redact → truncate → validate → ledger → send); `wisen egress` | `tests/test_egress.py` extended: a fixture with a fake API key and an absolute path yields a packet with neither; a packet with an extra field fails validation |
 | **3. Job engine + proposal state machine** | `jobs`/`job_steps` with leases, timers, waits and replay policies; `transition()` with audit; `_jobs` in `wisen/main.py` and the launchd synthesis run moved onto it | Kill the process between Observer and Synthesizer, restart: the Observer is not called again and exactly one reflection is stored; a duplicate `idempotency_key` returns the existing job; an illegal transition changes nothing; an expired lease is requeued on startup |
 | **4. Server, stage A** | `wisen cloud serve` replacing `wisen/dashboard/server.py`; login, pairing, device tokens; the mailbox and device-job API; approval inbox; installable web app with Web Push; `device_id` in the packet envelope; `wisen worker` on the laptop; `deploy/` samples; backup timer | On the Hetzner box: pair the laptop; a day's reflection arrives and the phone gets a push; a revoked token gets 401; a server restart mid-lease recovers the job; a restored backup serves the same data; the server's environment has no model key; no fixture marker string appears in the server database |
 | **5. Gardener loop** | The Gardener agent and its `requires_approval` tool; proposals from reflections; the laptop applier (allow-list, branch `wisen/gardener/<id>`); merge detection; the measure timer wired to the eval loop | An approved proposal produces exactly one commit on one branch even if the laptop reconnects mid-apply; a proposal for a disallowed path is refused after approval; a rejection note reaches the next run; a measure job fires after merge and records its result |
