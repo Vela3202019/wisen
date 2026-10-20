@@ -22,8 +22,8 @@ Job states:
   leased     a worker holds it until `lease_expires_at`; heartbeats extend it
   waiting    parked in `ctx.wait` until its signal arrives or its timeout passes
   succeeded  final; `result` holds the handler's return value
-  failed     final; `error` says why (attempts used up, or an unsafe step was
-             interrupted)
+  failed     `error` says why (attempts used up, or an unsafe step was
+             interrupted); sending its request id again re-queues it
 
 The full design is docs/plan/cloud-architecture.md §6.2.
 """
@@ -121,7 +121,7 @@ def insert_job(
     """Insert a queued job inside the caller's transaction, so it commits with
     whatever else that transaction writes (lesson 1). The job row is the
     receipt for its request id (lesson 4): a resent request returns the job
-    already recorded for it."""
+    already recorded for it, re-queued if it had failed."""
     args_json = json.dumps(args, sort_keys=True)
     if request_id is not None:
         row = conn.execute(
@@ -130,7 +130,15 @@ def insert_job(
         if row:
             if row["kind"] != kind or row["args"] != args_json:
                 raise ValueError(f"request id {request_id!r} was already used for a different job")
-            return row
+            if row["state"] != "failed":
+                return row
+            # Sending the request again retries a failed job in place: its
+            # finished steps are kept, so it resumes from its last checkpoint.
+            return conn.execute(
+                "UPDATE jobs SET state = 'queued', attempts = 0, run_after = ?, error = NULL, "
+                "updated_at = ? WHERE id = ? RETURNING *",
+                (ts(now), ts(now), row["id"]),
+            ).fetchone()
     job_id = uuid.uuid4().hex
     conn.execute(
         "INSERT INTO jobs (id, user_id, kind, args, state, attempts, max_attempts, run_after, "
@@ -160,7 +168,7 @@ class JobContext:
         name: str,
         fn: Callable[[], Awaitable[Any]],
         *,
-        replay_safe: bool = True,
+        replay_safe: bool,
         output: Any = Any,
     ) -> Any:
         """Run `fn` once and checkpoint its result (lesson 2). If this job
@@ -168,7 +176,7 @@ class JobContext:
         without calling `fn`.
 
         `output` is the result's type, used to save it as JSON and load it
-        back. `replay_safe=False` marks a step whose effect must not happen
+        back. Every step declares `replay_safe`; `replay_safe=False` marks a step whose effect must not happen
         twice (create a branch, send a push): if a crash interrupts it, the
         job fails with `StepInterrupted` for a human to check instead of
         running it again (lesson 3). A step that raises is treated as not
@@ -292,20 +300,19 @@ class JobEngine:
         fails the job, so a job that keeps killing its process stops."""
         now = ts(self.clock())
         with self.store.transaction() as conn:
-            failed = [r["id"] for r in conn.execute(
+            failed = conn.execute(
                 "UPDATE jobs SET state = 'failed', error = ?, lease_owner = NULL, "
                 "lease_expires_at = NULL, updated_at = ? WHERE user_id = ? AND state = 'leased' "
-                "AND lease_expires_at <= ? AND attempts >= max_attempts RETURNING id",
+                "AND lease_expires_at <= ? AND attempts >= max_attempts",
                 ("LeaseExpired: the last attempt never finished", now, self._uid, now),
-            ).fetchall()]
-            _prune_outputs(conn, failed)
+            ).rowcount
             requeued = conn.execute(
                 "UPDATE jobs SET state = 'queued', run_after = ?, lease_owner = NULL, "
                 "lease_expires_at = NULL, updated_at = ? WHERE user_id = ? AND state = 'leased' "
                 "AND lease_expires_at <= ?",
                 (now, now, self._uid, now),
             ).rowcount
-        return len(failed) + requeued
+        return failed + requeued
 
     async def recover(self) -> int:
         return await asyncio.to_thread(self._recover)
@@ -427,8 +434,8 @@ class JobEngine:
                 "lease_expires_at = NULL, updated_at = ? WHERE id = ? AND state = 'leased' AND lease_owner = ?",
                 (state, json.dumps(result), error, now, job.id, self.worker_id),
             ).rowcount
-            if done:
-                _prune_outputs(conn, [job.id])
+            if done and state == "succeeded":
+                _prune_outputs(conn, job.id)
 
     def _retry_or_fail(self, job: Job, error: str) -> None:
         if job.attempts >= job.max_attempts:
@@ -525,11 +532,12 @@ class JobEngine:
         raise _Parked
 
 
-def _prune_outputs(conn: sqlite3.Connection, job_ids: list[str]) -> None:
-    # Step outputs only matter while a job can still resume. Drop them once it
-    # is final, so derived day data does not linger in the journal; the step
-    # names and times stay as the record of what ran.
-    conn.executemany("UPDATE job_steps SET output = NULL WHERE job_id = ?", [(i,) for i in job_ids])
+def _prune_outputs(conn: sqlite3.Connection, job_id: str) -> None:
+    # Step outputs only matter while a job can still resume, and a failed job
+    # resumes when its request is sent again. Drop them once it succeeds, so
+    # derived day data does not linger in the journal; the step names and
+    # times stay as the record of what ran.
+    conn.execute("UPDATE job_steps SET output = NULL WHERE job_id = ?", (job_id,))
 
 
 def _describe(e: BaseException) -> str:

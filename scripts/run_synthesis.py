@@ -21,7 +21,7 @@ async def main() -> None:
     else:
         date = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
     print(f"[{datetime.now(UTC).isoformat()}] synthesizing {date}")
-    job = await synthesize_day(date, request_id=f"daily-synthesis:{date}")
+    job = await synthesize_day(date)
     if job.state != "succeeded":
         raise SystemExit(f"synthesis failed: {job.error}")
     print(f"done — reflection saved for {date}")

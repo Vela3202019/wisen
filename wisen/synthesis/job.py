@@ -20,18 +20,26 @@ async def run_synthesis_job(ctx: JobContext, args: dict) -> dict:
         # never the raw sessions it read.
         return await agent.observe(await ingest_all(date), date, yesterday_doc, model)
 
-    observation = await ctx.step("observe", observe_day, output=DayObservation)
+    observation = await ctx.step("observe", observe_day, replay_safe=True, output=DayObservation)
     reflection = await ctx.step(
-        "synthesize", lambda: agent.reflect(observation, yesterday_doc, past_docs, date, model), output=Reflection,
+        "synthesize", lambda: agent.reflect(observation, yesterday_doc, past_docs, date, model),
+        replay_safe=True, output=Reflection,
     )
     # Replay-safe: the save is an upsert by date.
-    await ctx.step("save", lambda: agent.save_reflection(reflection))
+    await ctx.step("save", lambda: agent.save_reflection(reflection), replay_safe=True)
     return {"date": date}
 
 
-async def synthesize_day(date: str, request_id: str | None = None) -> Job:
-    """Queue a synthesis job for `date` and work the queue until it is final.
-    Sending the same `request_id` again returns that same job."""
+def daily_request_id(date: str) -> str:
+    """The one request id per day, shared by the CLI, launchd and the API, so
+    a rerun resumes that day's job instead of starting a second one."""
+    return f"daily-synthesis:{date}"
+
+
+async def synthesize_day(date: str) -> Job:
+    """Queue (or resume) the synthesis job for `date` and work the queue
+    until it is final. A day that already succeeded returns its job; one that
+    failed is retried from its last checkpoint."""
     engine = get_engine()
-    job = await engine.enqueue("synthesize", {"date": date}, request_id=request_id)
+    job = await engine.enqueue("synthesize", {"date": date}, request_id=daily_request_id(date))
     return await engine.run_until_done(job.id)

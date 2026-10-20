@@ -154,9 +154,12 @@ class Proposals:
         with self.store.transaction() as conn:
             receipt = self._receipt(conn, request_id)
             if receipt:
-                if receipt["from_state"] is not None:
-                    raise ValueError(f"request id {request_id!r} was already used for a different command")
                 proposal_id = receipt["proposal_id"]
+                row = conn.execute("SELECT target, payload FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
+                if receipt["from_state"] is not None or (row["target"], json.loads(row["payload"])) != (
+                    target, payload
+                ):
+                    raise ValueError(f"request id {request_id!r} was already used for a different command")
             else:
                 proposal_id = uuid.uuid4().hex
                 conn.execute(
@@ -217,6 +220,11 @@ class Proposals:
             raise ValueError(f"a decision is one of {sorted(DECISIONS)}, not {decision!r}")
         now = ts(self.clock())
         with self.store.transaction() as conn:
+            receipt = self._receipt(conn, request_id)
+            if receipt and (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
+                proposal_id, "proposed", decision
+            ):
+                raise ValueError(f"request id {request_id!r} was already used for a different command")
             memo = conn.execute(
                 "SELECT * FROM proposal_decisions WHERE user_id = ? AND proposal_id = ?",
                 (self._uid, proposal_id),

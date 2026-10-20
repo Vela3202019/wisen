@@ -18,6 +18,7 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from wisen import jobs as jobs_mod
 from wisen import store as store_mod
 from wisen.ingestion.pipeline import IngestResult
 from wisen.jobs import LEASE, JobEngine, LeaseLost
@@ -99,16 +100,10 @@ def _fake_synthesis(calls: Path, crash_on: str | None) -> None:
 
 
 def _crash_child(calls: str) -> None:
-    """Runs in a subprocess (WISEN_DB_PATH points at the test file): start a
-    synthesis job and die inside the Synthesizer's model call."""
+    """Runs in a subprocess (WISEN_DB_PATH points at the test file): run
+    `wisen synthesize`'s path and die inside the Synthesizer's model call."""
     _fake_synthesis(Path(calls), crash_on="Reflection")
-    engine = JobEngine(store_mod.get_store(), {"synthesize": synthesis_job.run_synthesis_job})
-
-    async def go():
-        job = await engine.enqueue("synthesize", {"date": DATE}, request_id="daily")
-        await engine.run_until_done(job.id)
-
-    asyncio.run(go())
+    asyncio.run(synthesis_job.synthesize_day(DATE))
 
 
 async def check_kill_and_restart(tmp: str):
@@ -128,20 +123,24 @@ async def check_kill_and_restart(tmp: str):
     steps = {r["name"]: r["state"] for r in _rows(store, "SELECT name, state FROM job_steps")}
     assert steps == {"observe": "done", "synthesize": "started"}, steps
 
-    # Restart: a new process (fresh worker id) once the dead worker's lease has expired.
+    # Rerun `wisen synthesize` for the same day: a new process (fresh worker
+    # id), once the dead worker's lease has expired, resumes the same job.
     os.environ["WISEN_DB_PATH"] = str(db)
     store_mod._store = None
     _fake_synthesis(calls, crash_on=None)
-    engine = JobEngine(store, {"synthesize": synthesis_job.run_synthesis_job},
-                       clock=lambda: datetime.now(UTC) + 2 * LEASE)
-    done = await engine.run_until_done(job["id"])
+    jobs_mod._engine = JobEngine(store, {"synthesize": synthesis_job.run_synthesis_job},
+                                 clock=lambda: datetime.now(UTC) + 2 * LEASE)
+    done = await synthesis_job.synthesize_day(DATE)
+    assert done.id == job["id"] and len(_rows(store, "SELECT 1 FROM jobs")) == 1
     assert done.state == "succeeded" and done.result == {"date": DATE} and done.attempts == 2, done
     # The Observer ran once; the interrupted Synthesizer re-ran; one save, one reflection.
     assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save"], calls.read_text()
     assert len(_rows(store, "SELECT 1 FROM reflections")) == 1
-    # Resending the launch's request id returns the finished job instead of running again.
-    again = await engine.enqueue("synthesize", {"date": DATE}, request_id="daily")
+    # Rerunning a day that succeeded returns the finished job instead of running again.
+    again = await synthesis_job.synthesize_day(DATE)
     assert again.id == job["id"] and again.state == "succeeded"
+    assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save"], calls.read_text()
+    jobs_mod._engine = None
     # Once the job is final its step outputs are dropped; names and times stay.
     outputs = _rows(store, "SELECT name, output FROM job_steps ORDER BY started_at")
     assert [r["name"] for r in outputs] == ["observe", "synthesize", "save"], outputs
@@ -172,6 +171,42 @@ async def check_request_id(tmp: str):
     c = await engine.enqueue("noop", {"x": 1}, request_id="r1")
     assert c.id == a.id and c.state == "succeeded" and c.result == {"ran": 1} and len(runs) == 1, c
     print("✓ jobs: a duplicate request id returns the same job and its original result")
+
+
+async def check_failed_rerun(tmp: str):
+    store, clock = _store(tmp, "rerun"), Clock()
+    calls: list[str] = []
+
+    async def two_steps(ctx, args):
+        async def first():
+            calls.append("first")
+            return "kept"
+
+        async def second():
+            calls.append("second")
+            if calls.count("second") == 1:
+                raise RuntimeError("model down")
+            return "ok"
+
+        got = await ctx.step("first", first, replay_safe=True)
+        return [got, await ctx.step("second", second, replay_safe=True)]
+
+    engine = JobEngine(store, {"two": two_steps}, clock=clock)
+    job = await engine.enqueue("two", {"date": DATE}, request_id="day", max_attempts=1)
+    assert await engine.run_once()
+    failed = await engine.get(job.id)
+    assert failed.state == "failed" and failed.error == "RuntimeError: model down", failed
+    # A failed job keeps its finished steps, so a rerun can resume from them.
+    assert [r["output"] for r in _rows(store, "SELECT output FROM job_steps")] == ['"kept"']
+
+    rerun = await engine.enqueue("two", {"date": DATE}, request_id="day", max_attempts=1)
+    assert rerun.id == job.id and rerun.state == "queued" and rerun.attempts == 0 and rerun.error is None, rerun
+    assert len(_rows(store, "SELECT 1 FROM jobs")) == 1
+    done = await engine.run_until_done(job.id)
+    assert done.state == "succeeded" and done.result == ["kept", "ok"], done
+    assert calls == ["first", "second", "second"], calls  # the finished step was not re-run
+    assert all(r["output"] is None for r in _rows(store, "SELECT output FROM job_steps"))
+    print("✓ jobs: rerunning a failed request id retries the same job from its checkpoint")
 
 
 async def check_lease_recovery(tmp: str):
@@ -225,11 +260,11 @@ async def check_replay_policy(tmp: str):
         return run
 
     async def unsafe(ctx, args):
-        await ctx.step("read", effect("read", False))
+        await ctx.step("read", effect("read", False), replay_safe=True)
         await ctx.step("push", effect("push", len(calls) < 3), replay_safe=False)
 
     async def safe(ctx, args):
-        await ctx.step("model", effect("model", calls.count("model") == 0))
+        await ctx.step("model", effect("model", calls.count("model") == 0), replay_safe=True)
 
     engine = JobEngine(store, {"unsafe": unsafe, "safe": safe}, clock=clock)
     job = await engine.enqueue("unsafe", {})
@@ -255,8 +290,8 @@ async def check_replay_policy(tmp: str):
     assert (await engine.get(job.id)).state == "succeeded" and calls == ["model", "model"], calls
 
     async def twice(ctx, args):
-        await ctx.step("same", effect("a", False))
-        await ctx.step("same", effect("b", False))
+        await ctx.step("same", effect("a", False), replay_safe=True)
+        await ctx.step("same", effect("b", False), replay_safe=True)
 
     engine.handlers["twice"] = twice
     job = await engine.enqueue("twice", {}, max_attempts=1)
@@ -358,8 +393,21 @@ async def check_proposals(tmp: str):
     p = await props.create("wisen:CLAUDE.md", {"diff": "+ one rule"}, request_id="c1", actor="gardener",
                            expires_at=T0 + timedelta(days=2))
     assert p.state == "proposed"
-    assert (await props.create("wisen:CLAUDE.md", {}, request_id="c1", actor="gardener")).id == p.id
+    assert (await props.create("wisen:CLAUDE.md", {"diff": "+ one rule"}, request_id="c1",
+                               actor="gardener")).id == p.id
     assert len(_rows(store, "SELECT 1 FROM proposals")) == 1
+    for target, payload in [("wisen:CLAUDE.md", {}), ("wisen:AGENTS.md", {"diff": "+ one rule"})]:
+        try:
+            await props.create(target, payload, request_id="c1", actor="gardener")
+            raise AssertionError("a reused request id with another proposal must be refused")
+        except ValueError:
+            pass
+    try:
+        await props.decide(p.id, "approved", request_id="c1", actor="web")
+        raise AssertionError("a decision reusing another command's request id must be refused")
+    except ValueError:
+        pass
+    assert (await props.get(p.id)).state == "proposed" and len(_rows(store, "SELECT 1 FROM proposals")) == 1
 
     for frm, to in [("proposed", "applied"), ("approved", "applied"), ("proposed", "approved")]:
         try:
@@ -403,6 +451,7 @@ async def main():
     with tempfile.TemporaryDirectory() as tmp:
         await check_kill_and_restart(tmp)
         await check_request_id(tmp)
+        await check_failed_rerun(tmp)
         await check_lease_recovery(tmp)
         await check_replay_policy(tmp)
         await check_retry_and_timers(tmp)

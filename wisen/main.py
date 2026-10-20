@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from wisen.chat.agent import stream_chat
 from wisen.jobs import Job, get_engine
 from wisen.store import get_store
+from wisen.synthesis.job import daily_request_id
 from wisen.synthesis.schema import Reflection
 
 
@@ -38,7 +39,7 @@ app.add_middleware(
 
 class SynthesizeRequest(BaseModel):
     date: str | None = None  # YYYY-MM-DD, defaults to today
-    request_id: str | None = None  # resend with the same id to get the same job back
+    request_id: str | None = None  # default: the day's own id, so a resend resumes that day's job
 
 
 class JobStatus(BaseModel):
@@ -64,7 +65,9 @@ def _job_status(job: Job) -> JobStatus:
 async def trigger_synthesis(req: SynthesizeRequest):
     date = req.date or datetime.now(UTC).date().isoformat()
     try:
-        job = await get_engine().enqueue("synthesize", {"date": date}, request_id=req.request_id)
+        job = await get_engine().enqueue(
+            "synthesize", {"date": date}, request_id=req.request_id or daily_request_id(date)
+        )
     except ValueError as e:  # request id reused for a different date
         raise HTTPException(status_code=409, detail=str(e))
     return _job_status(job)
