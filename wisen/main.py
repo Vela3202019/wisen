@@ -1,6 +1,5 @@
 import json
 import uuid
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -9,19 +8,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from wisen.chat.agent import stream_chat
-from wisen.db import ensure_indexes, get_db
 from wisen.ingestion.pipeline import ingest_all
+from wisen.store import get_store
 from wisen.synthesis.agent import synthesize
 from wisen.synthesis.schema import Reflection
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await ensure_indexes()
-    yield
-
-
-app = FastAPI(title="Wisen API", lifespan=lifespan)
+app = FastAPI(title="Wisen API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,22 +70,16 @@ async def get_synthesis_status(job_id: str):
 
 @app.get("/reflections", response_model=list[dict])
 async def list_reflections():
-    db = get_db()
-    docs = await db.reflections.find(
-        {}, {"date": 1, "alignment_score": 1, "alignment_label": 1, "synthesized_at": 1}
-    ).sort("date", -1).to_list(30)
-    for d in docs:
-        d.pop("_id", None)
-    return docs
+    fields = ("date", "alignment_score", "alignment_label", "synthesized_at")
+    docs = await get_store().list_reflections(limit=30)
+    return [{k: d[k] for k in fields if k in d} for d in docs]
 
 
 @app.get("/reflections/{date}", response_model=Reflection)
 async def get_reflection(date: str):
-    db = get_db()
-    doc = await db.reflections.find_one({"date": date})
+    doc = await get_store().get_reflection(date)
     if not doc:
         raise HTTPException(status_code=404, detail=f"No reflection for {date}")
-    doc.pop("_id", None)
     doc.pop("synthesized_at", None)
     return Reflection(**doc)
 
@@ -113,31 +99,20 @@ async def chat(req: ChatRequest):
     if not req.messages or req.messages[-1].role != "user":
         raise HTTPException(status_code=400, detail="Last message must be role=user")
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
-    db = get_db()
+    store = get_store()
     now = datetime.now(UTC)
 
     # Resolve or create session
     session_id = req.session_id
-    if session_id:
-        exists = await db.chat_sessions.find_one({"session_id": session_id}, {"_id": 1})
-        if not exists:
-            session_id = None
+    if session_id and not await store.chat_session_exists(session_id):
+        session_id = None
     if not session_id:
         session_id = str(uuid.uuid4())
-        await db.chat_sessions.insert_one({
-            "session_id": session_id,
-            "kind": "text",
-            "created_at": now,
-            "updated_at": now,
-            "messages": [],
-        })
+        await store.create_chat_session(session_id, "text", now)
 
     # Save user message immediately
     user_msg = messages[-1]
-    await db.chat_sessions.update_one(
-        {"session_id": session_id},
-        {"$push": {"messages": {**user_msg, "at": now}}, "$set": {"updated_at": now}},
-    )
+    await store.append_chat_message(session_id, user_msg["role"], user_msg["content"], now)
 
     async def event_stream():
         yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
@@ -155,13 +130,7 @@ async def chat(req: ChatRequest):
         finally:
             if assistant_tokens:
                 full = "".join(assistant_tokens)
-                await db.chat_sessions.update_one(
-                    {"session_id": session_id},
-                    {
-                        "$push": {"messages": {"role": "assistant", "content": full, "at": datetime.now(UTC)}},
-                        "$set": {"updated_at": datetime.now(UTC)},
-                    },
-                )
+                await store.append_chat_message(session_id, "assistant", full, datetime.now(UTC))
             yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(
@@ -173,27 +142,19 @@ async def chat(req: ChatRequest):
 
 @app.get("/chat/sessions")
 async def list_chat_sessions(limit: int = 20):
-    db = get_db()
-    docs = await db.chat_sessions.find(
-        {},
-        {"session_id": 1, "kind": 1, "created_at": 1, "updated_at": 1, "messages": {"$slice": 1}},
-    ).sort("updated_at", -1).limit(limit).to_list(limit)
+    docs = await get_store().list_chat_sessions(limit)
     for d in docs:
-        d.pop("_id", None)
         # Surface first user message as preview
-        first = next((m for m in d.get("messages", []) if m.get("role") == "user"), None)
-        d["preview"] = first["content"][:80] if first else ""
-        d.pop("messages", None)
+        first = d.pop("first_message")
+        d["preview"] = first["content"][:80] if first and first["role"] == "user" else ""
     return docs
 
 
 @app.get("/chat/sessions/{session_id}")
 async def get_chat_session(session_id: str):
-    db = get_db()
-    doc = await db.chat_sessions.find_one({"session_id": session_id})
+    doc = await get_store().get_chat_session(session_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Session not found")
-    doc.pop("_id", None)
     return doc
 
 
@@ -220,16 +181,15 @@ _MODEL_KEY_ENV = {
 async def health():
     import asyncio
     import os
+    import sqlite3
 
     from wisen.llm import get_model
 
-    status = {"mongodb": False}
+    status = {"storage": False}
     try:
-        db = get_db()
-        await asyncio.wait_for(db.command("ping"), timeout=2.0)
-        status["mongodb"] = True
-    except (TimeoutError, OSError):
-        pass  # MongoDB ping failed, status already False
+        status["storage"] = await asyncio.wait_for(get_store().ping(), timeout=2.0)
+    except (TimeoutError, OSError, sqlite3.Error):
+        pass  # store unreachable, status already False
     model = get_model()
     provider = model.split(":", 1)[0]
     status["model"] = model

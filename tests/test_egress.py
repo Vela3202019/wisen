@@ -2,7 +2,7 @@
 Canary egress test: a reflection document carrying marker strings in fields that
 are not on the CloudReflection allow-list is exported, and no marker may appear
 in the JSON that leaves the machine. Allow-listed fields (evidence quotes too)
-must round-trip. No MongoDB needed.
+must round-trip. No store needed.
 Run: python3 -m tests.test_egress
 """
 import asyncio
@@ -68,32 +68,17 @@ def _poisoned_doc() -> dict:
     return doc
 
 
-class _FakeCursor:
+class _FakeStore:
     def __init__(self, docs):
-        self._docs = iter(docs)
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        try:
-            return next(self._docs)
-        except StopIteration:
-            raise StopAsyncIteration
-
-
-class _FakeDB:
-    def __init__(self, docs):
-        self.reflections = self
         self._docs = docs
 
-    def find(self, _query):
-        return _FakeCursor(self._docs)
+    async def list_reflections(self):
+        return self._docs
 
 
 def _export(docs) -> str:
     with tempfile.TemporaryDirectory() as tmp:
-        count = asyncio.run(export_reflections(_FakeDB(docs), Path(tmp)))
+        count = asyncio.run(export_reflections(_FakeStore(docs), Path(tmp)))
         assert count == len(docs)
         return "\n".join(p.read_text() for p in sorted(Path(tmp).glob("*.json")))
 

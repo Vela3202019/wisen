@@ -5,7 +5,6 @@ FastAPI backend that ingests coding-agent session history (Claude Code, Codex, G
 ## Run
 
 ```bash
-brew services start mongodb-community            # local MongoDB (wisen db), auto-starts at login
 pip install -e ".[server,dev]"                   # editable install; `wisen` CLI entry point
 wisen serve --reload                             # API on :8000 (or: uvicorn wisen.main:app --reload)
 ```

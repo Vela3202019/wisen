@@ -1,6 +1,6 @@
 """
-Reads all local agent data into memory. Nothing is written to MongoDB here.
-MongoDB only receives the final Reflection produced by the synthesis agent.
+Reads all local agent data into memory. Nothing is written to the store here.
+The store only receives the final Reflection produced by the synthesis agent.
 
 Returns:
   IngestResult.sessions — NormalizedSession objects from all connectors

@@ -27,12 +27,12 @@ class NormalizedSession(BaseModel):
     date: str                 # YYYY-MM-DD
     started_at: datetime
     ended_at: datetime
-    turns: list[Turn]         # held in memory for synthesis; NOT persisted to MongoDB
+    turns: list[Turn]         # held in memory for synthesis; NOT persisted to the store
     metadata: SessionMetadata
     raw_source_path: str      # local path — synthesis agent re-reads this for content
 
     def meta_doc(self) -> dict:
-        """MongoDB-safe dict: metadata signals only, no turns content."""
+        """Storable dict: metadata signals only, no turns content."""
         return {
             "session_id": self.session_id,
             "source": self.source,
