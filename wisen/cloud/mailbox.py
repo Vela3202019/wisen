@@ -327,7 +327,8 @@ class Mailbox:
     def store_packet(self, user_id: str, device_id: str, packet: BaseModel) -> bool:
         """Keep a checked packet (wisen.packets.receive) from a user's device.
         False if the mailbox already holds this exact packet. A new or changed
-        day's result, or a new proposal, queues a push in the same transaction."""
+        day's result, or a new proposal, queues a push in the same transaction;
+        the caller wakes the user's engine on the event loop."""
         if packet.user_id != user_id or packet.device_id != device_id:
             raise Conflict("packet user_id and device_id must match the device token")
         key = {"result": lambda: packet.date, "usage": lambda: "latest",
@@ -356,8 +357,6 @@ class Mailbox:
                 self._record_proposal(conn, user_id, device_id, packet)
                 self._queue_push(conn, user_id, f"proposal:{packet.proposal_id}", now,
                                  title="Proposal waiting", body=packet.target, url=f"/#proposal-{packet.proposal_id}")
-        if packet.packet_type in ("result", "proposal"):
-            self.engine(user_id).wake()
         return True
 
     def _record_proposal(self, conn: sqlite3.Connection, user_id: str, device_id: str, packet: BaseModel) -> None:

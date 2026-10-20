@@ -513,6 +513,25 @@ async def check_rejections():
     print("✓ cloud: the server rejects off-schema, unredacted, over-cap and mis-addressed packets")
 
 
+async def check_body_limit():
+    server = _server("body-limit")
+
+    async def chunks():
+        for _ in range(3):
+            yield b" " * 500_000
+
+    async with server.http() as http:
+        for path in ("/login", "/api/device/pair"):
+            r = await http.post(path, content=chunks(), headers={"Content-Type": "application/json"})
+            assert "content-length" not in r.request.headers, r.request.headers
+            assert r.status_code == 413, (path, r.status_code, r.text)
+        r = await http.post("/login", content=b" " * 1_500_000, headers={"Content-Type": "application/json"})
+        assert r.status_code == 413, r.text
+        r = await http.post("/login", json={"user": USER, "password": PASSWORD})
+        assert r.status_code == 200, r.text
+    print("✓ cloud: an oversized body gets 413, chunked or not")
+
+
 # ── no model key ──────────────────────────────────────────────────────────────
 
 MODEL_ENV = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY",
@@ -651,6 +670,7 @@ async def main():
     await check_schedule()
     await check_backup_restore()
     await check_rejections()
+    await check_body_limit()
     await check_no_model_key()
     await check_no_marker_reaches_server()
     print("\nall cloud tests passed")

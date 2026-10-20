@@ -135,13 +135,13 @@ def create_app(
 
     @app.middleware("http")
     async def limits(request: Request, call_next):
-        if int(request.headers.get("content-length") or 0) > MAX_BODY:
-            return JSONResponse({"detail": "request too large"}, status_code=413)
         if request.method == "POST" and not request.headers.get("content-type", "").startswith("application/json"):
             # JSON only: a cross-site form post cannot send it without a
             # CORS preflight, which this app never grants.
             return JSONResponse({"detail": "send application/json"}, status_code=415)
         return await call_next(request)
+
+    app.add_middleware(_BodyLimit)
 
     async def web_user(request: Request) -> str:
         token = request.cookies.get(COOKIE)
@@ -300,6 +300,8 @@ def create_app(
             stored = await asyncio.to_thread(mailbox.store_packet, user_id, device_id, packet)
         except Conflict as e:
             raise HTTPException(409, str(e)) from None
+        if stored and packet.packet_type in ("result", "proposal"):
+            mailbox.engine(user_id).wake()
         return {"stored": stored, "packet_id": packet.packet_id}
 
     @app.post("/api/device/poll")
@@ -331,6 +333,41 @@ def create_app(
         return {"ok": True}
 
     return app
+
+
+class _BodyLimit:
+    """MAX_BODY for every request: refused up front by Content-Length, or
+    counted as a chunked body streams in, before any route parses it."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        too_large = JSONResponse({"detail": "request too large"}, status_code=413)
+        if int(dict(scope["headers"]).get(b"content-length") or 0) > MAX_BODY:
+            return await too_large(scope, receive, send)
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                return
+            body += message.get("body", b"")
+            if len(body) > MAX_BODY:
+                return await too_large(scope, receive, send)
+            if not message.get("more_body"):
+                break
+        replayed = False
+
+        async def replay():
+            nonlocal replayed
+            if replayed:
+                return await receive()
+            replayed = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay, send)
 
 
 async def _json(request: Request) -> object:
