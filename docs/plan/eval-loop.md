@@ -114,6 +114,10 @@ runner produces a diffable report for two identical configs (pass rates equal).
 
 ## Phase 3 — Gated loop + dashboard
 
+> **Superseded:** a passing eval no longer auto-accepts a change. Replay results become
+> evidence on a Gardener proposal that a human approves; see
+> [cloud-architecture.md §5](cloud-architecture.md#5-the-gardener).
+
 1. Put `~/.claude/CLAUDE.md` under git (separate repo or symlink into dotfiles).
 2. Nightly (extends existing launchd synthesis job): recommendations targeting
    `claude-md` → applied on a branch → Phase-2 suite runs → **accept** iff eval-split
