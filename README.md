@@ -94,8 +94,9 @@ flowchart LR
 
 **Local-first by construction:** transcripts flow *through* wisen but are never
 stored *by* it. The SQLite file receives the synthesized reflections (plus your chat
-and voice conversations with wisen); raw content stays wherever your agents
-put it. Search happens by re-reading the original files (grep-first) at
+and voice conversations with wisen, and the job queue: while a synthesis job
+runs, it checkpoints the Observer's notes on the day there, and drops them when
+the job finishes); raw content stays wherever your agents put it. Search happens by re-reading the original files (grep-first) at
 question time. Local storage is not the same as fully
 offline: the model calls send excerpts out. See below.
 
@@ -202,6 +203,7 @@ Script-style tests, run from the repo root:
 python3 -m tests.test_fixtures   # committed sample data — runs anywhere, what CI runs
 python3 -m tests.test_claude_cli # subscription-synthesis adapter (no live call)
 python3 -m tests.test_store      # SQLite store on a temp file
+python3 -m tests.test_jobs       # job engine + proposal state machine, incl. a kill-and-restart
 python3 -m tests.test_ingest     # reads your real local session data
 python3 -m tests.test_sources    # per-connector, real local data
 python3 -m tests.test_synthesis  # end-to-end: calls the LLM, writes SQLite

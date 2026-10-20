@@ -1,6 +1,8 @@
 """
 Local storage: what wisen persists (reflections, chat and voice conversations),
-behind a small `Store` interface with one SQLite implementation.
+behind a small `Store` interface with one SQLite implementation. The same file
+holds the job engine's tables (wisen/jobs.py) and the proposal state machine's
+(wisen/proposals.py).
 
 One SQLite file (WAL mode) at `[storage].sqlite_path` / WISEN_DB_PATH, default
 ~/.wisen/wisen.db. Every row carries a user id (`[storage].user_id` /
@@ -12,7 +14,8 @@ Timestamps are stored and returned as ISO-8601 UTC strings.
 import asyncio
 import json
 import sqlite3
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -64,6 +67,80 @@ CREATE TABLE IF NOT EXISTS voice_messages (
     at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS voice_messages_room ON voice_messages (user_id, room_name, at, id);
+
+-- Job engine (wisen/jobs.py). The job row doubles as the receipt for its
+-- request_id: a resent enqueue finds it and returns it.
+CREATE TABLE IF NOT EXISTS jobs (
+    id               TEXT PRIMARY KEY,
+    user_id          TEXT NOT NULL,
+    kind             TEXT NOT NULL,
+    args             TEXT NOT NULL,
+    state            TEXT NOT NULL,
+    attempts         INTEGER NOT NULL,
+    max_attempts     INTEGER NOT NULL,
+    run_after        TEXT,
+    wait_key         TEXT,
+    lease_owner      TEXT,
+    lease_expires_at TEXT,
+    request_id       TEXT,
+    result           TEXT,
+    error            TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    UNIQUE (user_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS jobs_due ON jobs (user_id, state, run_after);
+CREATE TABLE IF NOT EXISTS job_steps (
+    job_id      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    state       TEXT NOT NULL,
+    replay_safe INTEGER NOT NULL,
+    output      TEXT,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    PRIMARY KEY (job_id, name)
+);
+CREATE TABLE IF NOT EXISTS job_signals (
+    user_id TEXT NOT NULL,
+    key     TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    at      TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
+
+-- Proposal state machine (wisen/proposals.py)
+CREATE TABLE IF NOT EXISTS proposals (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    target     TEXT NOT NULL,
+    state      TEXT NOT NULL,
+    payload    TEXT NOT NULL,
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS proposal_decisions (
+    proposal_id TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    decision    TEXT NOT NULL,
+    actor       TEXT NOT NULL,
+    note        TEXT,
+    request_id  TEXT NOT NULL,
+    at          TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS proposal_events (
+    id          INTEGER PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    proposal_id TEXT NOT NULL,
+    request_id  TEXT NOT NULL,
+    from_state  TEXT,
+    to_state    TEXT NOT NULL,
+    actor       TEXT NOT NULL,
+    note        TEXT,
+    at          TEXT NOT NULL,
+    UNIQUE (user_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS proposal_events_proposal ON proposal_events (user_id, proposal_id, id);
 """
 
 
@@ -114,6 +191,20 @@ class SqliteStore:
         conn = sqlite3.connect(self.path, timeout=5)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """One write transaction, taking the write lock up front (BEGIN
+        IMMEDIATE) so a read-then-write inside it cannot interleave with
+        another process's write. Commits on success, rolls back on any error."""
+        with closing(self._connect()) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield conn
+            except BaseException:
+                conn.rollback()
+                raise
+            conn.commit()
 
     async def _run(self, fn, *args):
         return await asyncio.to_thread(fn, *args)
