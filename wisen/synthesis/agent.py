@@ -147,40 +147,54 @@ async def _generate(
     return (await agent.run(user_prompt)).output
 
 
-# ── Main entry point ──────────────────────────────────────────────────────────
+# ── Stages (each one checkpointed separately by the synthesis job) ────────────
 
-async def synthesize(result: IngestResult, date: str | None = None) -> Reflection:
-    target_date = date or datetime.now(UTC).date().isoformat()
-
-    store = get_store()
-
-    # Past 7 days for trend; the newest is yesterday's full Reflection for diff analysis
-    past_docs = await store.list_reflections(limit=7, before=target_date)
-    yesterday_doc = past_docs[0] if past_docs else None
-
-    model = get_model()
-
-    # ── Stage 1: Observer ─────────────────────────────────────────────────────
+async def observe(result: IngestResult, date: str, yesterday_doc: dict | None, model: str) -> DayObservation:
+    """Stage 1: Observer."""
     print("  [Stage 1] Observer reading sessions + configs + yesterday's reflection...")
-    observer_context = _build_observer_context(result, target_date, yesterday_doc)
+    observer_context = _build_observer_context(result, date, yesterday_doc)
     observation = await _generate(
         OBSERVER_PROMPT,
-        f"Observe and analyze {target_date}.\n\n{observer_context}",
+        f"Observe and analyze {date}.\n\n{observer_context}",
         DayObservation,
         model,
     )
     print(f"  [Stage 1] Done. Topics: {observation.topics_raw}")
+    return observation
 
-    # ── Stage 2: Synthesizer ──────────────────────────────────────────────────
+
+async def reflect(
+    observation: DayObservation, yesterday_doc: dict | None, past_docs: list[dict], date: str, model: str
+) -> Reflection:
+    """Stage 2: Synthesizer."""
     print("  [Stage 2] Synthesizer producing Reflection...")
-    synth_context = _build_synthesizer_context(observation, yesterday_doc, past_docs, target_date)
+    synth_context = _build_synthesizer_context(observation, yesterday_doc, past_docs, date)
     reflection = await _generate(SYNTHESIZER_PROMPT, synth_context, Reflection, model)
-    reflection.date = target_date
+    reflection.date = date
     print(f"  [Stage 2] Done. Alignment: {reflection.alignment_score:.2f} ({reflection.alignment_label})")
+    return reflection
 
-    # ── Save to the local store ───────────────────────────────────────────────
+
+async def save_reflection(reflection: Reflection) -> None:
+    """Upsert by date, so saving the same day twice leaves one reflection."""
     doc = reflection.model_dump()
     doc["synthesized_at"] = datetime.now(UTC)
-    await store.upsert_reflection(doc)
+    await get_store().upsert_reflection(doc)
 
+
+async def load_history(date: str) -> tuple[dict | None, list[dict]]:
+    """Yesterday's full Reflection (for diff analysis) and the past 7 days (for trend)."""
+    past_docs = await get_store().list_reflections(limit=7, before=date)
+    return (past_docs[0] if past_docs else None), past_docs
+
+
+# ── Main entry point ──────────────────────────────────────────────────────────
+
+async def synthesize(result: IngestResult, date: str | None = None) -> Reflection:
+    target_date = date or datetime.now(UTC).date().isoformat()
+    yesterday_doc, past_docs = await load_history(target_date)
+    model = get_model()
+    observation = await observe(result, target_date, yesterday_doc, model)
+    reflection = await reflect(observation, yesterday_doc, past_docs, target_date, model)
+    await save_reflection(reflection)
     return reflection

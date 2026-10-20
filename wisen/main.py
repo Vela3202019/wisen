@@ -1,19 +1,33 @@
+import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from wisen.chat.agent import stream_chat
-from wisen.ingestion.pipeline import ingest_all
+from wisen.jobs import Job, get_engine
 from wisen.store import get_store
-from wisen.synthesis.agent import synthesize
+from wisen.synthesis.job import enqueue_day
 from wisen.synthesis.schema import Reflection
 
-app = FastAPI(title="Wisen API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # The job worker runs inside the API process; jobs live in SQLite, so a
+    # restart picks up where the last process stopped.
+    worker = asyncio.create_task(get_engine().run_forever())
+    yield
+    worker.cancel()
+    with suppress(asyncio.CancelledError):
+        await worker
+
+
+app = FastAPI(title="Wisen API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,12 +36,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory job tracker
-_jobs: dict[str, dict] = {}
-
 
 class SynthesizeRequest(BaseModel):
     date: str | None = None  # YYYY-MM-DD, defaults to today
+    request_id: str | None = None  # resend with the same id to get the same job back; without one, the day re-synthesizes
 
 
 class JobStatus(BaseModel):
@@ -37,35 +49,37 @@ class JobStatus(BaseModel):
     error: str | None = None
 
 
-async def _run_synthesis(job_id: str, date: str):
-    try:
-        result = await ingest_all(date)
-        reflection = await synthesize(result, date)
-        _jobs[job_id] = {"status": "done", "date": date, "reflection": reflection.model_dump()}
-    except (ValueError, RuntimeError) as e:
-        _jobs[job_id] = {"status": "error", "date": date, "error": str(e)}
+_STATUS = {"succeeded": "done", "failed": "error"}  # queued, leased, waiting -> running
+
+
+def _job_status(job: Job) -> JobStatus:
+    return JobStatus(
+        job_id=job.id,
+        status=_STATUS.get(job.state, "running"),
+        date=job.args.get("date"),
+        error=job.error if job.state == "failed" else None,
+    )
 
 
 @app.post("/synthesize", response_model=JobStatus)
-async def trigger_synthesis(req: SynthesizeRequest, background_tasks: BackgroundTasks):
+async def trigger_synthesis(req: SynthesizeRequest):
     date = req.date or datetime.now(UTC).date().isoformat()
-    job_id = f"{date}-{datetime.now(UTC).strftime('%H%M%S')}"
-    _jobs[job_id] = {"status": "running", "date": date}
-    background_tasks.add_task(_run_synthesis, job_id, date)
-    return JobStatus(job_id=job_id, status="running", date=date)
+    try:
+        if req.request_id:
+            job = await get_engine().enqueue("synthesize", {"date": date}, request_id=req.request_id)
+        else:
+            job = await enqueue_day(date)
+    except ValueError as e:  # request id reused for a different date
+        raise HTTPException(status_code=409, detail=str(e))
+    return _job_status(job)
 
 
 @app.get("/synthesize/{job_id}", response_model=JobStatus)
 async def get_synthesis_status(job_id: str):
-    job = _jobs.get(job_id)
-    if not job:
+    job = await get_engine().get(job_id)
+    if not job or job.kind != "synthesize":
         raise HTTPException(status_code=404, detail="Job not found")
-    return JobStatus(
-        job_id=job_id,
-        status=job["status"],
-        date=job.get("date"),
-        error=job.get("error"),
-    )
+    return _job_status(job)
 
 
 @app.get("/reflections", response_model=list[dict])
