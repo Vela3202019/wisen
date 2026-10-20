@@ -450,16 +450,23 @@ class JobEngine:
                 _prune_outputs(conn, job.id)
 
     def _retry_or_fail(self, job: Job, error: str) -> None:
-        if job.attempts >= job.max_attempts:
-            self._finish(job, "failed", None, error)
-            return
         now = self.clock()
-        delay = min(RETRY_BASE * 2 ** (job.attempts - 1), RETRY_CAP)
         with self.store.transaction() as conn:
+            row = conn.execute(
+                "SELECT attempts, max_attempts FROM jobs WHERE id = ? AND state = 'leased' AND lease_owner = ?",
+                (job.id, self.worker_id),
+            ).fetchone()
+            if row is None:
+                return
+            if row["attempts"] >= row["max_attempts"]:
+                state, run_after = "failed", None
+            else:
+                state = "queued"
+                run_after = ts(now + min(RETRY_BASE * 2 ** max(row["attempts"] - 1, 0), RETRY_CAP))
             conn.execute(
-                "UPDATE jobs SET state = 'queued', run_after = ?, error = ?, lease_owner = NULL, "
-                "lease_expires_at = NULL, updated_at = ? WHERE id = ? AND state = 'leased' AND lease_owner = ?",
-                (ts(now + delay), error, ts(now), job.id, self.worker_id),
+                "UPDATE jobs SET state = ?, run_after = COALESCE(?, run_after), error = ?, "
+                "lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?",
+                (state, run_after, error, ts(now), job.id),
             )
 
     # ── steps (called by JobContext) ──────────────────────────────────────────

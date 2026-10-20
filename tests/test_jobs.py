@@ -21,7 +21,7 @@ from pathlib import Path
 from wisen import jobs as jobs_mod
 from wisen import store as store_mod
 from wisen.ingestion.pipeline import IngestResult
-from wisen.jobs import LEASE, JobEngine, LeaseLost
+from wisen.jobs import LEASE, RETRY_BASE, JobEngine, LeaseLost
 from wisen.proposals import IllegalTransition, Proposals, expire_proposal_job
 from wisen.store import SqliteStore
 from wisen.synthesis import agent
@@ -234,6 +234,29 @@ async def check_repeated_interrupts(tmp: str):
     done = await engine.run_until_done(job.id)
     assert done.state == "succeeded" and done.result == "ok" and done.attempts == 1, done
     print("✓ jobs: a job interrupted more times than its attempts still resumes on a rerun")
+
+
+async def check_rerun_during_last_attempt(tmp: str):
+    store, clock = _store(tmp, "rerun-running"), Clock()
+    runs = []
+
+    async def flaky(ctx, args):
+        runs.append(ctx.job.attempts)
+        if len(runs) == 1:
+            # Someone reruns the day while its last attempt is still running.
+            await ctx.engine.enqueue("flaky", {}, request_id="day", rerun=True)
+            raise RuntimeError("boom")
+        return "ok"
+
+    engine = JobEngine(store, {"flaky": flaky}, clock=clock)
+    job = await engine.enqueue("flaky", {}, request_id="day", max_attempts=1)
+    assert await engine.run_once()
+    got = await engine.get(job.id)
+    assert got.state == "queued" and got.error == "RuntimeError: boom", got
+    clock.advance(RETRY_BASE)
+    done = await engine.run_until_done(job.id)
+    assert done.state == "succeeded" and runs == [1, 1], (done, runs)
+    print("✓ jobs: a rerun during the last attempt gets that job retried, not failed")
 
 
 async def check_lease_recovery(tmp: str):
@@ -480,6 +503,7 @@ async def main():
         await check_request_id(tmp)
         await check_failed_rerun(tmp)
         await check_repeated_interrupts(tmp)
+        await check_rerun_during_last_attempt(tmp)
         await check_lease_recovery(tmp)
         await check_replay_policy(tmp)
         await check_retry_and_timers(tmp)
