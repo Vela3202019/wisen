@@ -19,13 +19,13 @@ from wisen import __version__, config
 
 
 async def _synthesize(date: str) -> None:
-    from wisen.ingestion.pipeline import ingest_all
-    from wisen.synthesis.agent import synthesize
+    from wisen.synthesis.job import synthesize_day
 
     print(f"[{datetime.now(UTC).isoformat()}] synthesizing {date}")
-    result = await ingest_all(date)
-    reflection = await synthesize(result, date)
-    print(f"done — reflection saved for {reflection.date}")
+    job = await synthesize_day(date)
+    if job.state != "succeeded":
+        raise SystemExit(f"synthesis failed: {job.error}")
+    print(f"done — reflection saved for {date}")
 
 
 async def _export(out_dir: Path) -> None:
