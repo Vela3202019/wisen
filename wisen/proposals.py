@@ -19,6 +19,8 @@ decision is also a first-write-wins memo (lesson 6): the first approve or
 reject is recorded once, and a later one (a Telegram retry, a tap on a second
 device) gets the first answer back. See docs/plan/cloud-architecture.md §6.1.
 """
+from __future__ import annotations
+
 import asyncio
 import json
 import sqlite3
