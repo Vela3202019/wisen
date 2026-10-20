@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keeps `wisen worker` running on the laptop. Replace /Users/YOU and the path
+  to `wisen` (run `which wisen`), copy to ~/Library/LaunchAgents/, then:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.wisen.worker.plist
+  The worker exits 0 when the server revokes this device; SuccessfulExit=false
+  then keeps launchd from restarting it until you pair again.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.wisen.worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/.local/bin/wisen</string>
+    <string>worker</string>
+  </array>
+  <!-- The repo checkout with your .env, if you keep model keys there. -->
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/wisen</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/wisen-worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/wisen-worker.log</string>
+</dict>
+</plist>

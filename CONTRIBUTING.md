@@ -4,7 +4,7 @@
 
 ```bash
 git clone https://github.com/Vela3202019/wisen && cd wisen
-pip install -e ".[server,dev]"       # editable install + FastAPI + pytest/ruff
+pip install -e ".[server,cloud,dev]" # editable install + FastAPI + Web Push + pytest/ruff
 ```
 
 You don't need API keys or any real agent history to work on ingestion —
@@ -15,9 +15,11 @@ python3 -m tests.test_fixtures       # committed sample sessions in tests/fixtur
 python3 -m tests.test_claude_cli     # claude -p adapter parsing (no live call)
 python3 -m tests.test_egress         # cloud export leaks nothing off the allow-list
 python3 -m tests.test_store          # SQLite store on a temp file
+python3 -m tests.test_jobs           # job engine + proposal state machine
+python3 -m tests.test_cloud          # server stage A, in-process, fake push + model
 ```
 
-CI runs exactly `ruff check .` plus those four tests, so if they pass locally
+CI runs exactly `ruff check .` plus those tests, so if they pass locally
 you're green.
 
 The other tests read *your* real local data and are useful once you actually

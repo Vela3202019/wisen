@@ -13,10 +13,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[server,dev]"
+      - run: pip install -e ".[server,cloud,dev]"
       - run: ruff check .
       - run: python -m tests.test_claude_cli
       - run: python -m tests.test_fixtures
       - run: python -m tests.test_egress
       - run: python -m tests.test_store
       - run: python -m tests.test_jobs
+      - run: python -m tests.test_cloud

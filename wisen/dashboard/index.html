@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <title>hi boss</title>
 <style>
   :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#e6edf3; --dim:#8b949e;
@@ -98,11 +102,46 @@
   .loop .persist { color:var(--friction); }
   .loop .resolved { color:var(--aligned); }
   .loop .days { color:var(--dim); font-size:12px; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .top .actions { display:flex; gap:6px; }
+  .top .actions button, .panel button, .proposal button {
+    background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:8px;
+    padding:6px 10px; font-size:13px; cursor:pointer; }
+  .panel, .proposal { background:var(--card); border:1px solid var(--border); border-radius:12px;
+                      padding:12px 16px; margin-bottom:16px; }
+  .panel h2, #approvals h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em;
+                             color:var(--dim); margin:0 0 8px; }
+  .panel .row { display:flex; justify-content:space-between; align-items:center; gap:8px;
+                font-size:14px; margin:6px 0; }
+  .panel .meta, .proposal .meta { color:var(--dim); font-size:12px; }
+  .panel code { font-size:20px; letter-spacing:.1em; color:var(--aligned); }
+  .proposal.focus { border-color:var(--mild); }
+  .proposal .target { font-weight:600; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:14px; }
+  .proposal pre { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px;
+                  overflow-x:auto; font-size:12px; line-height:1.4; max-height:360px; }
+  .proposal pre .add { color:var(--aligned); }
+  .proposal pre .del { color:var(--misaligned); }
+  .proposal textarea { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border);
+                       border-radius:8px; padding:8px; font:inherit; font-size:14px; min-height:40px; }
+  .proposal .buttons { display:flex; gap:8px; margin-top:8px; }
+  .proposal .approve { background:#238636 !important; border-color:#238636 !important; color:#fff !important; }
+  .proposal .reject { color:var(--misaligned) !important; }
+  .proposal .state { font-size:12px; padding:2px 10px; border-radius:10px; background:var(--border); }
+  .card.focus { border-color:var(--mild); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>🫡 hi boss</h1>
+  <div class="top">
+    <h1>🫡 hi boss</h1>
+    <div class="actions">
+      <button id="push-btn" onclick="enablePush()" style="display:none">🔔 Notify me</button>
+      <button onclick="toggleDevices()">Devices</button>
+      <button onclick="logout()">Log out</button>
+    </div>
+  </div>
+  <div class="panel" id="devices" style="display:none"></div>
+  <div id="approvals"></div>
   <div class="usage" id="usage" style="display:none"></div>
   <div class="chart" id="chart" style="display:none"></div>
   <div class="hero" id="hero" style="display:none"></div>
@@ -282,22 +321,171 @@ function renderChart(logs) {
   });
 }
 
+// Every API call goes through here: JSON both ways, and a lapsed session
+// goes back to the login page (keeping the #proposal-… / #day-… target).
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (res.status === 401) { location.replace("/login" + location.hash); throw new Error("logged out"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `HTTP ${res.status}`);
+  return data;
+}
+
 async function load() {
-  const [logs, queue, usage] = await Promise.all([
-    fetch("/api/logs").then(r => r.json()),
-    fetch("/api/queue").then(r => r.json()),
-    fetch("/api/usage").then(r => r.json()).catch(() => null),
+  const [logs, queue, usage, proposals] = await Promise.all([
+    api("/api/logs"),
+    api("/api/queue"),
+    api("/api/usage").catch(() => null),
+    api("/api/proposals").catch(() => []),
   ]);
+  renderApprovals(proposals);
   renderUsage(usage);
   renderHero(logs);
   renderLoop(logs);
   renderChart(logs);
   document.getElementById("queued").textContent =
-    queue.length ? "Queued for reflection (runs when laptop is awake): " + queue.join(", ") : "";
+    queue.length ? "Queued for reflection (runs when a paired laptop is awake): " + queue.join(", ") : "";
   const el = document.getElementById("logs");
   if (!logs.length) { el.innerHTML = '<p class="empty">No reflections yet.</p>'; return; }
   el.innerHTML = logs.map(render).join("");
+  focusHash();
 }
+
+// ── approval inbox ──────────────────────────────────────────────────────────
+
+function diffHtml(diff) {
+  return String(diff || "").split("\n").map(line => {
+    const cls = line.startsWith("+") && !line.startsWith("+++") ? "add"
+              : line.startsWith("-") && !line.startsWith("---") ? "del" : "";
+    return cls ? `<span class="${cls}">${esc(line)}</span>` : esc(line);
+  }).join("\n");
+}
+
+function renderApprovals(proposals) {
+  const el = document.getElementById("approvals");
+  const waiting = proposals.filter(p => p.state === "proposed");
+  const recent = proposals.filter(p => p.state !== "proposed").slice(0, 5);
+  if (!waiting.length && !recent.length) { el.innerHTML = ""; return; }
+  const card = (p, open) => {
+    const evidence = (p.payload.evidence || []).map(q => `<li><i>“${esc(q)}”</i></li>`).join("");
+    const expires = p.expires_at ? ` · expires ${new Date(p.expires_at).toLocaleString()}` : "";
+    return `<div class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}">
+      <div class="row" style="display:flex;justify-content:space-between;gap:8px">
+        <span class="target">${esc(p.target)}</span><span class="state">${esc(p.state)}</span>
+      </div>
+      <div class="meta">${new Date(p.created_at).toLocaleString()}${expires}</div>
+      ${open ? `<p>${esc(p.payload.rationale)}</p>
+        ${evidence ? `<ul>${evidence}</ul>` : ""}
+        ${p.payload.eval_summary ? `<p class="meta">${esc(p.payload.eval_summary)}</p>` : ""}
+        <pre>${diffHtml(p.payload.diff)}</pre>
+        <textarea placeholder="Note for the Gardener (optional; it reads rejections)"></textarea>
+        <div class="buttons">
+          <button class="approve" onclick="decide(this, 'approved')">Approve</button>
+          <button class="reject" onclick="decide(this, 'rejected')">Reject</button>
+        </div>` : ""}
+    </div>`;
+  };
+  el.innerHTML = (waiting.length ? `<h2>Waiting for you · ${waiting.length}</h2>` + waiting.map(p => card(p, true)).join("") : "")
+    + (recent.length ? `<h2>Recently decided</h2>` + recent.map(p => card(p, false)).join("") : "");
+}
+
+// Ids and names reach handlers through data-* attributes, never inside inline
+// script, so a value cannot break out of a JS string.
+async function decide(button, decision) {
+  const box = button.closest(".proposal");
+  const id = box.dataset.id;
+  box.querySelectorAll("button").forEach(b => b.disabled = true);
+  // One request id per tap: a resent request returns the first answer.
+  const requestId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
+  try {
+    const note = box.querySelector("textarea").value.trim() || null;
+    const result = await api(`/api/proposals/${encodeURIComponent(id)}/decision`, { decision, note, request_id: requestId });
+    if (result.already_decided) alert(`Already decided: ${result.decision} (${result.actor})`);
+  } catch (e) {
+    alert("Decision failed: " + e.message);
+  }
+  load();
+}
+
+// ── devices ────────────────────────────────────────────────────────────────
+
+async function toggleDevices() {
+  const el = document.getElementById("devices");
+  if (el.style.display === "block") { el.style.display = "none"; return; }
+  el.style.display = "block";
+  renderDevices();
+}
+
+async function renderDevices(pairing) {
+  const el = document.getElementById("devices");
+  const devices = await api("/api/devices");
+  const when = t => t ? new Date(t).toLocaleString() : "never";
+  const rows = devices.map(d => `<div class="row">
+      <span>${esc(d.name)}<br><span class="meta">${d.revoked_at ? "revoked " + when(d.revoked_at) : "last seen " + when(d.last_seen_at)}</span></span>
+      ${d.revoked_at ? "" : `<button data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="revokeDevice(this)">Revoke</button>`}
+    </div>`).join("") || `<p class="meta">No devices paired yet.</p>`;
+  const pair = pairing
+    ? `<p>On the laptop, run<br><code style="font-size:13px;letter-spacing:0">wisen cloud pair ${esc(location.origin)}</code><br>
+       and enter <code>${esc(pairing.code)}</code><br><span class="meta">one use, expires ${new Date(pairing.expires_at).toLocaleTimeString()}</span></p>`
+    : `<button onclick="addDevice()">Add device</button>`;
+  el.innerHTML = `<h2>Devices</h2>${rows}<div style="margin-top:10px">${pair}</div>`;
+}
+
+async function addDevice() {
+  renderDevices(await api("/api/pairing-codes", {}));
+}
+
+async function revokeDevice(button) {
+  if (!confirm(`Revoke ${button.dataset.name}? It will need to pair again.`)) return;
+  await api(`/api/devices/${encodeURIComponent(button.dataset.id)}/revoke`, {});
+  renderDevices();
+}
+
+async function logout() {
+  await api("/logout", {});
+  location.replace("/login");
+}
+
+// ── installable app + Web Push ──────────────────────────────────────────────
+
+function keyBytes(base64url) {
+  const padded = (base64url + "===".slice((base64url.length + 3) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(padded), c => c.charCodeAt(0));
+}
+
+let pushKey = null;
+
+async function setupPush() {
+  if (!("serviceWorker" in navigator)) return;
+  await navigator.serviceWorker.register("/sw.js");
+  pushKey = (await api("/api/push")).public_key;
+  // iPhone: Web Push exists only once the app is on the Home Screen.
+  if (!pushKey || !("PushManager" in window) || Notification.permission === "denied") return;
+  const reg = await navigator.serviceWorker.ready;
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) await api("/api/push/subscriptions", { subscription: existing.toJSON() });
+  else document.getElementById("push-btn").style.display = "";
+}
+
+async function enablePush() {
+  if (await Notification.requestPermission() !== "granted") return;
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(pushKey) });
+  await api("/api/push/subscriptions", { subscription: sub.toJSON() });
+  document.getElementById("push-btn").style.display = "none";
+}
+
+// A notification opens #proposal-<id> or #day-<date>: bring it into view.
+function focusHash() {
+  const target = location.hash && document.getElementById(location.hash.slice(1));
+  if (!target) return;
+  target.classList.add("focus");
+  if (target.classList.contains("card")) target.classList.add("open");
+  target.scrollIntoView({ block: "start" });
+}
+window.addEventListener("hashchange", focusHash);
 
 const MOOD_EMOJI = { "deep-focus":"🎯", "exploratory":"🧭", "frustrated":"😤", "iterating":"🔁",
                      "uncertain":"🤔", "confident":"😎", "stuck":"🧱", "flowing":"🌊" };
@@ -320,7 +508,7 @@ function render(l) {
       d.status === "persisting"
         ? `<li style="color:var(--friction)">↻ ${esc(d.description)} <span style="color:var(--dim);font-size:12px">· ${d.days_persisting || "?"}d</span></li>`
         : `<li style="color:var(--aligned)">✦ resolved — ${esc(d.description)}</li>`).join("");
-  return `<div class="card" onclick="if(event.target.closest('.head')){this.classList.remove('open');this.classList.toggle('min')}else if(!event.target.closest('.detail')){this.classList.remove('min');this.classList.toggle('open')}">
+  return `<div class="card" id="day-${esc(l.date)}" onclick="if(event.target.closest('.head')){this.classList.remove('open');this.classList.toggle('min')}else if(!event.target.closest('.detail')){this.classList.remove('min');this.classList.toggle('open')}">
     <div class="head">
       <span class="date">${esc(l.date)}</span>
       <span class="badge" style="background:${c}">${esc(l.alignment_label)} · ${pct}%</span>
@@ -344,12 +532,13 @@ function render(l) {
 async function trigger() {
   const date = document.getElementById("date").value;
   if (!date) return alert("Pick a date first");
-  const res = await fetch("/api/trigger", { method:"POST", body: JSON.stringify({date}) });
-  if (res.ok) load(); else alert("Trigger failed: " + (await res.text()));
+  try { await api("/api/trigger", { date }); } catch (e) { return alert("Trigger failed: " + e.message); }
+  load();
 }
 
 document.getElementById("date").value = new Date().toLocaleDateString("sv");
 load();
+setupPush().catch(e => console.warn("push unavailable:", e));
 </script>
 </body>
 </html>

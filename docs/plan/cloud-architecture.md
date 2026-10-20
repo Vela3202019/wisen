@@ -494,12 +494,14 @@ Both use WAL mode. Schema changes are numbered SQL migrations, tracked in a
 | `proposals`, `proposal_events` | — | The proposal state machine and its audit log. |
 | `egress_ledger` | — | Every packet sent. |
 
-The server has the same job and proposal tables, plus `users`, `devices`,
-`device_tokens`, `push_subscriptions`, `telegram_links`, and `packets`
-(received packets, by type).
+The server has the same job and proposal tables, plus `users`,
+`web_sessions`, `pairing_codes`, `devices` (one token per device, stored as a
+hash on the device row; re-pairing makes a new device), `push_subscriptions`,
+`telegram_links`, and `packets` (received packets, by type).
 
-**Every row carries `user_id`.** On a laptop that has never paired, it is a
-fixed local id. After pairing, the server's id is used.
+**Every row carries `user_id`.** On a laptop it is a fixed local id. After
+pairing, the packets the laptop sends carry the server's user id; local rows
+keep the local id.
 
 Moving existing data: a one-time `wisen import-mongo` command reads the old
 MongoDB and writes SQLite. After step 1, MongoDB and `motor` are no longer
@@ -537,8 +539,10 @@ systemd: wisen-backup.timer     daily, Persistent=true → consistent SQLite sna
 - The unit runs as a dedicated user with `MemoryMax=` set, so it cannot starve
   the other apps on the box, plus the usual systemd sandboxing
   (`NoNewPrivileges`, `ProtectSystem=strict`, `ReadWritePaths=/var/lib/wisen`).
-- **Secrets.** Stage A: device-token hashes, the session secret, VAPID keys and
-  the Telegram bot token, in a root-owned `EnvironmentFile`. **No model key.**
+- **Secrets.** Stage A: VAPID keys and the Telegram bot token, in a
+  root-owned `EnvironmentFile`. **No model key.** Device tokens and login
+  sessions are random values stored only as hashes in the database, so there
+  is no session secret.
   Stage B adds the model provider key to the same file. The Claude subscription
   path (`claude -p`) is not the server's model path (open question 9).
 - **Backups** hold packets and results only, never raw transcripts, so off-box
