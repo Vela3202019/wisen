@@ -2,8 +2,9 @@
 Run one day's ingest + synthesis outside the API server.
 Usage: python3 scripts/run_synthesis.py [YYYY-MM-DD]   (default: yesterday)
 Meant to be run daily by launchd (com.vela.wisen-daily). Runs as a durable
-job keyed by the date: a second launch for the same day returns the first
-job's outcome, and a launch after a crash resumes it from its last checkpoint.
+job keyed by the date: a launch after a crash resumes it from its last
+checkpoint, a launch after a failure retries it, and a second launch for a
+day that succeeded synthesizes the day again.
 """
 import asyncio
 import sys
