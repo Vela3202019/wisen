@@ -143,6 +143,69 @@ CREATE TABLE IF NOT EXISTS proposal_events (
 CREATE INDEX IF NOT EXISTS proposal_events_proposal ON proposal_events (user_id, proposal_id, id);
 """
 
+# Numbered schema changes, applied in order on open and tracked per component
+# in `schema_version`. Never edit a shipped entry; append a new one. Entry 1 is
+# the original schema (IF NOT EXISTS, so it also adopts files made before
+# versioning existed).
+MIGRATIONS = [
+    _SCHEMA,
+    # 2: one queue, two kinds of worker. `runner` says who may claim a job:
+    # 'local' is the engine in this process; 'device' is a paired laptop
+    # claiming over HTTPS (wisen/cloud). `cloud_state` holds the laptop's sync
+    # bookkeeping: what it last uploaded per key, its decision-feed cursor.
+    """
+    ALTER TABLE jobs ADD COLUMN runner TEXT NOT NULL DEFAULT 'local';
+    CREATE TABLE cloud_state (
+        user_id TEXT NOT NULL,
+        key     TEXT NOT NULL,
+        value   TEXT NOT NULL,
+        at      TEXT NOT NULL,
+        PRIMARY KEY (user_id, key)
+    );
+    """,
+]
+
+
+def migrate(conn: sqlite3.Connection, component: str, migrations: list[str]) -> None:
+    """Apply the `migrations` this file has not seen yet, each with its version
+    bump in one transaction. The version is read under the write lock, so two
+    processes opening the file at once cannot both apply the same step."""
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_version (component TEXT PRIMARY KEY, version INTEGER NOT NULL)")
+    while True:
+        # executescript would commit between statements; run them one by one
+        # inside an explicit transaction instead, so a failed step leaves the
+        # file at the previous version.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute("SELECT version FROM schema_version WHERE component = ?", (component,)).fetchone()
+            version = row[0] if row else 0
+            if version >= len(migrations):
+                conn.commit()
+                return
+            for statement in _statements(migrations[version]):
+                conn.execute(statement)
+            conn.execute(
+                "INSERT INTO schema_version (component, version) VALUES (?, ?) "
+                "ON CONFLICT (component) DO UPDATE SET version = excluded.version",
+                (component, version + 1),
+            )
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.commit()
+
+
+def _statements(sql: str) -> list[str]:
+    statements, current = [], ""
+    for line in sql.splitlines(keepends=True):
+        if line.strip().startswith("--"):
+            continue
+        current += line
+        if sqlite3.complete_statement(current):
+            statements.append(current.strip())
+            current = ""
+    return [s for s in statements if s]
+
 
 def iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat()
@@ -183,7 +246,7 @@ class SqliteStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.executescript(_SCHEMA)
+            migrate(conn, "core", MIGRATIONS)
 
     def _connect(self) -> sqlite3.Connection:
         # One short-lived connection per operation, opened on the worker thread

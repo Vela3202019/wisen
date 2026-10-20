@@ -25,6 +25,10 @@ Job states:
   failed     `error` says why (attempts used up, or an unsafe step was
              interrupted); a rerun of its request id re-queues it
 
+A job's `runner` says who may claim it: 'local' jobs run in this process's
+engine; 'device' jobs are leased to an outside worker (a paired laptop, over
+HTTPS; wisen/cloud) under the same lease rules, through the `*_as` methods.
+
 The full design is docs/plan/cloud-architecture.md §6.2.
 """
 import asyncio
@@ -76,6 +80,7 @@ class Job:
     id: str
     kind: str
     args: dict
+    runner: str
     state: str
     attempts: int
     max_attempts: int
@@ -92,6 +97,7 @@ class Job:
             id=row["id"],
             kind=row["kind"],
             args=json.loads(row["args"]),
+            runner=row["runner"],
             state=row["state"],
             attempts=row["attempts"],
             max_attempts=row["max_attempts"],
@@ -118,6 +124,7 @@ def insert_job(
     max_attempts: int,
     now: datetime,
     rerun: bool = False,
+    runner: str = "local",
 ) -> sqlite3.Row:
     """Insert a queued job inside the caller's transaction, so it commits with
     whatever else that transaction writes (lesson 1). The job row is the
@@ -134,7 +141,7 @@ def insert_job(
             "SELECT * FROM jobs WHERE user_id = ? AND request_id = ?", (user_id, request_id)
         ).fetchone()
         if row:
-            if row["kind"] != kind or row["args"] != args_json:
+            if (row["kind"], row["args"], row["runner"]) != (kind, args_json, runner):
                 raise ValueError(f"request id {request_id!r} was already used for a different job")
             if not rerun:
                 return row
@@ -151,9 +158,9 @@ def insert_job(
             ).fetchone()
     job_id = uuid.uuid4().hex
     conn.execute(
-        "INSERT INTO jobs (id, user_id, kind, args, state, attempts, max_attempts, run_after, "
-        "request_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
-        (job_id, user_id, kind, args_json, max_attempts, ts(run_after), request_id, ts(now), ts(now)),
+        "INSERT INTO jobs (id, user_id, kind, args, runner, state, attempts, max_attempts, run_after, "
+        "request_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?)",
+        (job_id, user_id, kind, args_json, runner, max_attempts, ts(run_after), request_id, ts(now), ts(now)),
     )
     return conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
 
@@ -241,12 +248,12 @@ class JobEngine:
 
     # ── commands ──────────────────────────────────────────────────────────────
 
-    def _enqueue(self, kind, args, request_id, run_after, max_attempts, rerun) -> Job:
+    def _enqueue(self, kind, args, request_id, run_after, max_attempts, rerun, runner) -> Job:
         now = self.clock()
         with self.store.transaction() as conn:
             row = insert_job(
                 conn, self._uid, kind, args, request_id=request_id,
-                run_after=run_after or now, max_attempts=max_attempts, now=now, rerun=rerun,
+                run_after=run_after or now, max_attempts=max_attempts, now=now, rerun=rerun, runner=runner,
             )
         return Job.from_row(row)
 
@@ -259,11 +266,14 @@ class JobEngine:
         run_after: datetime | None = None,
         max_attempts: int = 3,
         rerun: bool = False,
+        runner: str = "local",
     ) -> Job:
         """Queue a job, runnable from `run_after` (default: now). With a
         `request_id`, sending the same request again returns the same job;
         with `rerun=True` as well, that job runs again (see `insert_job`)."""
-        job = await asyncio.to_thread(self._enqueue, kind, args, request_id, run_after, max_attempts, rerun)
+        job = await asyncio.to_thread(
+            self._enqueue, kind, args, request_id, run_after, max_attempts, rerun, runner
+        )
         self._wakeup.set()
         return job
 
@@ -276,6 +286,11 @@ class JobEngine:
 
     async def get(self, job_id: str) -> Job | None:
         return await asyncio.to_thread(self._get, job_id)
+
+    def wake(self) -> None:
+        """Recheck the queue now: a caller wrote a job with `insert_job` in
+        its own transaction, so `enqueue` did not wake the worker."""
+        self._wakeup.set()
 
     def _signal(self, key: str, payload: Any) -> Any:
         now = ts(self.clock())
@@ -329,7 +344,7 @@ class JobEngine:
     async def recover(self) -> int:
         return await asyncio.to_thread(self._recover)
 
-    def _claim(self) -> Job | None:
+    def _claim(self, runner: str = "local", owner: str | None = None) -> Job | None:
         now = self.clock()
         with self.store.transaction() as conn:
             # One statement picks and leases the job, so two workers can never
@@ -338,9 +353,10 @@ class JobEngine:
                 "UPDATE jobs SET state = 'leased', "
                 "attempts = attempts + CASE WHEN state = 'waiting' THEN 0 ELSE 1 END, "
                 "lease_owner = ?, lease_expires_at = ?, wait_key = NULL, updated_at = ? "
-                "WHERE id = (SELECT id FROM jobs WHERE user_id = ? AND state IN ('queued', 'waiting') "
-                "AND run_after <= ? ORDER BY run_after, created_at LIMIT 1) RETURNING *",
-                (self.worker_id, ts(now + LEASE), ts(now), self._uid, ts(now)),
+                "WHERE id = (SELECT id FROM jobs WHERE user_id = ? AND runner = ? "
+                "AND state IN ('queued', 'waiting') AND run_after <= ? ORDER BY run_after, created_at LIMIT 1) "
+                "RETURNING *",
+                (owner or self.worker_id, ts(now + LEASE), ts(now), self._uid, runner, ts(now)),
             ).fetchone()
         return Job.from_row(row) if row else None
 
@@ -348,7 +364,8 @@ class JobEngine:
         with closing(self.store._connect()) as conn:
             row = conn.execute(
                 "SELECT MIN(t) FROM ("
-                "SELECT run_after AS t FROM jobs WHERE user_id = ? AND state IN ('queued', 'waiting') "
+                "SELECT run_after AS t FROM jobs WHERE user_id = ? AND runner = 'local' "
+                "AND state IN ('queued', 'waiting') "
                 "UNION ALL "
                 "SELECT lease_expires_at FROM jobs WHERE user_id = ? AND state = 'leased')",
                 (self._uid, self._uid),
@@ -428,36 +445,40 @@ class JobEngine:
             if not await asyncio.to_thread(self._extend_lease, job_id):
                 return
 
-    def _extend_lease(self, job_id: str) -> bool:
+    def _extend_lease(self, job_id: str, owner: str | None = None) -> bool:
         now = self.clock()
         with self.store.transaction() as conn:
             return conn.execute(
-                "UPDATE jobs SET lease_expires_at = ? WHERE id = ? AND state = 'leased' AND lease_owner = ?",
-                (ts(now + LEASE), job_id, self.worker_id),
+                "UPDATE jobs SET lease_expires_at = ? WHERE user_id = ? AND id = ? AND state = 'leased' "
+                "AND lease_owner = ?",
+                (ts(now + LEASE), self._uid, job_id, owner or self.worker_id),
             ).rowcount == 1
 
-    def _finish(self, job: Job, state: str, result: Any, error: str | None) -> None:
+    def _finish(self, job: Job, state: str, result: Any, error: str | None, owner: str | None = None) -> bool:
         now = ts(self.clock())
         with self.store.transaction() as conn:
             # Fenced on the lease: a worker whose lease was taken over cannot
             # overwrite the new owner's outcome.
             done = conn.execute(
                 "UPDATE jobs SET state = ?, result = ?, error = ?, lease_owner = NULL, "
-                "lease_expires_at = NULL, updated_at = ? WHERE id = ? AND state = 'leased' AND lease_owner = ?",
-                (state, json.dumps(result), error, now, job.id, self.worker_id),
+                "lease_expires_at = NULL, updated_at = ? WHERE user_id = ? AND id = ? AND state = 'leased' "
+                "AND lease_owner = ?",
+                (state, json.dumps(result), error, now, self._uid, job.id, owner or self.worker_id),
             ).rowcount
             if done and state == "succeeded":
                 _prune_outputs(conn, job.id)
+        return bool(done)
 
-    def _retry_or_fail(self, job: Job, error: str) -> None:
+    def _retry_or_fail(self, job: Job, error: str, owner: str | None = None) -> bool:
         now = self.clock()
         with self.store.transaction() as conn:
             row = conn.execute(
-                "SELECT attempts, max_attempts FROM jobs WHERE id = ? AND state = 'leased' AND lease_owner = ?",
-                (job.id, self.worker_id),
+                "SELECT attempts, max_attempts FROM jobs WHERE user_id = ? AND id = ? AND state = 'leased' "
+                "AND lease_owner = ?",
+                (self._uid, job.id, owner or self.worker_id),
             ).fetchone()
             if row is None:
-                return
+                return False
             if row["attempts"] >= row["max_attempts"]:
                 state, run_after = "failed", None
             else:
@@ -468,6 +489,31 @@ class JobEngine:
                 "lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?",
                 (state, run_after, error, ts(now), job.id),
             )
+        return True
+
+    # ── outside workers (a paired device claiming over HTTPS) ─────────────────
+
+    async def claim_as(self, owner: str, runner: str) -> Job | None:
+        """Lease the next due `runner` job to `owner`, a worker outside this
+        process. It keeps the lease with `heartbeat_as` and ends it with
+        `finish_as` or `fail_as`; if it goes quiet, recovery re-queues the job
+        once the lease expires, exactly as for a local worker."""
+        return await asyncio.to_thread(self._claim, runner, owner)
+
+    async def heartbeat_as(self, job_id: str, owner: str) -> bool:
+        """Extend `owner`'s lease; False if it no longer holds the job."""
+        return await asyncio.to_thread(self._extend_lease, job_id, owner)
+
+    async def finish_as(self, job_id: str, owner: str, result: Any) -> bool:
+        """Record success; False (and nothing changes) if `owner` lost the lease."""
+        job = await self.get(job_id)
+        return job is not None and await asyncio.to_thread(self._finish, job, "succeeded", result, None, owner)
+
+    async def fail_as(self, job_id: str, owner: str, error: str) -> bool:
+        """A failed attempt: back off and re-queue, or fail once attempts run
+        out. False (and nothing changes) if `owner` lost the lease."""
+        job = await self.get(job_id)
+        return job is not None and await asyncio.to_thread(self._retry_or_fail, job, error, owner)
 
     # ── steps (called by JobContext) ──────────────────────────────────────────
 
