@@ -6,7 +6,8 @@ Collect real subscription usage for Claude Code and Codex.
   Codex  — last server-reported rate_limits snapshot in ~/.codex/sessions
            (fresh as of the last Codex activity)
 
-Only percentages and reset times are written; tokens never leave this machine.
+Only percentages and reset times are written, as a usage packet through the
+egress gate; tokens never leave this machine.
 
 Usage: python3 scripts/collect_usage.py [output.json]
        (default: ~/.wisen/exports/reflections/usage.json)
@@ -18,6 +19,11 @@ import sys
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from wisen import egress
+from wisen.packets import usage_packet
 
 _CLAUDE_SVC = "Claude Code-credentials"
 
@@ -137,13 +143,12 @@ def codex_usage() -> dict | None:
 
 def main() -> None:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "~/.wisen/exports/reflections/usage.json").expanduser()
-    out.parent.mkdir(parents=True, exist_ok=True)
     usage = {
         "collected_at": datetime.now(UTC).isoformat(),
         "claude": claude_usage(),
         "codex": codex_usage(),
     }
-    out.write_text(json.dumps(usage, indent=2))
+    egress.write_file(usage_packet(usage), out)
     print(f"usage written to {out}")
 
 

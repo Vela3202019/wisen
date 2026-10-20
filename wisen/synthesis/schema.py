@@ -1,6 +1,15 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationInfo,
+)
+
+from wisen.redact import redact
 
 # ── Sub-models ────────────────────────────────────────────────────────────────
 
@@ -140,32 +149,105 @@ class Reflection(BaseModel):
 
 
 # ── Cloud export: the allow-list of what may leave the machine ────────────────
-# Remote dashboards get reflections only through this model. Fields are listed
-# explicitly (not inherited from Reflection) so a new Reflection field stays
-# local until someone decides it may egress. Anything else stored on a
-# reflection document (synthesized_at, legacy or extra keys, Stage-1 output) is
-# dropped. Short evidence quotes are synthesized results and stay in.
+# Remote dashboards get reflections only through this model (wrapped in a
+# ResultPacket, wisen/packets.py). Fields are listed explicitly (not inherited
+# from Reflection) so a new Reflection field stays local until someone decides
+# it may egress. Anything else stored on a reflection document (synthesized_at,
+# legacy or extra keys, Stage-1 output) is dropped. Short evidence quotes are
+# synthesized results and stay in.
+#
+# Every text field is capped. Under the EGRESS validation context a value is
+# redacted (secrets, emails, absolute paths) and then cut to fit; without it
+# (the receiving end) an over-long value is rejected.
+
+EGRESS = {"egress": True}
+
+
+def _capped(max_len: int):
+    def prepare(value, info: ValidationInfo):
+        if isinstance(value, str) and (info.context or {}).get("egress"):
+            value = redact(value)
+            if len(value) > max_len:
+                value = value[: max_len - 1] + "…"
+        return value
+    return Annotated[str, BeforeValidator(prepare), StringConstraints(max_length=max_len)]
+
+
+Label = _capped(200)      # topics, sources, model names, file paths, tldr bullets
+Quote = _capped(500)      # short evidence quotes
+Text = _capped(1000)      # one-paragraph summaries, actions, questions
+Long = _capped(4000)      # multi-paragraph briefings
+Date = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$", max_length=10)]
+
+
+class CloudMindMapNode(MindMapNode):
+    topic: Label
+
+
+class CloudMoodSignal(MoodSignal):
+    summary: Text
+    evidence: Quote
+
+
+class CloudImplicitQuestion(ImplicitQuestion):
+    question: Text
+    evidence: Quote
+
+
+class CloudFrictionPoint(FrictionPoint):
+    description: Text
+    evidence: Quote
+
+
+class CloudRecommendation(Recommendation):
+    action: Text
+    reason: Text
+
+
+class CloudDayPattern(DayPattern):
+    date: Label
+
+
+class CloudConfigDiff(ConfigDiff):
+    file: Label
+    summary: Text
+
+
+class CloudFrictionDelta(FrictionDelta):
+    description: Text
+
+
+class CloudModelUsage(ModelUsage):
+    source: Label
+    model: Label
+
+
+class CloudKeyMoment(KeyMoment):
+    session_source: Label
+    quote: Quote
+    significance: Text
+
 
 class CloudReflection(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    date: str
-    mind_map_nodes: list[MindMapNode]
-    mind_map_edges: list[tuple[str, str]]
-    your_mood: MoodSignal
-    your_question: ImplicitQuestion
-    agent_mood: MoodSignal
-    agent_question: ImplicitQuestion
-    insight: str = ""
-    tldr: list[str] = []
+    date: Date
+    mind_map_nodes: list[CloudMindMapNode] = Field(max_length=100)
+    mind_map_edges: list[tuple[Label, Label]] = Field(max_length=200)
+    your_mood: CloudMoodSignal
+    your_question: CloudImplicitQuestion
+    agent_mood: CloudMoodSignal
+    agent_question: CloudImplicitQuestion
+    insight: Text = ""
+    tldr: list[Label] = Field([], max_length=10)
     alignment_score: float = Field(ge=0.0, le=1.0)
     alignment_label: Literal["aligned", "mild-friction", "friction", "misaligned"]
-    friction_points: list[FrictionPoint]
-    recommendations: list[Recommendation]
-    config_diffs: list[ConfigDiff]
-    friction_deltas: list[FrictionDelta]
-    model_usage: list[ModelUsage]
-    acted_on_recommendations: list[str]
-    ignored_recommendations: list[str] = []
-    seven_day_pattern: list[DayPattern]
-    synthesis_context: str
+    friction_points: list[CloudFrictionPoint] = Field(max_length=50)
+    recommendations: list[CloudRecommendation] = Field(max_length=50)
+    config_diffs: list[CloudConfigDiff] = Field(max_length=50)
+    friction_deltas: list[CloudFrictionDelta] = Field(max_length=50)
+    model_usage: list[CloudModelUsage] = Field(max_length=50)
+    acted_on_recommendations: list[Text] = Field(max_length=50)
+    ignored_recommendations: list[Text] = Field([], max_length=50)
+    seven_day_pattern: list[CloudDayPattern] = Field(max_length=31)
+    synthesis_context: Long
