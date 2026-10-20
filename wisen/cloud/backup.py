@@ -4,11 +4,13 @@ never raw transcripts, so a copy can safely leave the box.
 
 `backup` takes a consistent snapshot with SQLite's online backup API, which is
 safe while the server runs and writes (a plain `cp` of a WAL database is not).
-`restore` puts a snapshot back; the server must be stopped first.
+`restore` puts a snapshot back; the server must be stopped first. A running
+server holds an exclusive lock on <db>.lock (`serving`), so restore can tell.
 """
+import fcntl
 import os
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +22,23 @@ def _check(path: Path) -> None:
         result = conn.execute("PRAGMA integrity_check").fetchone()[0]
     if result != "ok":
         raise RuntimeError(f"{path} failed its integrity check: {result}")
+
+
+def _lock_path(db: Path) -> Path:
+    return db.with_name(db.name + ".lock")
+
+
+@contextmanager
+def serving(db: Path):
+    """Held by the server for as long as it runs; the OS drops it if the
+    process dies."""
+    db.parent.mkdir(parents=True, exist_ok=True)
+    with open(_lock_path(db), "a") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError(f"a server is running on {db}: stop it first")
+        yield
 
 
 def backup(db: Path, out_dir: Path, keep: int = 14) -> Path:
@@ -40,16 +59,14 @@ def backup(db: Path, out_dir: Path, keep: int = 14) -> Path:
 
 
 def restore(snapshot: Path, db: Path) -> None:
-    """Replace `db` with `snapshot`. Refuses while the server looks alive (its
-    WAL file is non-empty), since swapping a live database corrupts it."""
+    """Replace `db` with `snapshot`. Refuses while a server runs on `db`
+    (holds its lock), since swapping a live database corrupts it."""
     _check(snapshot)
-    wal = db.with_name(db.name + "-wal")
-    if wal.exists() and wal.stat().st_size > 0:
-        raise RuntimeError(f"{wal} is not empty: stop the server before restoring")
-    db.parent.mkdir(parents=True, exist_ok=True)
-    partial = db.with_name(db.name + ".restoring")
-    with closing(sqlite3.connect(snapshot)) as source, closing(sqlite3.connect(partial)) as dest:
-        source.backup(dest)
-    for leftover in (wal, db.with_name(db.name + "-shm")):
-        leftover.unlink(missing_ok=True)
-    os.replace(partial, db)
+    with serving(db):
+        wal = db.with_name(db.name + "-wal")
+        partial = db.with_name(db.name + ".restoring")
+        with closing(sqlite3.connect(snapshot)) as source, closing(sqlite3.connect(partial)) as dest:
+            source.backup(dest)
+        for leftover in (wal, db.with_name(db.name + "-shm")):
+            leftover.unlink(missing_ok=True)
+        os.replace(partial, db)

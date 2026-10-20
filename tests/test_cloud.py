@@ -446,16 +446,13 @@ async def check_backup_restore():
     for _ in range(2):
         backup(server.db, _TMP / "backups", keep=2)
     assert len(list((_TMP / "backups").glob("wisen-*.db"))) <= 2
-    # A live server (a non-empty WAL) is never restored over.
-    live = sqlite3.connect(server.db)
-    live.execute("INSERT INTO cloud_state (user_id, key, value, at) VALUES ('x', 'live', '1', 'now')")
-    live.commit()
-    try:
-        restore(snapshot, server.db)
-        raise AssertionError("restore over a live database must be refused")
-    except RuntimeError:
-        pass
-    live.close()
+    # A running server, even an idle one, is never restored over.
+    async with server.app.router.lifespan_context(server.app):
+        try:
+            restore(snapshot, server.db)
+            raise AssertionError("restore over a running server must be refused")
+        except RuntimeError:
+            pass
     # Disaster: the file is gone. Restore the snapshot and start the server again.
     for p in server.db.parent.glob(server.db.name + "*"):
         p.unlink()
@@ -467,7 +464,7 @@ async def check_backup_restore():
         assert after == before and len(after["/api/logs"]) == 2
         # The device token survives the restore too.
         assert (await _poll(creds, http, 0))["job"] is None
-    print("✓ cloud: a consistent snapshot restores to the same data, and never over a live file")
+    print("✓ cloud: a consistent snapshot restores to the same data, and never under a running server")
 
 
 # ── the server's packet check ─────────────────────────────────────────────────

@@ -46,6 +46,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from wisen.cloud.backup import serving
 from wisen.cloud.mailbox import ACCEPTED, Conflict, Mailbox
 from wisen.cloud.push import WebPushSender
 from wisen.packets import PacketRejected, receive
@@ -123,12 +124,13 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        task = asyncio.create_task(mailbox.run_forever()) if run_engines else None
-        yield
-        if task:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+        with serving(mailbox.path):
+            task = asyncio.create_task(mailbox.run_forever()) if run_engines else None
+            yield
+            if task:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
 
     app = FastAPI(title="wisen cloud", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     failures: dict[str, deque] = defaultdict(deque)

@@ -103,8 +103,8 @@ sudo -u wisen /opt/wisen/bin/wisen cloud restore /var/lib/wisen/backups/wisen-<t
 sudo systemctl start wisen
 ```
 
-`restore` checks the snapshot's integrity and refuses while the database's
-WAL file is non-empty (a sign the server is still running). Logins, paired
+`restore` checks the snapshot's integrity and refuses while the server is
+running (it holds a lock on `wisen.db.lock` until it exits). Logins, paired
 devices and their tokens come back with the data.
 
 ## Checks on the box (step 4)
