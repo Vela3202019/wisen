@@ -96,7 +96,8 @@ flowchart LR
 stored *by* it. The SQLite file receives the synthesized reflections (plus your chat
 and voice conversations with wisen, and the job queue: while a synthesis job
 runs, it checkpoints the Observer's notes on the day there, and drops them when
-the job finishes); raw content stays wherever your agents put it. Search happens by re-reading the original files (grep-first) at
+the job succeeds; a failed job keeps them so rerunning the day retries from
+there); raw content stays wherever your agents put it. Search happens by re-reading the original files (grep-first) at
 question time. Local storage is not the same as fully
 offline: the model calls send excerpts out. See below.
 

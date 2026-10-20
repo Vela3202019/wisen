@@ -132,14 +132,17 @@ async def check_kill_and_restart(tmp: str):
                                  clock=lambda: datetime.now(UTC) + 2 * LEASE)
     done = await synthesis_job.synthesize_day(DATE)
     assert done.id == job["id"] and len(_rows(store, "SELECT 1 FROM jobs")) == 1
-    assert done.state == "succeeded" and done.result == {"date": DATE} and done.attempts == 2, done
+    assert done.state == "succeeded" and done.result == {"date": DATE} and done.attempts == 1, done
     # The Observer ran once; the interrupted Synthesizer re-ran; one save, one reflection.
     assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save"], calls.read_text()
     assert len(_rows(store, "SELECT 1 FROM reflections")) == 1
-    # Rerunning a day that succeeded returns the finished job instead of running again.
+    # Rerunning a day that succeeded synthesizes it afresh under the same job;
+    # the newest reflection replaces the old one.
     again = await synthesis_job.synthesize_day(DATE)
-    assert again.id == job["id"] and again.state == "succeeded"
-    assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save"], calls.read_text()
+    assert again.id == job["id"] and again.state == "succeeded" and again.attempts == 1, again
+    assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save",
+                                         "DayObservation", "Reflection", "save"], calls.read_text()
+    assert len(_rows(store, "SELECT 1 FROM jobs")) == 1 and len(_rows(store, "SELECT 1 FROM reflections")) == 1
     jobs_mod._engine = None
     # Once the job is final its step outputs are dropped; names and times stay.
     outputs = _rows(store, "SELECT name, output FROM job_steps ORDER BY started_at")
@@ -199,7 +202,9 @@ async def check_failed_rerun(tmp: str):
     # A failed job keeps its finished steps, so a rerun can resume from them.
     assert [r["output"] for r in _rows(store, "SELECT output FROM job_steps")] == ['"kept"']
 
-    rerun = await engine.enqueue("two", {"date": DATE}, request_id="day", max_attempts=1)
+    # A plain resend returns the failed job as it is (lesson 4); a rerun retries it.
+    assert (await engine.enqueue("two", {"date": DATE}, request_id="day", max_attempts=1)).state == "failed"
+    rerun = await engine.enqueue("two", {"date": DATE}, request_id="day", max_attempts=1, rerun=True)
     assert rerun.id == job.id and rerun.state == "queued" and rerun.attempts == 0 and rerun.error is None, rerun
     assert len(_rows(store, "SELECT 1 FROM jobs")) == 1
     done = await engine.run_until_done(job.id)
@@ -207,6 +212,28 @@ async def check_failed_rerun(tmp: str):
     assert calls == ["first", "second", "second"], calls  # the finished step was not re-run
     assert all(r["output"] is None for r in _rows(store, "SELECT output FROM job_steps"))
     print("✓ jobs: rerunning a failed request id retries the same job from its checkpoint")
+
+
+async def check_repeated_interrupts(tmp: str):
+    store, clock = _store(tmp, "interrupts"), Clock()
+
+    async def noop(ctx, args):
+        return "ok"
+
+    crashed = JobEngine(store, {"noop": noop}, clock=clock)
+    # More interrupted runs than max_attempts: each rerun gets fresh attempts,
+    # so recovery re-queues the job instead of failing it.
+    for _ in range(4):
+        job = await crashed.enqueue("noop", {}, request_id="day", rerun=True)
+        await crashed.recover()
+        assert (await asyncio.to_thread(crashed._claim)).id == job.id  # then the process dies
+        clock.advance(LEASE + timedelta(seconds=1))
+    engine = JobEngine(store, {"noop": noop}, clock=clock)
+    rerun = await engine.enqueue("noop", {}, request_id="day", rerun=True)
+    assert rerun.id == job.id and rerun.state == "leased" and rerun.attempts == 0, rerun
+    done = await engine.run_until_done(job.id)
+    assert done.state == "succeeded" and done.result == "ok" and done.attempts == 1, done
+    print("✓ jobs: a job interrupted more times than its attempts still resumes on a rerun")
 
 
 async def check_lease_recovery(tmp: str):
@@ -452,6 +479,7 @@ async def main():
         await check_kill_and_restart(tmp)
         await check_request_id(tmp)
         await check_failed_rerun(tmp)
+        await check_repeated_interrupts(tmp)
         await check_lease_recovery(tmp)
         await check_replay_policy(tmp)
         await check_retry_and_timers(tmp)

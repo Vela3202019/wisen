@@ -445,8 +445,8 @@ SQLite file. It replaces the in-memory `_jobs` dict in `wisen/main.py`.
 
 | Concept | What it is |
 |---|---|
-| **Job** | A row: `id`, `user_id`, `kind`, `args` (JSON), `state`, `attempts`, `max_attempts`, `run_after`, `request_id` (unique per user; the row is the request's receipt). States: `queued → leased → succeeded / failed`, plus `waiting` for a parked job; a failed attempt goes back to `queued` with backoff until `max_attempts`, then `failed`. (`parent_id`, for sub-jobs, is not built yet.) |
-| **Step** | A named, memoized unit inside a job. Its output is saved on success. When a job reruns after a crash, finished steps return their saved output instead of running again. |
+| **Job** | A row: `id`, `user_id`, `kind`, `args` (JSON), `state`, `attempts`, `max_attempts`, `run_after`, `request_id` (unique per user; the row is the request's receipt). States: `queued → leased → succeeded / failed`, plus `waiting` for a parked job; a failed attempt goes back to `queued` with backoff until `max_attempts`, then `failed`. A resent request returns the job as it is; an explicit rerun (`rerun=True`, used for `daily-synthesis:{date}` by the CLI, launchd and `POST /synthesize`) resumes an unfinished job, re-queues a failed one from its last checkpoint, and starts a succeeded one over, each with fresh attempts. (`parent_id`, for sub-jobs, is not built yet.) |
+| **Step** | A named, memoized unit inside a job. Its output is saved on success. When a job reruns after a crash, finished steps return their saved output instead of running again. Outputs are dropped once the job succeeds; a failed job keeps them so a rerun resumes from them. |
 | **Lease** | A claim on a job with an expiry. A worker heartbeats to extend it. On startup, and on every scheduler tick, expired leases go back to `queued`. |
 | **Timer** | A job with `run_after` in the future. The scheduler sleeps until the earliest one. Wake-ups may repeat, so handlers must be idempotent. |
 | **Wait** | A job parked until an event arrives (a decision, a laptop result), with an optional timeout. |

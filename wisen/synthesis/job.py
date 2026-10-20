@@ -30,16 +30,18 @@ async def run_synthesis_job(ctx: JobContext, args: dict) -> dict:
     return {"date": date}
 
 
-def daily_request_id(date: str) -> str:
-    """The one request id per day, shared by the CLI, launchd and the API, so
-    a rerun resumes that day's job instead of starting a second one."""
-    return f"daily-synthesis:{date}"
+async def enqueue_day(date: str) -> Job:
+    """Queue the synthesis of `date` under the one request id per day shared
+    by the CLI, launchd and the API, so a run never races an interrupted one:
+    an unfinished job resumes, a failed one is retried from its last
+    checkpoint, and a day that already succeeded is synthesized afresh."""
+    return await get_engine().enqueue(
+        "synthesize", {"date": date}, request_id=f"daily-synthesis:{date}", rerun=True
+    )
 
 
 async def synthesize_day(date: str) -> Job:
-    """Queue (or resume) the synthesis job for `date` and work the queue
-    until it is final. A day that already succeeded returns its job; one that
-    failed is retried from its last checkpoint."""
+    """Synthesize `date` (see `enqueue_day`) and work the queue until it is final."""
     engine = get_engine()
-    job = await engine.enqueue("synthesize", {"date": date}, request_id=daily_request_id(date))
+    job = await enqueue_day(date)
     return await engine.run_until_done(job.id)

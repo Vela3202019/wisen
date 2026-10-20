@@ -23,7 +23,7 @@ Job states:
   waiting    parked in `ctx.wait` until its signal arrives or its timeout passes
   succeeded  final; `result` holds the handler's return value
   failed     `error` says why (attempts used up, or an unsafe step was
-             interrupted); sending its request id again re-queues it
+             interrupted); a rerun of its request id re-queues it
 
 The full design is docs/plan/cloud-architecture.md §6.2.
 """
@@ -117,11 +117,17 @@ def insert_job(
     run_after: datetime,
     max_attempts: int,
     now: datetime,
+    rerun: bool = False,
 ) -> sqlite3.Row:
     """Insert a queued job inside the caller's transaction, so it commits with
     whatever else that transaction writes (lesson 1). The job row is the
     receipt for its request id (lesson 4): a resent request returns the job
-    already recorded for it, re-queued if it had failed."""
+    already recorded for it.
+
+    `rerun=True` asks for the work to happen again under the same request id
+    instead: an unfinished job resumes, a failed one is re-queued from its
+    last checkpoint, and a succeeded one starts over from its first step.
+    Either way it gets a fresh set of attempts."""
     args_json = json.dumps(args, sort_keys=True)
     if request_id is not None:
         row = conn.execute(
@@ -130,13 +136,17 @@ def insert_job(
         if row:
             if row["kind"] != kind or row["args"] != args_json:
                 raise ValueError(f"request id {request_id!r} was already used for a different job")
-            if row["state"] != "failed":
+            if not rerun:
                 return row
-            # Sending the request again retries a failed job in place: its
-            # finished steps are kept, so it resumes from its last checkpoint.
+            if row["state"] == "succeeded":
+                conn.execute("DELETE FROM job_steps WHERE job_id = ?", (row["id"],))
+            # A leased job keeps its lease: its worker may still be alive, and
+            # if not, recovery re-queues it once the lease expires.
             return conn.execute(
-                "UPDATE jobs SET state = 'queued', attempts = 0, run_after = ?, error = NULL, "
-                "updated_at = ? WHERE id = ? RETURNING *",
+                "UPDATE jobs SET attempts = 0, result = NULL, error = NULL, updated_at = ?, "
+                "state = CASE WHEN state IN ('succeeded', 'failed') THEN 'queued' ELSE state END, "
+                "run_after = CASE WHEN state = 'waiting' THEN run_after ELSE ? END "
+                "WHERE id = ? RETURNING *",
                 (ts(now), ts(now), row["id"]),
             ).fetchone()
     job_id = uuid.uuid4().hex
@@ -176,9 +186,9 @@ class JobContext:
         without calling `fn`.
 
         `output` is the result's type, used to save it as JSON and load it
-        back. Every step declares `replay_safe`; `replay_safe=False` marks a step whose effect must not happen
-        twice (create a branch, send a push): if a crash interrupts it, the
-        job fails with `StepInterrupted` for a human to check instead of
+        back. Every step declares `replay_safe`; `replay_safe=False` marks a
+        step whose effect must not happen twice (create a branch, send a
+        push): if a crash interrupts it, the job fails with `StepInterrupted` for a human to check instead of
         running it again (lesson 3). A step that raises is treated as not
         having happened, so raise only when its effect did not take place."""
         self._use_name(name)
@@ -231,12 +241,12 @@ class JobEngine:
 
     # ── commands ──────────────────────────────────────────────────────────────
 
-    def _enqueue(self, kind, args, request_id, run_after, max_attempts) -> Job:
+    def _enqueue(self, kind, args, request_id, run_after, max_attempts, rerun) -> Job:
         now = self.clock()
         with self.store.transaction() as conn:
             row = insert_job(
                 conn, self._uid, kind, args, request_id=request_id,
-                run_after=run_after or now, max_attempts=max_attempts, now=now,
+                run_after=run_after or now, max_attempts=max_attempts, now=now, rerun=rerun,
             )
         return Job.from_row(row)
 
@@ -248,10 +258,12 @@ class JobEngine:
         request_id: str | None = None,
         run_after: datetime | None = None,
         max_attempts: int = 3,
+        rerun: bool = False,
     ) -> Job:
         """Queue a job, runnable from `run_after` (default: now). With a
-        `request_id`, sending the same request again returns the same job."""
-        job = await asyncio.to_thread(self._enqueue, kind, args, request_id, run_after, max_attempts)
+        `request_id`, sending the same request again returns the same job;
+        with `rerun=True` as well, that job runs again (see `insert_job`)."""
+        job = await asyncio.to_thread(self._enqueue, kind, args, request_id, run_after, max_attempts, rerun)
         self._wakeup.set()
         return job
 
