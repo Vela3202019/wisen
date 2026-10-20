@@ -10,10 +10,12 @@ WISEN_EGRESS_LOG) as one JSON line: time, destination, packet type, size, field
 list and sha256 of the bytes. The content itself is never logged. `wisen
 egress` reads it back.
 
-Today the only transport is a directory that a sync job outside wisen (e.g.
-rsync to the dashboard) uploads. Such entries are logged when the packet is
-written there, as "outbox:<file>", i.e. prepared for upload; the upload itself
-is not observed.
+Two transports:
+  - a paired wisen server (wisen/cloud), over HTTPS: `prepare` checks and logs
+    the packet as "cloud:<host>" and hands back the exact bytes to POST;
+  - a directory that a sync job outside wisen (e.g. rsync) uploads. Such
+    entries are logged when the packet is written there, as "outbox:<file>",
+    i.e. prepared for upload; the upload itself is not observed.
 """
 import hashlib
 import json
@@ -36,6 +38,16 @@ def check(data: dict) -> BaseModel:
     if model is None:
         raise EgressRejected("not a packet: needs a known packet_type")
     return validate(model, data, f"{data['packet_type']} packet", extra="forbid")
+
+
+def prepare(data: dict, destination: str) -> bytes:
+    """Check one packet bound for `destination` (e.g. "cloud:wisen.example.org"),
+    record it in the egress log, and return the bytes to send: the log entry is
+    written before anything leaves."""
+    packet = check(data)
+    body = packet.model_dump_json().encode()
+    _record(packet, body, destination)
+    return body
 
 
 def write_file(data: dict, path: Path) -> bool:
@@ -110,7 +122,7 @@ def report(day: date, every: bool = False) -> str:
     entries = read_log(day)
     total = sum(e["bytes"] for e in entries)
     lines = [f"{len(entries)} packets, {total:,} bytes passed the egress gate on {day} (log: {log_path()})",
-             "  outbox:<file> = written for a sync job to upload"]
+             "  outbox:<file> = written for a sync job to upload; cloud:<host> = sent to a paired wisen server"]
     if every:
         for e in entries:
             lines.append(f"  {e['at']:%H:%M:%S}  {e['packet_type']:<11} {e['bytes']:>7,} B  "

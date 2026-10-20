@@ -26,7 +26,7 @@ from wisen.packets import PACKETS, observation_packet, result_packet, usage_pack
 from wisen.redact import redact
 from wisen.synthesis.schema import CloudReflection, DayObservation, Reflection
 
-ENVELOPE = {"packet_type", "schema_version", "user_id", "packet_id", "created_at"}
+ENVELOPE = {"packet_type", "schema_version", "user_id", "device_id", "packet_id", "created_at"}
 FAKE_KEY = "sk-ant-api03-Zx9Qw8Er7Ty6Ui5Op4As3Df2Gh1Jk0LmNb"
 ABS_PATH = "/Users/alice/clients/acme/secret_plan.py"
 EMAIL = "alice@acme-corp.com"
