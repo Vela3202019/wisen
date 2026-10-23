@@ -1,7 +1,8 @@
 """
 Synthesis as a durable job: one day's ingest + Observer + Synthesizer + save,
 checkpointed after each stage by the job engine (wisen/jobs.py). If the
-process dies after the Observer, the rerun starts at the Synthesizer.
+process dies after the Observer, the rerun starts at the Synthesizer. A saved
+day queues that day's Gardener run (wisen/gardener/loop.py).
 """
 from wisen.ingestion.pipeline import ingest_all
 from wisen.jobs import Job, JobContext, get_engine
@@ -27,6 +28,12 @@ async def run_synthesis_job(ctx: JobContext, args: dict) -> dict:
     )
     # Replay-safe: the save is an upsert by date.
     await ctx.step("save", lambda: agent.save_reflection(reflection), replay_safe=True)
+    # The day's Gardener run (its proposals are the day's batch); one per day,
+    # keyed by date, so a re-synthesized day does not propose again.
+    async def queue_garden() -> str:
+        return (await ctx.engine.enqueue("garden", {"date": date}, request_id=f"garden:{date}")).id
+
+    await ctx.step("garden", queue_garden, replay_safe=True)
     return {"date": date}
 
 
@@ -44,4 +51,11 @@ async def synthesize_day(date: str) -> Job:
     """Synthesize `date` (see `enqueue_day`) and work the queue until it is final."""
     engine = get_engine()
     job = await enqueue_day(date)
+    return await engine.run_until_done(job.id)
+
+
+async def garden_day(date: str) -> Job:
+    """Run the day's Gardener job (queued by its synthesis) until it is final."""
+    engine = get_engine()
+    job = await engine.enqueue("garden", {"date": date}, request_id=f"garden:{date}")
     return await engine.run_until_done(job.id)

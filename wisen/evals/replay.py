@@ -6,6 +6,10 @@ case's date, so the agent sees the repo roughly as it was. Config: ~/.claude is
 staged into a temp dir (CLAUDE.md swapped for the variant) and the run uses
 CLAUDE_CONFIG_DIR, so the real config is never touched. Bash is not in the
 allowed tools — the agent can read and edit the worktree copy, nothing else.
+
+A variant can also replace other files, so a Gardener proposal is replayed
+with exactly the file it changes: `config_files` are written into the staged
+config dir (paths relative to ~/.claude), `project_files` into the worktree.
 """
 import json
 import shutil
@@ -28,6 +32,8 @@ class ReplayResult:
     final_text: str
     diff: str          # what the agent changed in the worktree
     error: str = ""
+    tokens: int = 0    # what the replay spent, as `claude -p` reports it
+    cost_usd: float | None = None
 
 
 def stage_config(claude_md: Path | None, staging: Path) -> None:
@@ -84,7 +90,22 @@ def build_prompt(case: Case) -> str:
     return "\n\n".join(parts)
 
 
-def run_replay(case: Case, claude_md: Path | None = None) -> ReplayResult:
+def _write_files(root: Path, files: dict[str, str]) -> None:
+    for rel, text in files.items():
+        path = (root / rel).resolve()
+        if not path.is_relative_to(root.resolve()):
+            raise ValueError(f"{rel} is outside {root}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+
+def _tokens(usage: dict) -> int:
+    return sum(usage.get(k) or 0 for k in (
+        "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+
+
+def run_replay(case: Case, claude_md: Path | None = None, *, config_files: dict[str, str] | None = None,
+               project_files: dict[str, str] | None = None) -> ReplayResult:
     project = Path(case.project_path)
     if not (project / ".git").exists():
         return ReplayResult("", "", error=f"{project} is not a git repo")
@@ -95,12 +116,17 @@ def run_replay(case: Case, claude_md: Path | None = None) -> ReplayResult:
     with tempfile.TemporaryDirectory() as tmp:
         staging = Path(tmp) / "config"
         stage_config(claude_md, staging)
+        _write_files(staging, config_files or {})
         worktree = Path(tmp) / "repo"
         subprocess.run(
             ["git", "-C", str(project), "worktree", "add", "--detach", str(worktree), sha],
             capture_output=True, text=True, check=True,
         )
         try:
+            if project_files:
+                _write_files(worktree, project_files)
+                # Staged, so the `git diff` below shows only the agent's edits.
+                subprocess.run(["git", "-C", str(worktree), "add", "-A"], capture_output=True, check=True)
             r = subprocess.run(
                 ["claude", "-p", build_prompt(case),
                  "--output-format", "json",
@@ -125,7 +151,8 @@ def run_replay(case: Case, claude_md: Path | None = None) -> ReplayResult:
                 ["git", "-C", str(worktree), "diff"],
                 capture_output=True, text=True, check=False,
             ).stdout
-            return ReplayResult(final_text=final_text, diff=diff)
+            return ReplayResult(final_text=final_text, diff=diff, tokens=_tokens(data.get("usage") or {}),
+                                cost_usd=data.get("total_cost_usd"))
         except subprocess.TimeoutExpired:
             return ReplayResult("", "", error=f"replay timed out after {_TIMEOUT_S}s")
         finally:

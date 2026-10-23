@@ -30,9 +30,11 @@ from pydantic import BaseModel
 
 from wisen.cloud import auth
 from wisen.cloud.push import Gone, PushSender
+from wisen.gardener.applier import MEASURE_AFTER
 from wisen.jobs import Job, JobContext, JobEngine, insert_job, ts
 from wisen.proposals import (
     Decision,
+    IllegalTransition,
     Proposal,
     ProposalEvent,
     Proposals,
@@ -46,8 +48,8 @@ SEEN_EVERY = timedelta(minutes=1)  # how often a device's last_seen_at is rewrit
 POLL_RECHECK = 2.0  # seconds; a long poll rechecks at least this often (timers come due without a signal)
 # What a device may upload into the mailbox. Observation packets are stage B;
 # job status arrives only as the end of a device job.
-ACCEPTED = ("result", "usage", "proposal")
-DEVICE_KINDS = ("synthesize",)
+ACCEPTED = ("result", "usage", "proposal", "proposal_update", "metrics")
+DEVICE_KINDS = ("synthesize", "measure")
 USER_ID = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
 DAILY_AT = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -331,8 +333,8 @@ class Mailbox:
         the caller wakes the user's engine on the event loop."""
         if packet.user_id != user_id or packet.device_id != device_id:
             raise Conflict("packet user_id and device_id must match the device token")
-        key = {"result": lambda: packet.date, "usage": lambda: "latest",
-               "proposal": lambda: packet.proposal_id}[packet.packet_type]()
+        key = {"result": lambda: packet.date, "usage": lambda: "latest", "proposal": lambda: packet.proposal_id,
+               "proposal_update": lambda: packet.request_id, "metrics": lambda: packet.date}[packet.packet_type]()
         now = self.clock()
         with self.store(user_id).transaction() as conn:
             row = conn.execute(
@@ -351,16 +353,54 @@ class Mailbox:
                 (user_id, packet.packet_type, key, packet.packet_id, device_id, packet.model_dump_json(), ts(now)),
             )
             if packet.packet_type == "result":
+                # The morning briefing carries the day's Gardener batch, which
+                # the laptop uploads first.
+                waiting = self._batch_waiting(conn, user_id, packet.date)
+                body = f"{packet.date} · {packet.alignment_label}" + (
+                    f" · {waiting} proposal{'s' if waiting != 1 else ''} waiting" if waiting else "")
                 self._queue_push(conn, user_id, f"result:{packet.packet_id}", now, title="Reflection ready",
-                                 body=f"{packet.date} · {packet.alignment_label}", url=f"/#day-{packet.date}")
+                                 body=body, url=f"/#day-{packet.date}")
             elif packet.packet_type == "proposal":
                 self._record_proposal(conn, user_id, device_id, packet)
-                self._queue_push(conn, user_id, f"proposal:{packet.proposal_id}", now,
-                                 title="Proposal waiting", body=packet.target, url=f"/#proposal-{packet.proposal_id}")
+                if packet.batch is None:  # e.g. a revert after a worse measurement
+                    self._queue_push(conn, user_id, f"proposal:{packet.proposal_id}", now, title="Proposal waiting",
+                                     body=packet.target, url=f"/#proposal-{packet.proposal_id}")
+                elif conn.execute("SELECT 1 FROM packets WHERE user_id = ? AND packet_type = 'result' AND key = ?",
+                                  (user_id, packet.batch)).fetchone():
+                    # The briefing already went out: one push for the rest of the batch.
+                    self._queue_push(conn, user_id, f"batch:{packet.batch}", now, title="Proposals waiting",
+                                     body=f"from {packet.batch}", url=f"/#proposal-{packet.proposal_id}")
+            elif packet.packet_type == "proposal_update":
+                self._record_update(conn, user_id, device_id, packet, now)
         return True
 
+    def _batch_waiting(self, conn: sqlite3.Connection, user_id: str, batch: str) -> int:
+        return conn.execute(
+            "SELECT COUNT(*) FROM proposals WHERE user_id = ? AND state = 'proposed' "
+            "AND json_extract(payload, '$.batch') = ?", (user_id, batch)).fetchone()[0]
+
+    def _record_update(self, conn: sqlite3.Connection, user_id: str, device_id: str, packet: BaseModel,
+                       now: datetime) -> None:
+        """A git state the laptop decided. A merge sets the measure timer: a
+        device job, due 2 weeks after the merge."""
+        try:
+            self.proposals(user_id).transition_in(conn, packet.proposal_id, packet.from_state, packet.to_state,
+                                                  packet.request_id, _owner(device_id), packet.note)
+        except (IllegalTransition, ValueError) as e:
+            raise Conflict(str(e)) from None
+        if packet.to_state == "merged":
+            at = datetime.fromisoformat(packet.at)
+            insert_job(conn, user_id, "measure", {"proposal_id": packet.proposal_id},
+                       request_id=f"measure:{packet.proposal_id}", run_after=at + MEASURE_AFTER, max_attempts=3,
+                       now=now, runner="device")
+        elif packet.to_state in ("failed", "kept", "revert_proposed"):
+            title = {"failed": "Proposal not applied", "kept": "Change kept",
+                     "revert_proposed": "Change made things worse"}[packet.to_state]
+            self._queue_push(conn, user_id, f"update:{packet.request_id}", now, title=title,
+                             body=packet.note or packet.to_state, url=f"/#proposal-{packet.proposal_id}")
+
     def _record_proposal(self, conn: sqlite3.Connection, user_id: str, device_id: str, packet: BaseModel) -> None:
-        payload = packet.model_dump(include={"diff", "rationale", "evidence", "eval_summary"})
+        payload = packet.model_dump(include={"diff", "rationale", "evidence", "eval_summary", "batch"})
         expires_at = datetime.fromisoformat(packet.expires_at) if packet.expires_at else None
         if expires_at is not None and expires_at.tzinfo is None:
             raise Conflict("expires_at needs a UTC offset")
@@ -382,6 +422,23 @@ class Mailbox:
                 "SELECT body FROM packets WHERE user_id = ? AND packet_type = ? ORDER BY key DESC LIMIT ?",
                 (user_id, packet_type, limit),
             )]
+
+    def timeline(self, user_id: str) -> dict:
+        """The hill (cloud-architecture §5.4): each day's metrics, oldest
+        first, and a marker per merged Gardener change with its verdict."""
+        days = sorted(self.packets(user_id, "metrics"), key=lambda d: d["date"])
+        updates = self.packets(user_id, "proposal_update", 5000)
+        verdicts = {u["proposal_id"]: u["measure"]["verdict"] for u in updates if u.get("measure")}
+        with closing(self._db._connect()) as conn:
+            proposals = {r["id"]: r for r in conn.execute(
+                "SELECT id, target, state FROM proposals WHERE user_id = ?", (user_id,))}
+        changes = sorted(({"proposal_id": u["proposal_id"], "merged_at": u["at"],
+                           "target": proposals[u["proposal_id"]]["target"],
+                           "state": proposals[u["proposal_id"]]["state"],
+                           "verdict": verdicts.get(u["proposal_id"])}
+                          for u in updates if u["to_state"] == "merged" and u["proposal_id"] in proposals),
+                         key=lambda c: c["merged_at"])
+        return {"days": days, "changes": changes}
 
     # ── proposals and decisions ───────────────────────────────────────────────
 

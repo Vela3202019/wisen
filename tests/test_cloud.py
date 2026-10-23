@@ -334,8 +334,9 @@ async def check_approvals():
             assert inbox["id"] == proposal.id and inbox["state"] == "proposed" and inbox["target"] == "wisen:CLAUDE.md"
             assert inbox["payload"]["diff"] == DIFF and "CANARY_PAUSED_RUN" not in json.dumps(inbox)
             await server.run_jobs()
-            assert server.sender.sent[-1][1] == {"title": "Proposal waiting", "body": "wisen:CLAUDE.md",
-                                                 "url": f"/#proposal-{proposal.id}"}
+            # Not part of a daily batch, so it is pushed on its own.
+            assert {"title": "Proposal waiting", "body": "wisen:CLAUDE.md", "url": f"/#proposal-{proposal.id}"} in [
+                message for _, message in server.sender.sent], server.sender.sent
             # The first decision wins; a second tap (another device, a retry) gets it back.
             url = f"/api/proposals/{proposal.id}/decision"
             first = (await browser.post(url, json={"decision": "approved", "request_id": "tap-0001"})).json()
@@ -345,12 +346,16 @@ async def check_approvals():
             assert first["decision"] == "approved" and not first["already_decided"], first
             assert again == first and other["decision"] == "approved" and other["already_decided"], other
             # The laptop hears about it on its next poll and records the same decision.
+            # The approval then reaches the applier, which refuses it here: no
+            # project called "wisen" exists on this laptop (tests/test_gardener.py
+            # covers the branch itself).
             await worker.run(creds, store, http=http, once=True)
-            assert (await local.get(proposal.id)).state == "approved"
-            assert [e.request_id for e in await local.history(proposal.id)] == ["gardener:1", "tap-0001"]
+            moves = ["gardener:1", "tap-0001", f"failed:{proposal.id}"]
+            assert (await local.get(proposal.id)).state == "failed"
+            assert [e.request_id for e in await local.history(proposal.id)] == moves
             # The feed is replayed from the start after a lost cursor: still one decision.
             await worker.apply_decisions(store, (await _poll(creds, http, 0))["decisions"])
-            assert [e.request_id for e in await local.history(proposal.id)] == ["gardener:1", "tap-0001"]
+            assert [e.request_id for e in await local.history(proposal.id)] == moves
             # A proposal never changes once sent.
             changed = proposal_packet(proposal.id, "wisen:CLAUDE.md", {**proposal.payload, "rationale": "other"},
                                       proposal.expires_at, user=USER, device_id=creds.device_id)

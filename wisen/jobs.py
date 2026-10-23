@@ -616,11 +616,11 @@ def get_engine() -> JobEngine:
     global _engine
     if _engine is None:
         # Imported here: the handlers' modules import this one.
-        from wisen.proposals import expire_proposal_job
+        from wisen.gardener.loop import HANDLERS as gardener
         from wisen.synthesis.job import run_synthesis_job
 
         _engine = JobEngine(get_store(), {
             "synthesize": run_synthesis_job,
-            "expire-proposal": expire_proposal_job,
+            **gardener,  # garden, gardener-resume, apply-proposal, measure-proposal, expire-proposal
         })
     return _engine

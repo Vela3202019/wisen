@@ -170,8 +170,11 @@ characters, briefings at 4,000).
 - A paired wisen server receives what `wisen worker` sends: one result
   packet per reflection, cut down to the result fields; Gardener proposals
   (target file, diff, rationale, short quotes; a diff that would need
-  redacting or cutting is not sent at all); and job status (state, times,
-  error class, never a traceback). Results' `evidence` fields and summaries
+  redacting or cutting is not sent at all); what became of each approved
+  proposal (its branch name, applied / merged / measured, and the measured
+  numbers); one row of numbers per day for the verification loop (user turns,
+  corrections, tokens, problems solved; no text); and job status (state,
+  times, error class, never a traceback). Results' `evidence` fields and summaries
   can quote short pieces of your sessions word for word. Raw transcripts, the
   full turn excerpts, the Observer's notes, the SQLite file, and API keys
   never go to the server, and the server re-checks every packet against the
@@ -247,6 +250,7 @@ python3 -m tests.test_claude_cli # subscription-synthesis adapter (no live call)
 python3 -m tests.test_store      # SQLite store on a temp file
 python3 -m tests.test_jobs       # job engine + proposal state machine, incl. a kill-and-restart
 python3 -m tests.test_cloud      # server stage A in-process: pairing, push, approvals, backups, privacy
+python3 -m tests.test_gardener   # Gardener loop on temp repos with a fake model: apply once, allow-list, measure
 python3 -m tests.test_ingest     # reads your real local session data
 python3 -m tests.test_sources    # per-connector, real local data
 python3 -m tests.test_synthesis  # end-to-end: calls the LLM, writes SQLite

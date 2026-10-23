@@ -27,13 +27,16 @@ class Case(BaseModel):
     session_id: str
     source_path: str             # raw transcript the case was mined from
     project_path: str
-    detector: Detector
+    detector: Detector | None    # None for a clean case
     context: list[ContextTurn]   # conversation prefix up to the failure
     agent_action: str = ""       # what the agent did/was about to do (LLM-enriched)
     correction: str              # the user's actual words — verbatim ground truth
     behavior_check: str = ""     # yes/no judge question (LLM-enriched)
     split: Literal["eval", "holdout"]
     status: Literal["mined", "confirmed", "rejected"] = "mined"
+    # "clean": a smooth moment a config change must not break (the clean set);
+    # its behavior_check asks whether the replay broke it.
+    kind: Literal["correction", "clean"] = "correction"
 
 
 def assign_split(date: str) -> Literal["eval", "holdout"]:

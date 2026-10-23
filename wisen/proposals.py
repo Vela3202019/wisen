@@ -1,7 +1,8 @@
 """
 Proposal state machine: the record of each Gardener proposal and the only code
 that moves it between states. The Gardener itself (what to propose, applying
-the branch) comes later; this is the record and its transitions.
+the branch, measuring) is wisen/gardener/; this is the record and its
+transitions.
 
     proposed  --> approved | rejected   a human decision, through decide()
     proposed  --> expired               no decision before expires_at
@@ -301,17 +302,25 @@ class Proposals:
         return await asyncio.to_thread(self._decide, proposal_id, decision, request_id, actor, note)
 
     def _transition(self, proposal_id, from_state, to_state, request_id, actor, note) -> ProposalEvent:
+        with self.store.transaction() as conn:
+            return self.transition_in(conn, proposal_id, from_state, to_state, request_id, actor, note)
+
+    def transition_in(
+        self, conn: sqlite3.Connection, proposal_id: str, from_state: str, to_state: str, request_id: str,
+        actor: str, note: str | None = None,
+    ) -> ProposalEvent:
+        """`transition`, inside the caller's transaction (lesson 1), so the
+        move commits with whatever else that transaction writes."""
         if to_state in DECISIONS:
             raise IllegalTransition(f"{to_state} is a decision; use decide()")
-        with self.store.transaction() as conn:
-            receipt = self._receipt(conn, request_id)
-            if receipt:
-                if (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
-                    proposal_id, from_state, to_state
-                ):
-                    raise ValueError(f"request id {request_id!r} was already used for a different move")
-                return _event(receipt)
-            return self._move(conn, proposal_id, from_state, to_state, request_id, actor, note, ts(self.clock()))
+        receipt = self._receipt(conn, request_id)
+        if receipt:
+            if (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
+                proposal_id, from_state, to_state
+            ):
+                raise ValueError(f"request id {request_id!r} was already used for a different move")
+            return _event(receipt)
+        return self._move(conn, proposal_id, from_state, to_state, request_id, actor, note, ts(self.clock()))
 
     async def transition(
         self, proposal_id: str, from_state: str, to_state: str, *, request_id: str, actor: str,

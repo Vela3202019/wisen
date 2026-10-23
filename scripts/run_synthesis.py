@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from wisen.synthesis.job import synthesize_day
+from wisen.synthesis.job import garden_day, synthesize_day
 
 
 async def main() -> None:
@@ -26,6 +26,10 @@ async def main() -> None:
     if job.state != "succeeded":
         raise SystemExit(f"synthesis failed: {job.error}")
     print(f"done — reflection saved for {date}")
+    # The day's Gardener batch, so it is waiting with the morning reflection.
+    garden = await garden_day(date)
+    if garden.state != "succeeded":
+        print(f"gardener failed: {garden.error}", file=sys.stderr)
 
 
 if __name__ == "__main__":
