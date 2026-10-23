@@ -369,7 +369,7 @@ class Mailbox:
                                   (user_id, packet.batch)).fetchone():
                     # The briefing already went out: one push for the rest of the batch.
                     self._queue_push(conn, user_id, f"batch:{packet.batch}", now, title="Proposals waiting",
-                                     body=f"from {packet.batch}", url=f"/#proposal-{packet.proposal_id}")
+                                     body=f"from {packet.batch}", url=f"/#day-{packet.batch}")
             elif packet.packet_type == "proposal_update":
                 self._record_update(conn, user_id, device_id, packet, now)
         return True

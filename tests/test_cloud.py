@@ -370,6 +370,32 @@ async def check_approvals():
     print("✓ cloud: a proposal reaches the inbox; the first decision wins and reaches the laptop")
 
 
+async def check_batch_after_briefing():
+    """Proposals of a day whose reflection is already on the server (e.g. a
+    backfilled day): all reach the inbox, under one push for the batch."""
+    server = _server("batch")
+    store = get_store()
+    local = Proposals(store)
+    async with server.browser() as browser:
+        await browser.post("/api/push/subscriptions", json={"subscription": {
+            "endpoint": "https://push.example/phone", "keys": {"p256dh": "k", "auth": "a"}}})
+        creds = await server.device(browser)
+        await _upsert(_reflection("2026-10-17"))
+        async with server.http() as http:
+            await worker.run(creds, store, http=http, once=True)
+            made = [await local.create(target, {"diff": DIFF, "rationale": "r", "evidence": [], "batch": "2026-10-17"},
+                                       request_id=f"gardener:batch:{target}", actor="gardener",
+                                       expires_at=datetime.now(UTC) + timedelta(days=7))
+                    for target in ("wisen:CLAUDE.md", "wisen:AGENTS.md")]
+            await worker.run(creds, store, http=http, once=True)
+            inbox = {p["id"] for p in (await browser.get("/api/proposals")).json()}
+            assert {p.id for p in made} <= inbox, inbox
+            await server.run_jobs()
+            batch = [m for _, m in server.sender.sent if m["title"] == "Proposals waiting"]
+            assert batch == [{"title": "Proposals waiting", "body": "from 2026-10-17", "url": "/#day-2026-10-17"}], batch
+    print("✓ cloud: a batch that arrives after its reflection reaches the inbox under one push")
+
+
 async def _poll(creds: Credentials, http: httpx.AsyncClient, cursor: int) -> dict:
     async with CloudClient(creds, http) as client:
         return await client.poll(cursor, wait=0)
@@ -756,6 +782,7 @@ async def main():
     await check_no_model_key()
     await check_no_marker_reaches_server()
     await check_prepairing_proposals()
+    await check_batch_after_briefing()
     print("\nall cloud tests passed")
 
 
