@@ -7,6 +7,9 @@ models on receipt, so the schema is the privacy boundary at both ends.
   observation  the Observer's notes on a day, for a server-side Synthesizer
   usage        subscription usage percentages and reset times
   proposal     a Gardener proposal awaiting a human decision
+  proposal_update  a git state the laptop decided for a proposal (applied,
+               merged, measured, …), with its branch and measured numbers
+  metrics      one day's verification-loop numbers (no text)
   job_status   how a device job ended: state, timings, error class
 
 Builders here only shape data. Redaction and length caps live on the field
@@ -82,6 +85,9 @@ def _whole(max_len: int):
 Target = _whole(300)       # project alias + relative path of a file the Gardener may edit
 Diff = _whole(20_000)      # a unified diff
 ErrorClass = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][\w.]*$", max_length=200)]
+Branch = Annotated[str, StringConstraints(pattern=r"^wisen/gardener/[0-9a-f]{32}$", max_length=60)]
+UpdateId = Annotated[str, StringConstraints(
+    pattern=r"^(cli|expire|applied|failed|merged|abandoned|measuring|measured):[0-9a-f]{32}$", max_length=50)]
 
 
 def user_id() -> str:
@@ -147,6 +153,16 @@ class UsagePacket(Usage, Envelope):
     packet_type: Literal["usage"]
 
 
+class Decided(BaseModel):
+    """What became of a proposal the laptop decided or expired while unpaired.
+    It travels with the proposal's first upload: the server takes no device
+    decision for a proposal it already holds."""
+    request_id: UpdateId
+    state: Literal["approved", "rejected", "expired"]
+    at: Label
+    note: Text | None = None
+
+
 class CloudProposal(BaseModel):
     proposal_id: HexId
     target: Target
@@ -155,10 +171,74 @@ class CloudProposal(BaseModel):
     evidence: list[Quote] = Field([], max_length=10)
     eval_summary: Text | None = None
     expires_at: Label | None = None
+    batch: Date | None = None   # the day whose Gardener run made it (the daily batch)
+    decided: Decided | None = None
 
 
 class ProposalPacket(CloudProposal, Envelope):
     packet_type: Literal["proposal"]
+
+
+class MeasureWindow(BaseModel):
+    first: Date
+    last: Date
+    user_turns: int
+    problems_solved: int
+    corrections_per_100_turns: float | None
+    tokens_per_problem: float | None
+    hitl_turns_per_pr: float | None
+    friction_half_life_days: float | None
+
+
+class CloudMeasure(BaseModel):
+    verdict: Literal["helped", "no_change", "worse"]
+    before: MeasureWindow
+    after: MeasureWindow
+
+
+class ProposalUpdate(BaseModel):
+    """A move the laptop is the authority for (cloud-architecture §6.1)."""
+    proposal_id: HexId
+    request_id: UpdateId
+    from_state: Literal["approved", "applied", "merged", "measuring"]
+    to_state: Literal["applied", "failed", "merged", "abandoned", "measuring", "kept", "revert_proposed"]
+    at: Label
+    branch: Branch | None = None
+    note: Text | None = None
+    measure: CloudMeasure | None = None
+
+
+class ProposalUpdatePacket(ProposalUpdate, Envelope):
+    packet_type: Literal["proposal_update"]
+
+
+class Detections(BaseModel):
+    tool_rejection: int
+    interruption: int
+    explicit_correction: int
+    rephrase_storm: int
+
+
+class DayMetrics(BaseModel):
+    """The verification loop's numbers for one day (wisen/evals/verification.py)."""
+    date: Date
+    user_turns: int
+    corrections: int
+    corrections_per_100_turns: float | None
+    by_detector: Detections
+    tokens: int
+    cost_usd: float | None
+    problems_solved: int
+    tokens_per_problem: float | None
+    turns_per_problem: float | None
+    cost_per_problem: float | None
+    hitl_turns_per_pr: float | None
+    reverted: int
+    refixed: int
+
+
+class MetricsPacket(DayMetrics, Envelope):
+    packet_type: Literal["metrics"]
 
 
 class JobStatus(BaseModel):
@@ -179,6 +259,8 @@ PACKETS: dict[str, type[BaseModel]] = {
     "observation": ObservationPacket,
     "usage": UsagePacket,
     "proposal": ProposalPacket,
+    "proposal_update": ProposalUpdatePacket,
+    "metrics": MetricsPacket,
     "job_status": JobStatusPacket,
 }
 
@@ -233,12 +315,21 @@ def usage_packet(usage: dict) -> dict:
 
 
 def proposal_packet(proposal_id: str, target: str, payload: dict, expires_at: str | None, *,
-                    user: str | None = None, device_id: str | None = None) -> dict:
+                    decided: dict | None = None, user: str | None = None, device_id: str | None = None) -> dict:
     """A stored proposal, cut down to the CloudProposal allow-list: the rest of
     its payload (a paused agent run, say) stays here."""
-    content = {"proposal_id": proposal_id, "target": target, "expires_at": expires_at,
-               **{k: payload[k] for k in ("diff", "rationale", "evidence", "eval_summary") if k in payload}}
+    content = {"proposal_id": proposal_id, "target": target, "expires_at": expires_at, "decided": decided,
+               **{k: payload[k] for k in ("diff", "rationale", "evidence", "eval_summary", "batch") if k in payload}}
     return _packet("proposal", validate(CloudProposal, content, "proposal packet", extra="forbid"), user, device_id)
+
+
+def proposal_update_packet(update: dict, *, user: str | None = None, device_id: str | None = None) -> dict:
+    return _packet("proposal_update", validate(ProposalUpdate, update, "proposal update packet", extra="forbid"),
+                   user, device_id)
+
+
+def metrics_packet(doc: dict, *, user: str | None = None, device_id: str | None = None) -> dict:
+    return _packet("metrics", validate(DayMetrics, doc, "metrics packet", extra="forbid"), user, device_id)
 
 
 def job_status_packet(status: dict, *, user: str | None = None, device_id: str | None = None) -> dict:

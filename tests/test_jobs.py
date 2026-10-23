@@ -131,7 +131,7 @@ async def check_kill_and_restart(tmp: str):
     jobs_mod._engine = JobEngine(store, {"synthesize": synthesis_job.run_synthesis_job},
                                  clock=lambda: datetime.now(UTC) + 2 * LEASE)
     done = await synthesis_job.synthesize_day(DATE)
-    assert done.id == job["id"] and len(_rows(store, "SELECT 1 FROM jobs")) == 1
+    assert done.id == job["id"] and len(_rows(store, "SELECT 1 FROM jobs WHERE kind = 'synthesize'")) == 1
     assert done.state == "succeeded" and done.result == {"date": DATE} and done.attempts == 1, done
     # The Observer ran once; the interrupted Synthesizer re-ran; one save, one reflection.
     assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save"], calls.read_text()
@@ -142,11 +142,15 @@ async def check_kill_and_restart(tmp: str):
     assert again.id == job["id"] and again.state == "succeeded" and again.attempts == 1, again
     assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save",
                                          "DayObservation", "Reflection", "save"], calls.read_text()
-    assert len(_rows(store, "SELECT 1 FROM jobs")) == 1 and len(_rows(store, "SELECT 1 FROM reflections")) == 1
+    assert len(_rows(store, "SELECT 1 FROM jobs WHERE kind = 'synthesize'")) == 1
+    assert len(_rows(store, "SELECT 1 FROM reflections")) == 1
+    # The saved day queued its one Gardener run; a re-synthesized day does not queue another.
+    assert [r["request_id"] for r in _rows(store, "SELECT request_id FROM jobs WHERE kind = 'garden'")] == [
+        f"garden:{DATE}"]
     jobs_mod._engine = None
     # Once the job is final its step outputs are dropped; names and times stay.
     outputs = _rows(store, "SELECT name, output FROM job_steps ORDER BY started_at")
-    assert [r["name"] for r in outputs] == ["observe", "synthesize", "save"], outputs
+    assert [r["name"] for r in outputs] == ["observe", "synthesize", "save", "garden"], outputs
     assert all(r["output"] is None for r in outputs), [dict(r) for r in outputs]
     print("✓ jobs: SIGKILL between Observer and Synthesizer resumes; Observer not re-run; one save")
 

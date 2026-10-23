@@ -8,7 +8,9 @@ wisen command-line interface.
   wisen migrate-mongo             one-off copy of a pre-SQLite MongoDB into SQLite
   wisen eval <args...>            case-bank commands (mine, list, review,
                                   metrics, replay, compare)
-  wisen worker                    laptop daemon for a paired server (outbound only)
+  wisen worker                    laptop daemon: with a paired server, sync and run its
+                                  device jobs (outbound only); unpaired, local jobs only
+  wisen gardener <command>        Gardener proposals: run, list, approve, reject, status
   wisen cloud <command>           the server (serve, user, vapid-keys, backup,
                                   restore) and pairing this laptop with one (pair)
 """
@@ -17,6 +19,7 @@ import asyncio
 import getpass
 import os
 import sys
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -24,13 +27,18 @@ from wisen import __version__, config
 
 
 async def _synthesize(date: str) -> None:
-    from wisen.synthesis.job import synthesize_day
+    from wisen.synthesis.job import garden_day, synthesize_day
 
     print(f"[{datetime.now(UTC).isoformat()}] synthesizing {date}")
     job = await synthesize_day(date)
     if job.state != "succeeded":
         raise SystemExit(f"synthesis failed: {job.error}")
     print(f"done — reflection saved for {date}")
+    garden = await garden_day(date)
+    if garden.state != "succeeded":
+        print(f"gardener failed: {garden.error}", file=sys.stderr)
+    elif garden.result["proposals"]:
+        print(f"gardener: {garden.result['proposals']} proposals waiting (wisen gardener list)")
 
 
 async def _export(out_dir: Path) -> None:
@@ -105,14 +113,71 @@ def _cloud(args) -> None:
 
 def _worker(once: bool) -> None:
     from wisen.cloud.client import Credentials, credentials_path
-    from wisen.cloud.worker import run
+    from wisen.cloud.worker import run, run_local
     from wisen.store import get_store
 
     creds = Credentials.load()
     if creds is None:
-        raise SystemExit(f"not paired ({credentials_path()} missing): run wisen cloud pair https://<server>")
+        if once:
+            raise SystemExit(f"not paired ({credentials_path()} missing): run wisen cloud pair https://<server>")
+        print("wisen worker: not paired; running local jobs only (Gardener timers, merge checks)")
+        asyncio.run(run_local(get_store()))
+        return
     print(f"wisen worker: {creds.url} as device {creds.device_id}")
     asyncio.run(run(creds, get_store(), once=once))
+
+
+async def _gardener(args) -> None:
+    """Local-only mode's approval inbox; with a paired server, decide in its
+    dashboard instead (the server is the authority for decisions)."""
+    from wisen.cloud.worker import drain, tend
+    from wisen.gardener.applier import git_row
+    from wisen.gardener.loop import on_decided
+    from wisen.jobs import get_engine
+    from wisen.proposals import IllegalTransition, Proposals
+    from wisen.store import get_store
+    from wisen.synthesis.job import garden_day
+
+    store, engine = get_store(), get_engine()
+    proposals = Proposals(store)
+    if args.gardener_cmd == "run":
+        day = args.date or (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
+        job = await garden_day(day)
+        if job.state != "succeeded":
+            raise SystemExit(f"gardener failed: {job.error}")
+        print(f"{job.result['proposals']} proposals from {day}")
+    elif args.gardener_cmd in ("approve", "reject"):
+        from wisen.cloud.client import Credentials
+
+        if creds := Credentials.load():
+            raise SystemExit(f"paired with {creds.url}: decide in its dashboard, so both sides keep one decision")
+        decision = "approved" if args.gardener_cmd == "approve" else "rejected"
+        request_id = f"cli:{uuid.uuid4().hex}"
+        try:
+            d = await proposals.decide(args.id, decision, request_id=request_id, actor="cli",
+                                       note=getattr(args, "note", None))
+        except IllegalTransition as e:
+            raise SystemExit(str(e))
+        await on_decided(store, engine, args.id)
+        await drain(engine)
+        last = (await proposals.history(args.id))[-1]
+        print(f"{args.id}: {d.decision}{' earlier' if d.request_id != request_id else ''}; now {last.to_state}"
+              + (f": {last.note}" if last.note and last.to_state != d.decision else ""))
+    elif args.gardener_cmd == "status":
+        await tend(store, engine)
+        await drain(engine)
+    if args.gardener_cmd in ("list", "status"):
+        for p in await proposals.list(states=None if args.all else ("proposed", "approved", "applied",
+                                                                    "merged", "measuring")):
+            print(f"{p.id}  {p.state:<15} {p.target}")
+            if p.state == "applied" and (row := git_row(store, p.id)):
+                where = f"git --git-dir {row['git_dir']}" if row["git_dir"] else f"git -C {row['work_tree']}"
+                print(f"    branch {row['branch']}; merge it when you choose: {where} merge {row['branch']}")
+            if p.state == "proposed":
+                print(f"    {p.payload.get('rationale', '')}")
+                print(f"    {p.payload.get('eval_summary') or ''}")
+                for line in p.payload.get("diff", "").splitlines():
+                    print(f"    {line}")
 
 
 def main() -> None:
@@ -140,8 +205,22 @@ def main() -> None:
     ev = sub.add_parser("eval", help="case-bank commands (mine, list, review, …)")
     ev.add_argument("args", nargs=argparse.REMAINDER)
 
-    wk = sub.add_parser("worker", help="laptop daemon for a paired server: sync up, run device jobs")
+    wk = sub.add_parser("worker", help="laptop daemon: with a paired server, sync and run its device jobs; unpaired, run only local jobs (Gardener timers, merge checks)")
     wk.add_argument("--once", action="store_true", help="one pass, no waiting (for debugging)")
+
+    gd = sub.add_parser("gardener", help="Gardener proposals (local-only mode's approval inbox)")
+    gs = gd.add_subparsers(dest="gardener_cmd", required=True)
+    c = gs.add_parser("run", help="run the Gardener for a day now (default: yesterday)")
+    c.add_argument("date", nargs="?")
+    c = gs.add_parser("list", help="open proposals with their diffs")
+    c.add_argument("--all", action="store_true", help="every proposal, in any state")
+    c = gs.add_parser("status", help="check applied branches for merges, run due jobs, then list")
+    c.add_argument("--all", action="store_true", help="every proposal, in any state")
+    c = gs.add_parser("approve", help="approve a proposal; its branch is made at once")
+    c.add_argument("id")
+    c = gs.add_parser("reject", help="reject a proposal; the note reaches the Gardener")
+    c.add_argument("id")
+    c.add_argument("--note", help="why, in your words")
 
     cl = sub.add_parser("cloud", help="the wisen server, and pairing with one")
     cs = cl.add_subparsers(dest="cloud_cmd", required=True)
@@ -189,6 +268,8 @@ def main() -> None:
         _worker(args.once)
     elif args.cmd == "cloud":
         _cloud(args)
+    elif args.cmd == "gardener":
+        asyncio.run(_gardener(args))
     elif args.cmd == "eval":
         from wisen.evals.cli import main as eval_main
         sys.argv = ["wisen eval"] + args.args

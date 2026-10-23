@@ -10,6 +10,7 @@ Browser (session cookie, after /login):
   GET  /api/queue                  dates waiting for a device to synthesize
   POST /api/trigger                {"date"}: ask a device to synthesize that day
   GET  /api/proposals              the approval inbox
+  GET  /api/timeline               daily verification metrics + merged Gardener changes
   POST /api/proposals/{id}/decision  {"decision", "note", "request_id"}
   GET  /api/devices                paired devices
   POST /api/devices/{id}/revoke
@@ -20,7 +21,7 @@ Browser (session cookie, after /login):
 
 Device (Authorization: Bearer <device token>; the laptop only connects out):
   POST /api/device/pair            {"code", "name"} -> a device token (no auth)
-  POST /api/device/packets         one packet (result, usage, proposal)
+  POST /api/device/packets         one packet (result, usage, proposal, proposal_update, metrics)
   POST /api/device/poll            long poll: a device job to lease, and decisions
   POST /api/device/jobs/{id}/heartbeat
   POST /api/device/jobs/{id}/finish  a job_status packet
@@ -245,6 +246,10 @@ def create_app(
     async def proposals(user: User):
         return [asdict(p) for p in await mailbox.inbox(user)]
 
+    @app.get("/api/timeline")
+    async def timeline(user: User):
+        return await asyncio.to_thread(mailbox.timeline, user)
+
     @app.post("/api/proposals/{proposal_id}/decision")
     async def decide(proposal_id: Id, body: DecisionIn, user: User):
         try:
@@ -302,7 +307,7 @@ def create_app(
             stored = await asyncio.to_thread(mailbox.store_packet, user_id, device_id, packet)
         except Conflict as e:
             raise HTTPException(409, str(e)) from None
-        if stored and packet.packet_type in ("result", "proposal"):
+        if stored and packet.packet_type in ("result", "proposal", "proposal_update"):
             mailbox.engine(user_id).wake()
         return {"stored": stored, "packet_id": packet.packet_id}
 

@@ -3,6 +3,10 @@ Detect correction moments in raw claude-code transcripts and turn them into
 eval cases. All detection is deterministic; only enrich() calls an LLM, to fill
 agent_action and behavior_check.
 
+A session with no detection yields one clean case instead (kind "clean"): a
+smooth moment a config change must not break. Its behavior_check is fixed, so
+it needs no enrichment.
+
 Detectors:
   tool-rejection      user declined a tool call (harness marker in tool_result)
   interruption        user hit escape mid-turn ("[Request interrupted by user")
@@ -12,7 +16,8 @@ Detectors:
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -38,6 +43,8 @@ _CORRECTION_RE = re.compile(
 _HARNESS_RE = re.compile(r"^\s*(<(task-notification|command-name|local-command|system-reminder|bash-)|Caveat:)")
 _CONTEXT_TURNS = 12
 _RAPID_CORRECTION_SECONDS = 60
+CLEAN_CHECK = ("Did the agent do something the user would have had to correct, stop or undo, "
+               "instead of carrying the work on as it went in the original session?")
 
 
 @dataclass
@@ -48,6 +55,36 @@ class SessionScan:
     source_path: str
     user_turns: int = 0
     cases: list[Case] = field(default_factory=list)
+    clean: Case | None = None    # the clean-set case of a session with no detection
+    # For the verification loop (wisen/evals/verification.py):
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    git_branch: str = ""         # the branch the session ran on, as the harness recorded it
+    tokens: int = 0              # input + output + cache tokens, each assistant message once
+    cost_usd: float | None = None  # only when the transcript records it
+
+
+_USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def _usage(events: list[dict]) -> tuple[int, float | None]:
+    """Tokens and recorded cost. The harness writes one event per content
+    block of a message, each with the message's usage, so count each message id once."""
+    seen: set[str] = set()
+    tokens, cost = 0, None
+    for e in events:
+        msg = e.get("message")
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        key = msg.get("id") or e.get("uuid") or str(id(e))
+        if key in seen:
+            continue
+        seen.add(key)
+        usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
+        tokens += sum(v for k in _USAGE_KEYS if isinstance(v := usage.get(k), int))
+        if isinstance(e.get("costUSD"), int | float):
+            cost = (cost or 0.0) + e["costUSD"]
+    return tokens, cost
 
 
 def _plain_text(content) -> str:
@@ -134,9 +171,14 @@ def _scan_session(session_id: str, events: list[dict], project_path: str,
         return None
 
     date = first_ts.date().isoformat()
+    stamps = [ts if ts.tzinfo else ts.replace(tzinfo=UTC) for ts in map(_parse_ts, events) if ts]
+    tokens, cost = _usage(events)
     scan = SessionScan(
         date=date, session_id=session_id,
         project_path=project_path, source_path=source_path,
+        started_at=min(stamps), ended_at=max(stamps),
+        git_branch=next((e["gitBranch"] for e in reversed(events) if e.get("gitBranch")), ""),
+        tokens=tokens, cost_usd=cost,
     )
 
     prev_user_ts = None
@@ -160,7 +202,29 @@ def _scan_session(session_id: str, events: list[dict], project_path: str,
             detector=detector, context=context, correction=correction,
             split=assign_split(date),
         ))
+    if not scan.cases:
+        scan.clean = _clean_case(scan, turns)
     return scan
+
+
+def _clean_case(scan: SessionScan, turns: list) -> Case | None:
+    """The session's last user turn that follows earlier turns, with the
+    turns before it as context: the replay must carry on as smoothly."""
+    idx = next((i for i in range(len(turns) - 1, 0, -1) if turns[i][1] == "user"), None)
+    if idx is None:
+        return None
+    event_i, _, text, _, _ = turns[idx]
+    context = [
+        ContextTurn(role=r, content=truncate_content(t or rej, 1500))
+        for _, r, t, _, rej in turns[max(0, idx - _CONTEXT_TURNS):idx]
+    ]
+    return Case(
+        id=f"{scan.date}-{scan.session_id[:8]}-{event_i}",
+        date=scan.date, session_id=scan.session_id,
+        source_path=scan.source_path, project_path=scan.project_path,
+        detector=None, context=context, correction=truncate_content(text, 500),
+        behavior_check=CLEAN_CHECK, split=assign_split(scan.date), kind="clean",
+    )
 
 
 def scan_all(claude_dir: Path = _CLAUDE_DIR, since: str | None = None) -> Iterator[SessionScan]:
@@ -195,12 +259,15 @@ The user corrected the agent. From the context and the correction, produce:
   Example: "Did the agent add a fallback default value the user didn't ask for?"
 Be specific to this case; never generic."""
 
-_enricher = Agent(get_model(), output_type=Enrichment, instructions=_ENRICH_PROMPT)
+@cache
+def _enricher() -> Agent:
+    # Built on first use: importing the miner (the metrics do) needs no model key.
+    return Agent(get_model(), output_type=Enrichment, instructions=_ENRICH_PROMPT)
 
 
 async def enrich(case: Case) -> Case:
     transcript = "\n".join(f"{t.role}: {t.content}" for t in case.context)
-    result = await _enricher.run(
+    result = await _enricher().run(
         f"## Context (before the correction)\n{transcript}\n\n"
         f"## Detector\n{case.detector}\n\n## User's correction\n{case.correction}"
     )

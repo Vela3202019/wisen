@@ -163,6 +163,48 @@ MIGRATIONS = [
         PRIMARY KEY (user_id, key)
     );
     """,
+    # 3: the Gardener loop (wisen/gardener). A paused Gardener run and its
+    # Conversation; where an applied proposal's branch lives; the field
+    # check's verdict; one row of verification-loop metrics per day.
+    """
+    CREATE TABLE gardener_runs (
+        id           TEXT PRIMARY KEY,
+        user_id      TEXT NOT NULL,
+        date         TEXT NOT NULL,
+        conversation TEXT NOT NULL,
+        state        TEXT NOT NULL,
+        output       TEXT,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+    );
+    CREATE TABLE proposal_git (
+        proposal_id TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL,
+        git_dir     TEXT NOT NULL,
+        work_tree   TEXT NOT NULL,
+        path        TEXT NOT NULL,
+        branch      TEXT NOT NULL,
+        base_commit TEXT NOT NULL,
+        commit_sha  TEXT NOT NULL,
+        new_blob    TEXT,
+        applied_at  TEXT NOT NULL,
+        merged_at   TEXT
+    );
+    CREATE TABLE proposal_measures (
+        proposal_id TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL,
+        verdict     TEXT NOT NULL,
+        reason      TEXT NOT NULL,
+        result      TEXT NOT NULL,
+        at          TEXT NOT NULL
+    );
+    CREATE TABLE daily_metrics (
+        user_id TEXT NOT NULL,
+        date    TEXT NOT NULL,
+        doc     TEXT NOT NULL,
+        PRIMARY KEY (user_id, date)
+    );
+    """,
 ]
 
 

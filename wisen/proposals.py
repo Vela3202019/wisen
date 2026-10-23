@@ -1,7 +1,8 @@
 """
 Proposal state machine: the record of each Gardener proposal and the only code
 that moves it between states. The Gardener itself (what to propose, applying
-the branch) comes later; this is the record and its transitions.
+the branch, measuring) is wisen/gardener/; this is the record and its
+transitions.
 
     proposed  --> approved | rejected   a human decision, through decide()
     proposed  --> expired               no decision before expires_at
@@ -160,10 +161,11 @@ class Proposals:
 
     def create_in(
         self, conn: sqlite3.Connection, target: str, payload: dict, request_id: str, actor: str,
-        expires_at: datetime | None, proposal_id: str | None = None,
+        expires_at: datetime | None, proposal_id: str | None = None, *, expiry_timer: bool = True,
     ) -> Proposal:
         """`create`, inside the caller's transaction (lesson 1), so the record
-        commits with whatever else that transaction writes."""
+        commits with whatever else that transaction writes. Without
+        `expiry_timer` no expiry job is set (the uploading laptop owns it)."""
         now = self.clock()
         receipt = self._receipt(conn, request_id)
         if receipt:
@@ -191,7 +193,7 @@ class Proposals:
                 "VALUES (?, ?, ?, NULL, 'proposed', ?, ?)",
                 (self._uid, proposal_id, request_id, actor, ts(now)),
             )
-            if expires_at:
+            if expires_at and expiry_timer:
                 # The expiry is a stored timer job written with the
                 # proposal, so no restart can lose it (lessons 1 and 5).
                 insert_job(
@@ -267,29 +269,38 @@ class Proposals:
     # ── moves ─────────────────────────────────────────────────────────────────
 
     def _decide(self, proposal_id, decision, request_id, actor, note) -> Decision:
+        with self.store.transaction() as conn:
+            return self.decide_in(conn, proposal_id, decision, request_id, actor, note, self.clock())
+
+    def decide_in(
+        self, conn: sqlite3.Connection, proposal_id: str, decision: str, request_id: str, actor: str,
+        note: str | None, at: datetime,
+    ) -> Decision:
+        """`decide`, inside the caller's transaction, as of `at`: a decision
+        the laptop made while unpaired keeps its own time, so one made before
+        the deadline still counts when it reaches the server after it."""
         if decision not in DECISIONS:
             raise ValueError(f"a decision is one of {sorted(DECISIONS)}, not {decision!r}")
-        now = ts(self.clock())
-        with self.store.transaction() as conn:
-            receipt = self._receipt(conn, request_id)
-            if receipt and (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
-                proposal_id, "proposed", decision
-            ):
-                raise ValueError(f"request id {request_id!r} was already used for a different command")
+        now = ts(at)
+        receipt = self._receipt(conn, request_id)
+        if receipt and (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
+            proposal_id, "proposed", decision
+        ):
+            raise ValueError(f"request id {request_id!r} was already used for a different command")
+        memo = conn.execute(
+            "SELECT * FROM proposal_decisions WHERE user_id = ? AND proposal_id = ?",
+            (self._uid, proposal_id),
+        ).fetchone()
+        if memo is None:
+            self._move(conn, proposal_id, "proposed", decision, request_id, actor, note, now)
+            conn.execute(
+                "INSERT INTO proposal_decisions (proposal_id, user_id, decision, actor, note, request_id, at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (proposal_id, self._uid, decision, actor, note, request_id, now),
+            )
             memo = conn.execute(
-                "SELECT * FROM proposal_decisions WHERE user_id = ? AND proposal_id = ?",
-                (self._uid, proposal_id),
+                "SELECT * FROM proposal_decisions WHERE proposal_id = ?", (proposal_id,)
             ).fetchone()
-            if memo is None:
-                self._move(conn, proposal_id, "proposed", decision, request_id, actor, note, now)
-                conn.execute(
-                    "INSERT INTO proposal_decisions (proposal_id, user_id, decision, actor, note, request_id, at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (proposal_id, self._uid, decision, actor, note, request_id, now),
-                )
-                memo = conn.execute(
-                    "SELECT * FROM proposal_decisions WHERE proposal_id = ?", (proposal_id,)
-                ).fetchone()
         return _decision(memo)
 
     async def decide(
@@ -301,17 +312,25 @@ class Proposals:
         return await asyncio.to_thread(self._decide, proposal_id, decision, request_id, actor, note)
 
     def _transition(self, proposal_id, from_state, to_state, request_id, actor, note) -> ProposalEvent:
+        with self.store.transaction() as conn:
+            return self.transition_in(conn, proposal_id, from_state, to_state, request_id, actor, note)
+
+    def transition_in(
+        self, conn: sqlite3.Connection, proposal_id: str, from_state: str, to_state: str, request_id: str,
+        actor: str, note: str | None = None,
+    ) -> ProposalEvent:
+        """`transition`, inside the caller's transaction (lesson 1), so the
+        move commits with whatever else that transaction writes."""
         if to_state in DECISIONS:
             raise IllegalTransition(f"{to_state} is a decision; use decide()")
-        with self.store.transaction() as conn:
-            receipt = self._receipt(conn, request_id)
-            if receipt:
-                if (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
-                    proposal_id, from_state, to_state
-                ):
-                    raise ValueError(f"request id {request_id!r} was already used for a different move")
-                return _event(receipt)
-            return self._move(conn, proposal_id, from_state, to_state, request_id, actor, note, ts(self.clock()))
+        receipt = self._receipt(conn, request_id)
+        if receipt:
+            if (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
+                proposal_id, from_state, to_state
+            ):
+                raise ValueError(f"request id {request_id!r} was already used for a different move")
+            return _event(receipt)
+        return self._move(conn, proposal_id, from_state, to_state, request_id, actor, note, ts(self.clock()))
 
     async def transition(
         self, proposal_id: str, from_state: str, to_state: str, *, request_id: str, actor: str,
