@@ -4,6 +4,8 @@ Run: python3 -m tests.test_evals
 """
 import asyncio
 import json
+import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -11,7 +13,7 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
 from wisen.evals import cli as evals_cli
-from wisen.evals import judge, miner, runner
+from wisen.evals import judge, miner, replay, runner
 from wisen.evals.cases import Case, ContextTurn, assign_split, load_cases, save_case
 from wisen.evals.metrics import daily_correction_rates, friction_half_life, pearson
 from wisen.evals.miner import scan_all
@@ -239,6 +241,39 @@ def test_judge_prompt_by_kind():
     print("✓ judge: a clean case is framed as the user's next message in a smooth session")
 
 
+def test_replay_error_result():
+    """A `claude -p` run that reports is_error (e.g. logged out) is a replay
+    error, not a transcript for the judge to score as a pass."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        project, bin_dir = tmp / "proj", tmp / "bin"
+        project.mkdir()
+        bin_dir.mkdir()
+        dated = {**os.environ, "GIT_AUTHOR_DATE": "2026-06-01T12:00:00", "GIT_COMMITTER_DATE": "2026-06-01T12:00:00"}
+        git = lambda *a: subprocess.run(["git", "-C", str(project), *a], capture_output=True, check=True, env=dated)
+        git("init", "-q")
+        (project / "a.txt").write_text("a")
+        git("add", "a.txt")
+        git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "a")
+        claude = bin_dir / "claude"
+        claude.write_text("#!/bin/sh\necho '" + json.dumps({
+            "type": "result", "subtype": "success", "is_error": True, "num_turns": 1,
+            "result": "Not logged in · Please run /login", "total_cost_usd": 0, "usage": {}}) + "'\nexit 1\n")
+        claude.chmod(0o755)
+        case = Case(id="x", date="2026-07-01", session_id="s", source_path="/x", project_path=str(project),
+                    detector="explicit-correction", context=[ContextTurn(role="user", content="do it")],
+                    correction="no", behavior_check="Did it?", split="eval")
+        real_stage, real_path = replay.stage_config, os.environ["PATH"]
+        replay.stage_config = lambda claude_md, staging: staging.mkdir(parents=True)
+        os.environ["PATH"] = f"{bin_dir}{os.pathsep}{real_path}"
+        try:
+            result = replay.run_replay(case)
+        finally:
+            replay.stage_config, os.environ["PATH"] = real_stage, real_path
+    assert result.error == "claude -p failed: Not logged in · Please run /login", result
+    print("✓ replay: a claude -p error result is an error, not a judged replay")
+
+
 if __name__ == "__main__":
     test_detectors()
     test_no_false_positives()
@@ -247,4 +282,5 @@ if __name__ == "__main__":
     test_build_prompt()
     test_clean_set()
     test_judge_prompt_by_kind()
+    test_replay_error_result()
     print("\nall eval tests passed")

@@ -146,6 +146,8 @@ def run_replay(case: Case, claude_md: Path | None = None, *, config_files: dict[
                     (d for d in reversed(data)
                      if isinstance(d, dict) and d.get("type") == "result"), {},
                 )
+            if data.get("is_error"):  # e.g. "Not logged in": nothing was replayed, so nothing to judge
+                return ReplayResult("", "", error=f"claude -p failed: {str(data.get('result'))[:500]}")
             final_text = data.get("result", "")
             diff = subprocess.run(
                 ["git", "-C", str(worktree), "diff"],
