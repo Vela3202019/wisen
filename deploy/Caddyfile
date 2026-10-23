@@ -1,0 +1,17 @@
+# Add this site block to the box's Caddyfile (Caddy gets the certificate).
+# The hostname must resolve to the box; change it for your own server.
+wisen.vela-server.duckdns.org {
+	encode zstd gzip
+	request_body {
+		max_size 1MB
+	}
+	# Device polls hold a request open for up to 30 s; Caddy's proxy has no
+	# response timeout by default, so nothing else is needed for them.
+	reverse_proxy 127.0.0.1:8722
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+	}
+}

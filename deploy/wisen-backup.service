@@ -1,0 +1,23 @@
+# Daily consistent snapshot of the server database (run by wisen-backup.timer).
+# Install as /etc/systemd/system/wisen-backup.service.
+
+[Unit]
+Description=wisen server database snapshot
+
+[Service]
+Type=oneshot
+User=wisen
+Group=wisen
+Environment=WISEN_CLOUD_DB=/var/lib/wisen/wisen.db
+# SQLite's online backup API: safe while the server runs. Keeps 14 snapshots.
+ExecStart=/opt/wisen/bin/wisen cloud backup /var/lib/wisen/backups --keep 14
+# Copy the snapshots off the box (they hold packets and results, never raw
+# transcripts). For example, with an rclone remote set up for the wisen user:
+# ExecStartPost=/usr/bin/rclone copy /var/lib/wisen/backups offsite:wisen-backups
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/wisen
+ProtectHome=true
+PrivateTmp=true
+UMask=0077

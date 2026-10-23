@@ -26,7 +26,7 @@ All package code lives under `wisen/`:
 - `wisen/synthesis/` — daily reflection synthesis agent
 - `wisen/chat/` — chat agent (`agent.py`) + history/config search tools (`search.py`)
 - `wisen/voice/` — LiveKit token endpoint (`[voice]` extra; lazily imported)
-- `wisen/dashboard/` — stdlib-only web dashboard for remote hosting (synced logs + queued reflection triggers); `scripts/export_reflections.py` produces its data files
+- `wisen/dashboard/` — the server's installable web app (reflections, approval inbox, Web Push service worker), served by `wisen cloud serve` (`wisen/cloud/`) from packets the laptop's `wisen worker` uploads
 - `scripts/` — thin wrappers for launchd jobs; must stay runnable by system python (they bootstrap `sys.path` themselves)
 
 ## Conventions

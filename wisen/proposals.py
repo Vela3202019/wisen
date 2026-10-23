@@ -19,6 +19,8 @@ decision is also a first-write-wins memo (lesson 6): the first approve or
 reject is recorded once, and a later one (a Telegram retry, a tap on a second
 device) gets the first answer back. See docs/plan/cloud-architecture.md §6.1.
 """
+from __future__ import annotations
+
 import asyncio
 import json
 import sqlite3
@@ -41,6 +43,9 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "measuring": frozenset({"kept", "revert_proposed"}),
 }
 DECISIONS = frozenset({"approved", "rejected"})
+# The states the human's side decides (the server, once paired); the laptop
+# learns them from the decision feed (`events_since`).
+DECIDED = ("approved", "rejected", "expired", "superseded")
 
 
 class IllegalTransition(Exception):
@@ -149,48 +154,65 @@ class Proposals:
 
     # ── create / read ─────────────────────────────────────────────────────────
 
-    def _create(self, target, payload, request_id, actor, expires_at) -> Proposal:
-        now = self.clock()
+    def _create(self, target, payload, request_id, actor, expires_at, proposal_id) -> Proposal:
         with self.store.transaction() as conn:
-            receipt = self._receipt(conn, request_id)
-            if receipt:
-                proposal_id = receipt["proposal_id"]
-                row = conn.execute("SELECT target, payload FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
-                if receipt["from_state"] is not None or (row["target"], json.loads(row["payload"])) != (
-                    target, payload
-                ):
-                    raise ValueError(f"request id {request_id!r} was already used for a different command")
-            else:
+            return self.create_in(conn, target, payload, request_id, actor, expires_at, proposal_id)
+
+    def create_in(
+        self, conn: sqlite3.Connection, target: str, payload: dict, request_id: str, actor: str,
+        expires_at: datetime | None, proposal_id: str | None = None,
+    ) -> Proposal:
+        """`create`, inside the caller's transaction (lesson 1), so the record
+        commits with whatever else that transaction writes."""
+        now = self.clock()
+        receipt = self._receipt(conn, request_id)
+        if receipt:
+            if proposal_id not in (None, receipt["proposal_id"]):
+                raise ValueError(f"request id {request_id!r} was already used for a different command")
+            proposal_id = receipt["proposal_id"]
+            row = conn.execute("SELECT target, payload FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
+            if receipt["from_state"] is not None or (row["target"], json.loads(row["payload"])) != (
+                target, payload
+            ):
+                raise ValueError(f"request id {request_id!r} was already used for a different command")
+        else:
+            if proposal_id is None:
                 proposal_id = uuid.uuid4().hex
-                conn.execute(
-                    "INSERT INTO proposals (id, user_id, target, state, payload, expires_at, created_at, updated_at) "
-                    "VALUES (?, ?, ?, 'proposed', ?, ?, ?, ?)",
-                    (proposal_id, self._uid, target, json.dumps(payload), ts(expires_at) if expires_at else None,
-                     ts(now), ts(now)),
+            elif conn.execute("SELECT 1 FROM proposals WHERE id = ?", (proposal_id,)).fetchone():
+                raise ValueError(f"proposal {proposal_id} already exists")
+            conn.execute(
+                "INSERT INTO proposals (id, user_id, target, state, payload, expires_at, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'proposed', ?, ?, ?, ?)",
+                (proposal_id, self._uid, target, json.dumps(payload), ts(expires_at) if expires_at else None,
+                 ts(now), ts(now)),
+            )
+            conn.execute(
+                "INSERT INTO proposal_events (user_id, proposal_id, request_id, from_state, to_state, actor, at) "
+                "VALUES (?, ?, ?, NULL, 'proposed', ?, ?)",
+                (self._uid, proposal_id, request_id, actor, ts(now)),
+            )
+            if expires_at:
+                # The expiry is a stored timer job written with the
+                # proposal, so no restart can lose it (lessons 1 and 5).
+                insert_job(
+                    conn, self._uid, "expire-proposal", {"proposal_id": proposal_id},
+                    request_id=f"expire-proposal:{proposal_id}", run_after=expires_at,
+                    max_attempts=3, now=now,
                 )
-                conn.execute(
-                    "INSERT INTO proposal_events (user_id, proposal_id, request_id, from_state, to_state, actor, at) "
-                    "VALUES (?, ?, ?, NULL, 'proposed', ?, ?)",
-                    (self._uid, proposal_id, request_id, actor, ts(now)),
-                )
-                if expires_at:
-                    # The expiry is a stored timer job written with the
-                    # proposal, so no restart can lose it (lessons 1 and 5).
-                    insert_job(
-                        conn, self._uid, "expire-proposal", {"proposal_id": proposal_id},
-                        request_id=f"expire-proposal:{proposal_id}", run_after=expires_at,
-                        max_attempts=3, now=now,
-                    )
-            row = conn.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
+        row = conn.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
         return _proposal(row)
 
     async def create(
         self, target: str, payload: dict[str, Any], *, request_id: str, actor: str,
-        expires_at: datetime | None = None,
+        expires_at: datetime | None = None, proposal_id: str | None = None,
     ) -> Proposal:
         """Record a new proposal in `proposed`. `target` names the file it
-        changes; `payload` holds the rest (diff, rationale, evidence)."""
-        return await asyncio.to_thread(self._create, target, payload, request_id, actor, expires_at)
+        changes; `payload` holds the rest (diff, rationale, evidence).
+        `proposal_id` keeps an id given elsewhere (the server records a
+        laptop's proposal under the laptop's id); by default one is made."""
+        return await asyncio.to_thread(
+            self._create, target, payload, request_id, actor, expires_at, proposal_id
+        )
 
     def _get(self, proposal_id: str) -> Proposal | None:
         with closing(self.store._connect()) as conn:
@@ -212,6 +234,35 @@ class Proposals:
     async def history(self, proposal_id: str) -> list[ProposalEvent]:
         """The audit trail: every move, oldest first."""
         return await asyncio.to_thread(self._history, proposal_id)
+
+    def _list(self, states: tuple[str, ...] | None, limit: int) -> list[Proposal]:
+        sql, params = "SELECT * FROM proposals WHERE user_id = ?", [self._uid]
+        if states is not None:
+            sql += f" AND state IN ({', '.join('?' * len(states))})"
+            params += states
+        with closing(self.store._connect()) as conn:
+            return [_proposal(r) for r in conn.execute(sql + " ORDER BY created_at DESC LIMIT ?", (*params, limit))]
+
+    async def list(self, states: tuple[str, ...] | None = None, limit: int = 50) -> list[Proposal]:
+        """Newest first, optionally only those in `states`."""
+        return await asyncio.to_thread(self._list, states, limit)
+
+    def _events_since(self, cursor: int, to_states: tuple[str, ...], limit: int) -> list[tuple[int, ProposalEvent]]:
+        with closing(self.store._connect()) as conn:
+            return [(r["id"], _event(r)) for r in conn.execute(
+                f"SELECT * FROM proposal_events WHERE user_id = ? AND id > ? "
+                f"AND to_state IN ({', '.join('?' * len(to_states))}) ORDER BY id LIMIT ?",
+                (self._uid, cursor, *to_states, limit),
+            )]
+
+    async def events_since(
+        self, cursor: int, to_states: tuple[str, ...] = DECIDED, limit: int = 100,
+    ) -> list[tuple[int, ProposalEvent]]:
+        """Committed moves into `to_states` after event id `cursor`, oldest
+        first, each with its event id (the next cursor). From cursor 0 this is
+        the full snapshot, so a reconnecting reader catches up with one call
+        (lesson 8: reconnect is snapshot, then committed changes)."""
+        return await asyncio.to_thread(self._events_since, cursor, to_states, limit)
 
     # ── moves ─────────────────────────────────────────────────────────────────
 

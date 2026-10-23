@@ -1,0 +1,42 @@
+# wisen server, stage A: one process (uvicorn, one worker) that owns the
+# SQLite file, the timers and push. Install as /etc/systemd/system/wisen.service.
+# Secrets live in /etc/wisen/wisen.env (root-owned, 0600); see deploy/README.md.
+
+[Unit]
+Description=wisen server (mailbox, approval inbox, Web Push)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wisen
+Group=wisen
+EnvironmentFile=/etc/wisen/wisen.env
+Environment=WISEN_CLOUD_DB=/var/lib/wisen/wisen.db
+WorkingDirectory=/var/lib/wisen
+# Binds localhost only; Caddy terminates HTTPS in front of it.
+ExecStart=/opt/wisen/bin/wisen cloud serve --host 127.0.0.1 --port 8722
+Restart=on-failure
+RestartSec=5
+
+# Never starve the other apps on the box.
+MemoryHigh=250M
+MemoryMax=320M
+
+# Sandbox: the only writable path is the data directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/wisen
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

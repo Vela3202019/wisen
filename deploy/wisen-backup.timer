@@ -1,0 +1,14 @@
+# Install as /etc/systemd/system/wisen-backup.timer, then:
+#   systemctl enable --now wisen-backup.timer
+
+[Unit]
+Description=Daily wisen server database snapshot
+
+[Timer]
+OnCalendar=daily
+# Run at the next boot if the box was off when it was due.
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target

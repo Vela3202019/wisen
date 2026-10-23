@@ -59,6 +59,9 @@ wisen serve                     # POST /synthesize, GET /reflections, POST /chat
 wisen export [dir]              # dump reflections to JSON files
 wisen egress                    # what passed the egress gate today
 wisen migrate-mongo             # one-off: copy a pre-SQLite MongoDB into SQLite
+wisen cloud pair https://<host> # pair this laptop with your wisen server
+wisen worker                    # laptop daemon for a paired server (outbound only)
+wisen cloud serve               # run the server itself (on your server)
 ```
 
 Upgrading from a MongoDB-backed wisen? Run `pip install -e ".[migrate]"` and
@@ -66,6 +69,32 @@ Upgrading from a MongoDB-backed wisen? Run `pip install -e ".[migrate]"` and
 reflections and chat/voice sessions into the SQLite file. Re-running it is
 safe: anything already in SQLite (by reflection date, chat session or voice
 room) is skipped, never overwritten.
+
+## Your own server (optional)
+
+wisen runs fully on your laptop. Add a small server of your own and you get
+the dashboard on your phone as an installable web app, push notifications
+when a reflection or a proposal is ready, an approval inbox, and a daily
+schedule that runs while you sleep. The server is a mailbox: it never makes a
+model call, holds no model key, and never sees raw transcripts. Your laptop
+does all model work and only ever connects out to it.
+
+On the server (one Python process; see [deploy/README.md](deploy/README.md)
+for systemd, Caddy and backups):
+
+```bash
+pip install "wisen[cloud]"
+wisen cloud user <name>             # your login (prompts for a password)
+wisen cloud vapid-keys              # Web Push keys -> WISEN_VAPID_* env vars
+wisen cloud serve                   # 127.0.0.1:8722, behind your HTTPS proxy
+```
+
+On the laptop:
+
+```bash
+wisen cloud pair https://<host>     # code from the dashboard: Devices -> Add device
+wisen worker                        # keep it running with launchd (deploy/launchd/)
+```
 
 ## How it works
 
@@ -138,11 +167,17 @@ not on the schema, masks secrets (API keys, tokens, private keys), replaces
 email addresses and absolute paths, and caps every text field (quotes at 500
 characters, briefings at 4,000).
 
-- The optional dashboard receives what `scripts/export_reflections.py` writes:
-  one result packet per reflection, cut down to the result fields. Its
-  `evidence` fields and summaries can quote short pieces of your sessions word
-  for word. Raw transcripts, the full turn excerpts, the SQLite file, and API
-  keys never go to the dashboard.
+- A paired wisen server receives what `wisen worker` sends: one result
+  packet per reflection, cut down to the result fields; Gardener proposals
+  (target file, diff, rationale, short quotes; a diff that would need
+  redacting or cutting is not sent at all); and job status (state, times,
+  error class, never a traceback). Results' `evidence` fields and summaries
+  can quote short pieces of your sessions word for word. Raw transcripts, the
+  full turn excerpts, the Observer's notes, the SQLite file, and API keys
+  never go to the server, and the server re-checks every packet against the
+  same schema and rejects anything else. `wisen export` and
+  `scripts/export_reflections.py` write the same result packets to a folder
+  instead, for a sync job of your own.
 - `scripts/collect_usage.py` adds a usage packet with subscription usage
   percentages and reset times. To get the Claude percentages, it reads your
   Claude OAuth token from the Keychain and calls Anthropic's usage endpoint.
@@ -151,8 +186,10 @@ characters, briefings at 4,000).
 Every packet that passes the gate is logged in `~/.wisen/egress.log`: time,
 destination, packet type, size, field names and a SHA-256 of the bytes, never
 the content. `wisen egress` shows today's (`--date`, `--list` for one line per
-packet). The export writes packets to a folder that your own sync job (for
-example rsync) uploads, so the log records what was prepared for upload; a
+packet). Packets sent to your server are logged as `cloud:<host>` just before
+they leave; the worker sends a packet again only when its content changed.
+The export writes packets to a folder that your own sync job (for example
+rsync) uploads, so for those the log records what was prepared for upload; a
 packet whose content has not changed is not rewritten or logged again.
 
 ## Configuration
@@ -182,16 +219,20 @@ transcripts, then configs — before answering with dates and quotes.
 wisen runs on your machine. Network calls go to the model providers (see
 [What leaves your machine](#what-leaves-your-machine)), the GitHub API (the
 git commits connector reads your pushes), Anthropic's usage endpoint (the usage
-collector), and the optional dashboard sync. The optional dashboard (`wisen/dashboard/`,
-stdlib-only) lives on a VPS and serves *exported* reflection JSON synced via
-rsync — the server never sees raw transcripts, the SQLite file, or an API key.
-`scripts/` has the thin wrappers meant for launchd/cron.
+collector), and your own wisen server if you pair one. The server
+(`wisen cloud serve`, `wisen/cloud/`) runs on a box you control and serves
+the dashboard (`wisen/dashboard/`) from the packets your laptop sends — it
+never sees raw transcripts, the laptop's SQLite file, or an API key.
+`scripts/` has the thin wrappers meant for launchd/cron; `deploy/` has the
+server's systemd, Caddy and backup samples and the laptop worker's launchd
+job.
 
 ## Extras
 
 | Extra | Adds |
 |---|---|
 | `pip install -e ".[server]"` | FastAPI + uvicorn (`wisen serve`) |
+| `pip install -e ".[cloud]"` | FastAPI + uvicorn + pywebpush (`wisen cloud serve`, on your server) |
 | `pip install -e ".[voice]"` | LiveKit voice agent — the morning briefing, out loud |
 | `pip install -e ".[dev]"` | pytest + ruff |
 | `pip install -e ".[migrate]"` | pymongo, for the one-off `wisen migrate-mongo` |
@@ -205,6 +246,7 @@ python3 -m tests.test_fixtures   # committed sample data — runs anywhere, what
 python3 -m tests.test_claude_cli # subscription-synthesis adapter (no live call)
 python3 -m tests.test_store      # SQLite store on a temp file
 python3 -m tests.test_jobs       # job engine + proposal state machine, incl. a kill-and-restart
+python3 -m tests.test_cloud      # server stage A in-process: pairing, push, approvals, backups, privacy
 python3 -m tests.test_ingest     # reads your real local session data
 python3 -m tests.test_sources    # per-connector, real local data
 python3 -m tests.test_synthesis  # end-to-end: calls the LLM, writes SQLite
