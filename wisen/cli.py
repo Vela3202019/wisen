@@ -205,7 +205,7 @@ def main() -> None:
     ev = sub.add_parser("eval", help="case-bank commands (mine, list, review, …)")
     ev.add_argument("args", nargs=argparse.REMAINDER)
 
-    wk = sub.add_parser("worker", help="laptop daemon for a paired server: sync up, run device jobs")
+    wk = sub.add_parser("worker", help="laptop daemon: with a paired server, sync and run its device jobs; unpaired, run only local jobs (Gardener timers, merge checks)")
     wk.add_argument("--once", action="store_true", help="one pass, no waiting (for debugging)")
 
     gd = sub.add_parser("gardener", help="Gardener proposals (local-only mode's approval inbox)")
