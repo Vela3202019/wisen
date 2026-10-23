@@ -253,7 +253,9 @@ packet carries this envelope:
 | Packet | Stage | Carries | Never carries |
 |---|---|---|---|
 | `ReflectionPacket` (today's `CloudReflection`) | A | The day's reflection: mood, questions, friction points, recommendations, insight, short evidence quotes | Stage-1 output, raw turns, file paths outside an alias |
-| `ProposalPacket` | A | A Gardener proposal: target file (as `project alias + relative path`), the unified diff, rationale, evidence refs and short quotes, eval results if any | The rest of the target repo |
+| `ProposalPacket` | A | A Gardener proposal: target file (as `project alias + relative path`), the unified diff, rationale, evidence refs and short quotes, eval results if any, the daily batch it belongs to | The rest of the target repo |
+| `ProposalUpdatePacket` | A (step 5) | A git state the laptop decided (`applied`, `failed`, `merged`, `abandoned`, `measuring`, `kept`, `revert_proposed`), the branch name, a short note (why it failed, why it was kept), and the measured numbers before and after | Repo paths, commit contents |
+| `MetricsPacket` | A (step 5) | One day's verification-loop numbers ([§5.4](#54-verification-loop-climbing-the-hill)): user turns, corrections by detector, tokens, problems solved, human turns per PR | Sessions, prompts, file names |
 | `JobStatusPacket` | A | Job id, state, timings, error class | Stack traces with local paths or content |
 | `AnswerPacket` | A | A chat answer written by a model, with short quotes and dates | Raw search hits |
 | `ObservationPacket` | B | What the Synthesizer needs from one day: per-session source, project alias, durations, counts, mood/friction labels, topics, key moments with capped quotes, model usage | Full turns, tool output, code |
@@ -344,19 +346,20 @@ sequenceDiagram
     participant L as Laptop applier
 
     G->>G: read recent reflections, friction, current file
-    G->>S: ProposalPacket (diff + rationale + evidence)
-    S->>H: push: "1 proposal waiting"
+    G->>G: replay eval: proposed file vs current,<br/>plus the clean set (capped)
+    G->>S: ProposalPacket (diff + rationale + evidence + replay result)
+    S->>H: push with the morning briefing: "2 proposals waiting"
     H->>S: approve / reject (with a note) / let it expire
     S->>L: decision (laptop polls)
     L->>L: re-check: approval record exists, path is allowed,<br/>file unchanged since the diff was made
     L->>L: create branch wisen/gardener/{proposal id}, commit
-    L->>S: JobStatusPacket: applied, branch name
+    L->>S: ProposalUpdatePacket: applied, branch name
     Note over H,L: the human merges the branch when they choose
-    L->>S: merged (detected locally)
-    Note over S: measure timer set for N weeks after merge
+    L->>S: ProposalUpdatePacket: merged (detected locally)
+    Note over S: measure timer set for 2 weeks after merge
     S->>L: device job: measure proposal
-    L->>L: eval loop: friction before vs after,<br/>replay cases if available
-    L->>S: result: helped / no change / worse
+    L->>L: eval loop: field metrics before vs after (§5.4)
+    L->>S: ProposalUpdatePacket: kept / revert_proposed, with the numbers
     G->>S: if worse: a new proposal to revert
 ```
 
@@ -386,10 +389,122 @@ cases where they exist. Two changes to that plan:
 - Replay runs **before** a proposal is sent, when cases exist, and its result
   goes into the proposal as evidence. It never applies a change by itself
   (this replaces the automatic accept/revert in eval-loop Phase 3).
-- After merge, a timer fires a measure job N weeks later. A "worse" result
+- After merge, a timer fires a measure job 2 weeks later. A "worse" result
   makes the Gardener propose a revert, which goes through the same approval.
 
-Measurement reads transcripts, so it always runs on the laptop.
+Measurement reads transcripts, so it always runs on the laptop. What is
+measured, and what counts as better, is the
+[verification loop](#54-verification-loop-climbing-the-hill).
+
+### 5.4 Verification loop: climbing the hill
+
+**What it is.** The hill is "my coding agents solve my problems with less of
+my time, less money and less friction". Each approved Gardener proposal is one
+step up it. The verification loop is how wisen knows a step went up and not
+down: a controlled check before you approve, and a field check two weeks after
+you merge. A step that went down is reverted, and the reason is written down
+so the next proposal learns from it.
+
+> 中文说明：「爬山」＝ 让编码 agent 用更少的人力、更少的钱、更少的摩擦解决问题。每个被批准的 Gardener 提案是往上走的一步。验证循环负责回答「这一步是上坡还是下坡」：批准前先用回放评测做对照实验，合并两周后再看真实数据；变差就提议回滚，并把原因记下来留给下一次提案。
+
+**The metric layers.**
+
+| Layer | Metric | Better is | Source |
+|---|---|---|---|
+| 1. Outcome | **Problems solved** per day ([definition below](#problems-solved-proposed-definition)), with a quality guard: the share of solved problems later reverted or re-fixed | more solved, smaller guard share | local git repos of the projects the sessions ran in |
+| 2. Cost | **Tokens per problem solved**, $ per problem solved (only where the transcript records cost), user turns per problem solved, and **human-in-the-loop turns per PR**: the user turns spent across the sessions that led to one PR, from the first related session until the PR merged | lower | transcripts (token usage per assistant message) |
+| 3. Friction | **Corrections per 100 user turns**, by detector (tool rejection, interruption, explicit correction, rephrase storm); **friction half-life** (mean days a friction persisted before it resolved) | lower | transcripts (`wisen/evals/miner.py`), reflections (`friction_deltas`) |
+| 4. Controlled check | **Replay pass rate** per config version on the confirmed eval cases, plus the **clean set** (smooth moments a change must not break) | eval up, clean not down | `wisen/evals/replay.py`, `wisen/evals/runner.py` |
+| Trust check | **Alignment correlation**: Pearson r between the reflection's `alignment_score` and the measured correction rate; it should be negative | below zero | `wisen/evals/metrics.py` |
+
+Tokens per problem solved and human-in-the-loop turns per PR are the two
+headline cost numbers.
+
+<a id="problems-solved-proposed-definition"></a>
+**Problems solved: proposed definition, pending the owner's confirmation.** A
+problem is solved when the work of a coding session lands:
+
+- Sessions on a feature branch belong to that branch. The branch is one
+  problem (one "PR"). It is solved when it reaches the project's default
+  branch: a merge commit on the default branch names it, or its tip is
+  contained in the default branch. It counts on the day it landed.
+- A session on the default branch itself is one problem. It is solved when a
+  commit lands on the default branch between the session's start and one hour
+  after its end.
+- Quality guard: a solved problem is **reverted** when a later default-branch
+  commit says `This reverts commit <sha>` for one of its commits, and
+  **re-fixed** when, within 7 days, a default-branch commit whose subject
+  starts with "fix" touches a file it touched.
+- Human-in-the-loop turns per PR: the user turns of all sessions on that
+  branch, from the first one until it landed.
+
+The data comes from the local clones (the default branch and its
+`origin/` copy, as of the last fetch). Squash merges that do not name the
+branch are missed until the GitHub connector supplies merged-PR data. The
+definition lives in one function (`problems_solved` in
+`wisen/evals/verification.py`), so changing it changes nothing else.
+
+**Before you approve: replay.** When the Gardener drafts a proposal and
+confirmed cases exist for the file it changes, wisen replays them under the
+current file and under the proposed one, plus the clean set, through the
+existing runner interface. At most `[gardener].replay_cases` cases of each kind
+run per proposal (default 5; 0 turns replay off), and the tokens and dollars
+each replay spent are recorded. The result goes on the proposal, so you see the
+expected gain before you approve. The **accept rule**: approve only if the
+replay pass rate rises and the clean-set pass rate does not drop. wisen shows
+whether a proposal meets it; you still decide. A proposal with no cases says
+so.
+
+**After you merge: the field check.** Two weeks after merge, the measure job
+compares 7-day rolling medians: the 7 days before the merge against the last 7
+of the 14 days after it (the first week lets the change settle).
+
+| Metric | Helped when | Worse when |
+|---|---|---|
+| Corrections per 100 user turns | down by more than 5% | up by more than 5% |
+| Friction half-life | down | — |
+| Tokens per problem solved | down or flat (within 5%) | up by more than 10% |
+
+Helped: corrections down, friction half-life down (or not measurable in either
+window), and tokens per problem solved down or flat. Worse: corrections or
+tokens per problem solved worse. Anything else, including too little data, is
+no change. Helped or no change keeps the change (`kept`);
+worse moves the proposal to `revert_proposed` and drafts the revert as a new
+proposal, which you approve like any other. The verdict, the numbers and the
+reason are stored with the proposal, and the next Gardener run reads them, so
+"kept: corrections 4.1 → 2.9 per 100 turns" or "reverted: tokens per problem
+solved rose 18%" shapes what it proposes next.
+
+**On the dashboard: the hill.** A timeline of corrections per 100 user turns
+and tokens per problem solved per day, with a marker at each merged Gardener
+change, labelled with its file and verdict. A climb shows as both lines
+stepping down after markers.
+
+### 5.5 Step 5 decisions in practice
+
+Decided by the owner on 2026-10-22 (open questions 6, 10 and 11):
+
+- **Files outside a git repo** (`~/.claude/CLAUDE.md`, personal skills): wisen
+  keeps its own git repo for them at `~/.wisen/gardener/home.git`, with your
+  home directory as its work tree. These files are named `home:<path relative
+  to home>`, for example `home:.claude/CLAUDE.md`. Its `main` branch records
+  the files as they are on disk; wisen commits there only to record a file as
+  it found it, never a change of its own. A proposal lands on
+  `wisen/gardener/<id>` like any other, and you merge it with
+  `git --git-dir ~/.wisen/gardener/home.git merge wisen/gardener/<id>`, which
+  writes the file. No setup is needed.
+- **Timing:** a proposal expires 7 days after it is made if nobody decides
+  it. Its effect is measured 2 weeks after merge.
+- **Batching:** the Gardener runs once a day, right after the morning
+  reflection, and its proposals arrive as one batch with the morning briefing
+  (one push: "Reflection ready · 2 proposals waiting"). You approve or reject
+  each item on its own.
+
+How the applier writes a branch without touching your checkout: it builds the
+commit in a temporary index (`git apply --cached`, `commit-tree`) and creates
+the branch ref only if it does not exist. The commit's author, time and parent
+are fixed by the approval, so a rerun after a crash or a reconnect makes the
+same commit, and the branch is never created twice.
 
 ---
 
@@ -493,6 +608,10 @@ Both use WAL mode. Schema changes are numbered SQL migrations, tracked in a
 | `jobs`, `job_steps` | `_jobs` dict | The job engine. |
 | `proposals`, `proposal_events` | — | The proposal state machine and its audit log. |
 | `egress_ledger` | — | Every packet sent. |
+| `gardener_runs` | — | A paused Gardener run: its `Conversation` (with the pending calls), the day it ran for, and its final answer once resumed. |
+| `proposal_git` | — | Where an applied proposal lives: repo, branch, base and branch commits, the resulting file blob, when it merged. |
+| `proposal_measures` | — | The field check's verdict, reason and numbers per proposal. |
+| `daily_metrics` | — | One row per day of verification-loop metrics ([§5.4](#54-verification-loop-climbing-the-hill)). |
 
 The server has the same job and proposal tables, plus `users`,
 `web_sessions`, `pairing_codes`, `devices` (one token per device, stored as a
@@ -655,7 +774,7 @@ step.
 | **2. Packet boundary** | Shared packet models (starting from `CloudReflection`); the packet envelope (`packet_type`, `schema_version`, `user_id`, `packet_id`, `created_at`); the egress gate (allow-list → redact → truncate → validate → ledger → send); `wisen egress` | `tests/test_egress.py` extended: a fixture with a fake API key and an absolute path yields a packet with neither; a packet with an extra field fails validation; a proposal whose diff is over its cap or contains a secret is rejected, not cut or rewritten |
 | **3. Job engine + proposal state machine** | `jobs`/`job_steps` with leases, timers, waits and replay policies; `transition()` with audit; `_jobs` in `wisen/main.py` and the launchd synthesis run moved onto it | Kill the process between Observer and Synthesizer, restart: the Observer is not called again and exactly one reflection is stored; a duplicate `request_id` returns the existing job; an illegal transition changes nothing; an expired lease is requeued on startup |
 | **4. Server, stage A** | `wisen cloud serve` replacing `wisen/dashboard/server.py`; login, pairing, device tokens; the mailbox and device-job API; approval inbox; installable web app with Web Push; `device_id` in the packet envelope; `wisen worker` on the laptop; `deploy/` samples; backup timer | On the Hetzner box: pair the laptop; a day's reflection arrives and the phone gets a push; a revoked token gets 401; a server restart mid-lease recovers the job; a restored backup serves the same data; the server's environment has no model key; no fixture marker string appears in the server database |
-| **5. Gardener loop** | The Gardener agent and its `requires_approval` tool; proposals from reflections; the laptop applier (allow-list, branch `wisen/gardener/<id>`); merge detection; the measure timer wired to the eval loop | An approved proposal produces exactly one commit on one branch even if the laptop reconnects mid-apply; a proposal for a disallowed path is refused after approval; a rejection note reaches the next run; a measure job fires after merge and records its result |
+| **5. Gardener loop** | The Gardener agent and its `requires_approval` tool; proposals from reflections; the laptop applier (allow-list, branch `wisen/gardener/<id>`); merge detection; the measure timer wired to the eval loop ([verification loop](#54-verification-loop-climbing-the-hill); decisions in [§5.5](#55-step-5-decisions-in-practice)) | An approved proposal produces exactly one commit on one branch even if the laptop reconnects mid-apply; a proposal for a disallowed path is refused after approval; a rejection note reaches the next run; a measure job fires after merge and records its result |
 | **6. Telegram** | Bot linking, notifications, approve/reject buttons, history chat (reflections by default, `/search` on the laptop) | Approving in Telegram and then in the web app records one decision; an unlinked chat is ignored; `/search` while the laptop sleeps is answered after it wakes |
 | **7. Stage B** | `ObservationPacket` upload; Synthesizer, Gardener and reflection chat on the server over packets; model key on the server; applying still on the laptop | With the laptop asleep, the morning reflection is produced from packets already uploaded; with a mock model that echoes its prompt, no fixture marker appears in any server-side prompt or row |
 
@@ -673,7 +792,9 @@ step.
 ## 14. Open questions
 
 The research raised these and the owner has not decided them. Each names the
-step that needs the answer.
+step that needs the answer. Numbers stay fixed so other sections can cite
+them; questions the owner has since decided are listed under
+[Decided](#decided) instead.
 
 1. **Tailscale or public HTTPS for the device API?** The design works with
    public HTTPS plus device tokens. Tailscale would hide the device API from the
@@ -692,9 +813,6 @@ step that needs the answer.
 5. **Vendor clouds as hands.** May an approved proposal be carried out by a
    vendor's cloud agent (Claude routines, Codex cloud), given those vendors would
    see and store the proposal? Not planned; listed so it is decided on purpose.
-6. **Files outside a git repo.** `~/.claude/CLAUDE.md` and personal skills
-   often are not in a repo. Should the Gardener require a dotfiles repo, keep a
-   wisen-managed git repo for them, or skip them? *Step 5.*
 7. **What the stage B Gardener may see.** To write a diff on the server it needs
    the current file text (`ConfigSnapshotPacket`). The alternative is that the
    server Gardener writes the intent and the laptop drafts the diff, which keeps
@@ -705,11 +823,23 @@ step that needs the answer.
    subscription rule may allow it for the owner's use, but it adds a Node CLI of
    unmeasured memory size and consumer data terms. Stage B assumes an API key
    unless this changes. *Step 7.*
-10. **Timing.** How long a proposal stays open before it expires, and how many
-    weeks after merge to measure. *Step 5.*
-11. **Proposal batching.** One approval per proposal, or a daily batch you
-    approve item by item? *Step 5.*
 12. **When to make the Observer's per-turn cap configurable.** The owner
     accepts excerpts up to about 4,000 characters per turn, but no build step
     delivers the setting yet. Which step should, and what should the default be
     once `wisen eval` has compared the sizes?
+
+### Decided
+
+Decided by the owner on 2026-10-22, for step 5. How the build carries them
+out is in [§5.5](#55-step-5-decisions-in-practice).
+
+6. **Files outside a git repo.** `~/.claude/CLAUDE.md` and personal skills
+   often are not in a repo. *Decided:* wisen keeps its own local git repo for
+   them, so the one-branch-per-proposal, owner-merges flow works with no
+   setup. (The other options were to require a dotfiles repo, or to skip
+   these files.)
+10. **Timing.** *Decided:* a proposal expires after 7 days unanswered; its
+    effect is measured 2 weeks after merge.
+11. **Proposal batching.** *Decided:* a daily batch that arrives with the
+    morning briefing, approved item by item. (The other option was one
+    approval request per proposal.)
