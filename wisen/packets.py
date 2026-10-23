@@ -87,7 +87,7 @@ Diff = _whole(20_000)      # a unified diff
 ErrorClass = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][\w.]*$", max_length=200)]
 Branch = Annotated[str, StringConstraints(pattern=r"^wisen/gardener/[0-9a-f]{32}$", max_length=60)]
 UpdateId = Annotated[str, StringConstraints(
-    pattern=r"^(applied|failed|merged|abandoned|measuring|measured):[0-9a-f]{32}$", max_length=50)]
+    pattern=r"^(cli|expire|applied|failed|merged|abandoned|measuring|measured):[0-9a-f]{32}$", max_length=50)]
 
 
 def user_id() -> str:
@@ -186,11 +186,14 @@ class CloudMeasure(BaseModel):
 
 
 class ProposalUpdate(BaseModel):
-    """A move the laptop is the authority for (cloud-architecture §6.1)."""
+    """A move the laptop is the authority for (cloud-architecture §6.1), or a
+    decision it recorded while unpaired, replayed when that proposal is
+    uploaded after pairing."""
     proposal_id: HexId
     request_id: UpdateId
-    from_state: Literal["approved", "applied", "merged", "measuring"]
-    to_state: Literal["applied", "failed", "merged", "abandoned", "measuring", "kept", "revert_proposed"]
+    from_state: Literal["proposed", "approved", "applied", "merged", "measuring"]
+    to_state: Literal["approved", "rejected", "expired", "applied", "failed", "merged", "abandoned", "measuring",
+                      "kept", "revert_proposed"]
     at: Label
     branch: Branch | None = None
     note: Text | None = None

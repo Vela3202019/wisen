@@ -383,6 +383,9 @@ class Mailbox:
                        now: datetime) -> None:
         """A git state the laptop decided. A merge sets the measure timer: a
         device job, due 2 weeks after the merge."""
+        if packet.from_state == "proposed":
+            self._record_replayed(conn, user_id, device_id, packet)
+            return
         try:
             self.proposals(user_id).transition_in(conn, packet.proposal_id, packet.from_state, packet.to_state,
                                                   packet.request_id, _owner(device_id), packet.note)
@@ -399,15 +402,43 @@ class Mailbox:
             self._queue_push(conn, user_id, f"update:{packet.request_id}", now, title=title,
                              body=packet.note or packet.to_state, url=f"/#proposal-{packet.proposal_id}")
 
+    def _record_replayed(self, conn: sqlite3.Connection, user_id: str, device_id: str, packet: BaseModel) -> None:
+        """A decision or expiry the laptop recorded for a proposal before
+        uploading it (decided while unpaired). The server is the authority for
+        decisions, so a device's is taken only if made before the server held
+        the proposal, and its expiry only past the deadline."""
+        at = ts(datetime.fromisoformat(packet.at))
+        row = conn.execute("SELECT created_at, expires_at FROM proposals WHERE user_id = ? AND id = ?",
+                           (user_id, packet.proposal_id)).fetchone()
+        if row is None:
+            raise Conflict(f"no proposal {packet.proposal_id}")
+        proposals = self.proposals(user_id)
+        try:
+            if packet.to_state == "expired":
+                if row["expires_at"] is None or at < row["expires_at"]:
+                    raise Conflict(f"proposal {packet.proposal_id} is not past its expiry")
+                proposals.transition_in(conn, packet.proposal_id, "proposed", "expired", packet.request_id,
+                                        _owner(device_id))
+            else:
+                if at >= row["created_at"]:
+                    raise Conflict("a device sends only decisions made before the proposal was uploaded; "
+                                   "decide in the dashboard")
+                proposals.decide_in(conn, packet.proposal_id, packet.to_state, packet.request_id,
+                                    _owner(device_id), packet.note, datetime.fromisoformat(packet.at))
+        except (IllegalTransition, ValueError) as e:
+            raise Conflict(str(e)) from None
+
     def _record_proposal(self, conn: sqlite3.Connection, user_id: str, device_id: str, packet: BaseModel) -> None:
         payload = packet.model_dump(include={"diff", "rationale", "evidence", "eval_summary", "batch"})
         expires_at = datetime.fromisoformat(packet.expires_at) if packet.expires_at else None
         if expires_at is not None and expires_at.tzinfo is None:
             raise Conflict("expires_at needs a UTC offset")
         try:
+            # Uploaded past its deadline (made while unpaired): the laptop
+            # sends what became of it, so no expiry here races its decision.
             self.proposals(user_id).create_in(
                 conn, packet.target, payload, f"packet:{packet.packet_id}", _owner(device_id), expires_at,
-                packet.proposal_id,
+                packet.proposal_id, expiry_timer=expires_at is None or expires_at > self.clock(),
             )
         except ValueError as e:
             raise Conflict(str(e)) from None

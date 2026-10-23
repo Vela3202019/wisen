@@ -7,6 +7,7 @@ Covers the step-4 checks that do not need the box:
   - login: the dashboard and its API need a session; logins are throttled
   - pairing: a one-time code buys a device token; only its hash is stored
   - a revoked device token gets 401, and its leased job is released
+  - proposals decided before pairing upload with their full history once paired
   - a day's reflection syncs laptop -> server and triggers one push
   - approvals: a proposal syncs up, the first decision wins, the laptop learns it
   - a server restart mid-lease recovers the device job; a stale lease is fenced
@@ -20,6 +21,7 @@ Covers the step-4 checks that do not need the box:
 No network or model needed. Run: python3 -m tests.test_cloud
 """
 import asyncio
+import io
 import json
 import os
 import sqlite3
@@ -27,7 +29,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, redirect_stderr
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -373,6 +375,64 @@ async def _poll(creds: Credentials, http: httpx.AsyncClient, cursor: int) -> dic
         return await client.poll(cursor, wait=0)
 
 
+# ── proposals decided before pairing ──────────────────────────────────────────
+
+async def check_prepairing_proposals():
+    """Local-only mode first: 3 proposals decided on the laptop (one merged,
+    one rejected, one expired), all past their deadline by the time the laptop
+    pairs, plus one the egress gate refuses. Pairing then uploads each with
+    its history, and no cycle repeats a refusal."""
+    server = _server("prepairing")
+    store = get_store()
+    early = Clock()
+    early.now = T0 - timedelta(days=10)
+    local = Proposals(store, early)
+
+    async def make(target: str, diff: str = DIFF):
+        return await local.create(target, {"diff": diff, "rationale": "r", "evidence": []},
+                                  request_id=f"gardener:{target}", actor="gardener",
+                                  expires_at=early.now + timedelta(days=7))
+
+    merged, rejected, expired, too_big = (await make("wisen:A.md"), await make("wisen:B.md"),
+                                         await make("wisen:C.md"), await make("wisen:D.md", "x" * 20_001))
+    early.now += timedelta(days=1)
+    await local.decide(merged.id, "approved", request_id=f"cli:{'1' * 32}", actor="cli")
+    await local.transition(merged.id, "approved", "applied", request_id=f"applied:{merged.id}", actor="applier")
+    await local.transition(merged.id, "applied", "merged", request_id=f"merged:{merged.id}", actor="merge-check")
+    await local.decide(rejected.id, "rejected", request_id=f"cli:{'2' * 32}", actor="cli", note="too vague")
+    await local.decide(too_big.id, "rejected", request_id=f"cli:{'3' * 32}", actor="cli")
+    early.now += timedelta(days=7)
+    assert await local.expire(expired.id)
+    async with server.browser() as browser:
+        creds = await server.device(browser)
+        errors = []
+        async with server.http() as http:
+            for _ in range(3):
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    await worker.run(creds, store, http=http, once=True)
+                # The laptop file is shared with earlier checks (paired to
+                # other servers): only this check's proposals count here.
+                ids = (merged.id, rejected.id, expired.id, too_big.id)
+                errors.append("".join(line for line in err.getvalue().splitlines(keepends=True)
+                                      if any(i in line for i in ids)))
+        inbox = {p["id"]: p["state"] for p in (await browser.get("/api/proposals")).json()}
+        timeline = (await browser.get("/api/timeline")).json()
+    assert inbox == {merged.id: "merged", rejected.id: "rejected", expired.id: "expired"}, inbox
+    remote = server.mailbox.proposals(USER)
+    for p in (merged, rejected, expired):
+        assert [(e.from_state, e.to_state) for e in await remote.history(p.id)] == [
+            (e.from_state, e.to_state) for e in await local.history(p.id)], p.target
+    (note,) = [e.note for e in await remote.history(rejected.id) if e.to_state == "rejected"]
+    assert note == "too vague", note
+    assert [c["proposal_id"] for c in timeline["changes"]] == [merged.id], timeline
+    # The gate's refusal is recorded once; nothing is refused by the server.
+    assert errors[0].count(too_big.id) == 1 and "stays local" in errors[0], errors[0]
+    assert not errors[1] and not errors[2], errors
+    assert "409" not in "".join(errors) and "not sent" not in "".join(errors), errors
+    print("✓ cloud: proposals decided before pairing upload once with their history; no refusal repeats")
+
+
 # ── restart mid-lease ─────────────────────────────────────────────────────────
 
 async def check_restart_mid_lease():
@@ -675,6 +735,7 @@ async def main():
     await check_body_limit()
     await check_no_model_key()
     await check_no_marker_reaches_server()
+    await check_prepairing_proposals()
     print("\nall cloud tests passed")
 
 
