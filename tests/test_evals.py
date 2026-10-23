@@ -7,12 +7,15 @@ import json
 import tempfile
 from pathlib import Path
 
+from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
+
 from wisen.evals import cli as evals_cli
-from wisen.evals import miner, runner
+from wisen.evals import judge, miner, runner
 from wisen.evals.cases import Case, ContextTurn, assign_split, load_cases, save_case
 from wisen.evals.metrics import daily_correction_rates, friction_half_life, pearson
 from wisen.evals.miner import scan_all
-from wisen.evals.replay import build_prompt
+from wisen.evals.replay import ReplayResult, build_prompt
 
 
 def _event(role: str, text, ts: str, session="s1", **extra) -> dict:
@@ -204,6 +207,38 @@ def test_clean_set():
         print("✓ clean set: a session with no detection becomes a clean case; mine saves it unlabeled by a model")
 
 
+def test_judge_prompt_by_kind():
+    """The judge is told a clean case's message was the user carrying on,
+    not a correction; a correction case keeps the correction framing."""
+    seen = []
+
+    def respond(messages, info):
+        seen.append(messages[-1])
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {"repeated": False, "evidence": "x"})])
+
+    real = judge.get_model
+    judge.get_model = lambda: FunctionModel(respond)
+    judge._judge.cache_clear()
+    try:
+        replay = ReplayResult(final_text="done", diff="")
+        for kind in ("clean", "correction"):
+            case = Case(id=kind, date="2026-07-01", session_id="s", source_path="/x", project_path="/p",
+                        detector=None if kind == "clean" else "explicit-correction", context=[],
+                        correction="now add a test for it", behavior_check="Did it break?", split="eval", kind=kind)
+            asyncio.run(judge.judge_once(case, replay))
+    finally:
+        judge.get_model = real
+        judge._judge.cache_clear()
+    clean, correction = seen
+    clean_prompt = clean.parts[0].content
+    assert "went smoothly" in clean.instructions and "corrected the agent" not in clean.instructions
+    assert "## User's next message in the original, smooth session\nnow add a test for it" in clean_prompt
+    assert "correction" not in clean_prompt.lower()
+    assert "corrected the agent" in correction.instructions
+    assert "## Original correction (ground truth)\nnow add a test for it" in correction.parts[0].content
+    print("✓ judge: a clean case is framed as the user's next message in a smooth session")
+
+
 if __name__ == "__main__":
     test_detectors()
     test_no_false_positives()
@@ -211,4 +246,5 @@ if __name__ == "__main__":
     test_metrics()
     test_build_prompt()
     test_clean_set()
+    test_judge_prompt_by_kind()
     print("\nall eval tests passed")

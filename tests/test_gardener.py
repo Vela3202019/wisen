@@ -476,6 +476,15 @@ def check_problems_solved() -> None:
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "docs: notes", at=start + timedelta(hours=3, minutes=30),
         email="mate@example.invalid")
+    # The owner merges a teammate's PR during that session: still the teammate's work.
+    git(repo, "checkout", "-q", "-b", "mate-pr")
+    (repo / "mate.py").write_text("mate\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "feat: mate", at=start + timedelta(hours=3, minutes=35),
+        email="mate@example.invalid")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "merge", "-q", "--no-ff", "mate-pr", "-m", "Merge pull request #7 from mate/mate-pr",
+        at=start + timedelta(hours=3, minutes=45))
     git(repo, "merge", "-q", "--no-ff", "feat-x", "-m", "Merge branch 'feat-x'", at=start + timedelta(hours=4))
     merge = git(repo, "rev-parse", "HEAD")
     (repo / "VERSION").write_text("2\n")

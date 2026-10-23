@@ -426,8 +426,9 @@ problem is solved when the work of a coding session lands:
 
 - Only the owner's commits count: a commit's author email must match the
   owner's identity (`[gardener].owner_email` in the wisen config, else the
-  repo's `git config user.email`). A teammate's PR merged during your session
-  is not your solved problem.
+  repo's `git config user.email`). For a merge commit, what counts is who
+  wrote the commits it brought in, not who clicked merge. A teammate's PR
+  merged during your session, even by you, is not your solved problem.
 - Each landed commit counts once, for one problem at most.
 - Sessions on a feature branch belong to that branch. The branch is one
   problem (one "PR"). It is solved when it reaches the project's default

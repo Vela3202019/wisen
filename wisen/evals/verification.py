@@ -116,21 +116,28 @@ def _owner(repo: Repo) -> str:
 
 def _merged_range(h: _RepoHistory, merge: Commit) -> tuple[list[str], set[str], set[str]]:
     """The commits a merge brought in (the merge first), the files it
-    changed, and their authors."""
+    changed, and the authors of the commits it brought in (not the merge's
+    own author: that is whoever clicked merge)."""
     try:
         log = h.repo.out("log", "--format=%H %ae", f"{merge.parents[0]}..{merge.parents[1]}").splitlines()
         files = set(h.repo.out("diff", "--name-only", merge.parents[0], merge.sha).splitlines())
     except GitError:
         log, files = [], set()
     pairs = [line.split(" ", 1) for line in log if " " in line]
-    return [merge.sha, *(sha for sha, _ in pairs)], files, {merge.author, *(a.lower() for _, a in pairs)}
+    return [merge.sha, *(sha for sha, _ in pairs)], files, {a.lower() for _, a in pairs}
+
+
+def _owned(h: _RepoHistory, c: Commit, owner: str) -> bool:
+    """The owner wrote it: for a merge, one of the commits it brought in."""
+    return owner in _merged_range(h, c)[2] if len(c.parents) > 1 else c.author == owner
 
 
 def problems_solved(sessions: list[SessionScan], since: datetime) -> list[Solved]:
     """THE DEFINITION (confirmed by the owner; §5.4):
 
-    - only the owner's commits count (author email = `_owner`), and each
-      landed commit counts for one problem at most;
+    - only the owner's commits count (author email = `_owner`; for a merge
+      commit, the authors of the commits it brought in, never whoever
+      clicked merge), and each landed commit counts for one problem at most;
     - sessions on a feature branch belong to that branch, one problem (one
       PR); it is solved when it reaches the default branch: a merge commit
       names it ("Merge pull request #N from x/<branch>", "Merge branch
@@ -184,7 +191,7 @@ def problems_solved(sessions: list[SessionScan], since: datetime) -> list[Solved
                 continue
             c = next((c for c in h.commits if c.at >= start
                       and (c.sha == tip or h.repo.ok("merge-base", "--is-ancestor", tip, c.sha))), None)
-            if c is not None and c.sha not in claimed and c.author == owner:
+            if c is not None and c.sha not in claimed and _owned(h, c, owner):
                 claimed.add(c.sha)
                 landed[branch] = (c.at, [c.sha], set(c.files))
         for branch, hit in landed.items():
@@ -196,10 +203,10 @@ def problems_solved(sessions: list[SessionScan], since: datetime) -> list[Solved
         on_default = [s for s in repo_sessions if not s.git_branch or s.git_branch == h.default]
         credited: dict[int, list[Commit]] = defaultdict(list)
         for c in h.commits:
-            if c.sha in claimed or c.author != owner:
+            if c.sha in claimed:
                 continue
             near = [i for i, s in enumerate(on_default) if s.started_at <= c.at <= s.ended_at + LAND_GRACE]
-            if near:
+            if near and _owned(h, c, owner):
                 credited[min(near, key=lambda i: (max(c.at - on_default[i].ended_at, timedelta(0)),
                                                   c.at - on_default[i].started_at))].append(c)
         for i, hits in credited.items():

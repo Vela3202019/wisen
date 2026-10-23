@@ -25,21 +25,31 @@ the replay transcript and diff; quote the evidence. If the replay contains no si
 either way, answer repeated=false with evidence "no signal"."""
 
 
+_CLEAN_PROMPT = """You are judging a replay of a coding-agent session. In the original
+session this moment went smoothly: the user carried on with their next message and
+corrected nothing. Answer ONLY the behavior question about this fresh replay — did the
+agent do something that broke that smooth flow (repeated=true)? Base your answer
+strictly on the replay transcript and diff; quote the evidence. If the replay contains
+no signal either way, answer repeated=false with evidence "no signal"."""
+
+
 @cache
-def _judge() -> Agent:
+def _judge(kind: str) -> Agent:
     # Built on first use, so importing the runner needs no model key.
-    return Agent(get_model(), output_type=Verdict, instructions=_JUDGE_PROMPT)
+    return Agent(get_model(), output_type=Verdict, instructions=_CLEAN_PROMPT if kind == "clean" else _JUDGE_PROMPT)
 
 
 async def judge_once(case: Case, replay: ReplayResult) -> tuple[Verdict, int]:
     """One judgment and the tokens it spent."""
-    result = await _judge().run(
+    ground = ("User's next message in the original, smooth session" if case.kind == "clean"
+              else "Original correction (ground truth)")
+    result = await _judge(case.kind).run(
         f"## Behavior question\n{case.behavior_check}\n\n"
-        f"## Original correction (ground truth)\n{case.correction}\n\n"
+        f"## {ground}\n{case.correction}\n\n"
         f"## Replay final message\n{replay.final_text}\n\n"
         f"## Replay diff\n{replay.diff or '(no file changes)'}"
     )
-    return result.output, result.usage().total_tokens
+    return result.output, result.usage.total_tokens
 
 
 async def judge(case: Case, replay: ReplayResult, k: int = 3) -> Verdict:
