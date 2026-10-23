@@ -153,6 +153,16 @@ class UsagePacket(Usage, Envelope):
     packet_type: Literal["usage"]
 
 
+class Decided(BaseModel):
+    """What became of a proposal the laptop decided or expired while unpaired.
+    It travels with the proposal's first upload: the server takes no device
+    decision for a proposal it already holds."""
+    request_id: UpdateId
+    state: Literal["approved", "rejected", "expired"]
+    at: Label
+    note: Text | None = None
+
+
 class CloudProposal(BaseModel):
     proposal_id: HexId
     target: Target
@@ -162,6 +172,7 @@ class CloudProposal(BaseModel):
     eval_summary: Text | None = None
     expires_at: Label | None = None
     batch: Date | None = None   # the day whose Gardener run made it (the daily batch)
+    decided: Decided | None = None
 
 
 class ProposalPacket(CloudProposal, Envelope):
@@ -186,14 +197,11 @@ class CloudMeasure(BaseModel):
 
 
 class ProposalUpdate(BaseModel):
-    """A move the laptop is the authority for (cloud-architecture §6.1), or a
-    decision it recorded while unpaired, replayed when that proposal is
-    uploaded after pairing."""
+    """A move the laptop is the authority for (cloud-architecture §6.1)."""
     proposal_id: HexId
     request_id: UpdateId
-    from_state: Literal["proposed", "approved", "applied", "merged", "measuring"]
-    to_state: Literal["approved", "rejected", "expired", "applied", "failed", "merged", "abandoned", "measuring",
-                      "kept", "revert_proposed"]
+    from_state: Literal["approved", "applied", "merged", "measuring"]
+    to_state: Literal["applied", "failed", "merged", "abandoned", "measuring", "kept", "revert_proposed"]
     at: Label
     branch: Branch | None = None
     note: Text | None = None
@@ -307,10 +315,10 @@ def usage_packet(usage: dict) -> dict:
 
 
 def proposal_packet(proposal_id: str, target: str, payload: dict, expires_at: str | None, *,
-                    user: str | None = None, device_id: str | None = None) -> dict:
+                    decided: dict | None = None, user: str | None = None, device_id: str | None = None) -> dict:
     """A stored proposal, cut down to the CloudProposal allow-list: the rest of
     its payload (a paused agent run, say) stays here."""
-    content = {"proposal_id": proposal_id, "target": target, "expires_at": expires_at,
+    content = {"proposal_id": proposal_id, "target": target, "expires_at": expires_at, "decided": decided,
                **{k: payload[k] for k in ("diff", "rationale", "evidence", "eval_summary", "batch") if k in payload}}
     return _packet("proposal", validate(CloudProposal, content, "proposal packet", extra="forbid"), user, device_id)
 

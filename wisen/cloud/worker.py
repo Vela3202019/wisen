@@ -3,9 +3,9 @@
 (launchd keeps it alive; the laptop never opens a port):
 
   1. sync up    proposals not uploaded yet first (so a day's batch is there
-                before its reflection's push), then the git states the laptop
-                decided for proposals (applied, merged, measured, …) and, for
-                proposals decided while unpaired, those decisions, each day's metrics,
+                before its reflection's push), each with its decision if made
+                while unpaired, then the git states the laptop
+                decided for proposals (applied, merged, measured, …), each day's metrics,
                 and each day's reflection, when it changed since the last upload
   2. poll       one long poll returns a device job to run and any decisions
                 made since the last one
@@ -102,28 +102,28 @@ async def _upload(client: CloudClient, store: SqliteStore, key: str, build) -> b
     return True
 
 
-def _unsent(store: SqliteStore) -> list[Proposal]:
-    """Proposals not uploaded yet (any state: some were decided while
-    unpaired), oldest first, leaving out those kept local."""
+def _unsent(store: SqliteStore) -> list[tuple[Proposal, dict | None]]:
+    """Proposals not uploaded yet, oldest first, leaving out those kept local,
+    each with its decision or expiry if it has one (made while unpaired)."""
     with closing(store._connect()) as conn:
-        return [_proposal(r) for r in conn.execute(
-            "SELECT * FROM proposals p WHERE p.user_id = ? AND NOT EXISTS (SELECT 1 FROM cloud_state c "
+        return [(_proposal(r), {"request_id": r["request_id"], "state": r["to_state"], "at": r["at"],
+                                "note": r["note"]} if r["to_state"] else None) for r in conn.execute(
+            "SELECT p.*, e.request_id, e.to_state, e.at, e.note FROM proposals p "
+            "LEFT JOIN proposal_events e ON e.user_id = p.user_id AND e.proposal_id = p.id "
+            "AND e.from_state = 'proposed' WHERE p.user_id = ? AND NOT EXISTS (SELECT 1 FROM cloud_state c "
             "WHERE c.user_id = p.user_id AND c.key IN ('sent:proposal:' || p.id, 'local:proposal:' || p.id)) "
             "ORDER BY p.created_at", (store.user_id,))]
 
 
 def _updates(store: SqliteStore) -> list[dict]:
     """Every git-state move of an uploaded proposal, oldest first, as update
-    content; for one uploaded after it was decided or past its deadline
-    (made while unpaired), its decision or expiry too."""
+    content."""
     with closing(store._connect()) as conn:
         rows = conn.execute(
             f"SELECT e.proposal_id, e.request_id, e.from_state, e.to_state, e.note, e.at, g.branch, m.result "
             f"FROM proposal_events e LEFT JOIN proposal_git g ON g.proposal_id = e.proposal_id "
             f"LEFT JOIN proposal_measures m ON m.proposal_id = e.proposal_id "
-            f"WHERE e.user_id = ? AND (e.to_state IN ({', '.join('?' * len(GIT_STATES))}) "
-            f"OR e.to_state IN ('approved', 'rejected', 'expired') AND EXISTS (SELECT 1 FROM cloud_state c "
-            f"WHERE c.user_id = e.user_id AND c.key = 'history:proposal:' || e.proposal_id)) "
+            f"WHERE e.user_id = ? AND e.to_state IN ({', '.join('?' * len(GIT_STATES))}) "
             f"AND NOT EXISTS (SELECT 1 FROM cloud_state c "
             f"WHERE c.user_id = e.user_id AND c.key = 'local:proposal:' || e.proposal_id) ORDER BY e.id",
             (store.user_id, *GIT_STATES),
@@ -137,8 +137,7 @@ def _updates(store: SqliteStore) -> list[dict]:
         updates.append({"proposal_id": r["proposal_id"], "request_id": r["request_id"],
                         "from_state": r["from_state"], "to_state": r["to_state"], "at": r["at"],
                         "branch": r["branch"] if r["to_state"] in ("applied", "merged") else None,
-                        "note": r["note"] if r["to_state"] in ("rejected", "failed", "kept", "revert_proposed")
-                        else None,
+                        "note": r["note"] if r["to_state"] in ("failed", "kept", "revert_proposed") else None,
                         "measure": measure})
     return updates
 
@@ -155,10 +154,10 @@ async def sync_up(client: CloudClient, store: SqliteStore) -> int:
     batch is in the inbox before that day's reflection announces it."""
     creds, sent = client.creds, 0
     who = {"user": creds.user_id, "device_id": creds.device_id}
-    now = ts(datetime.now(UTC))
-    for p in await asyncio.to_thread(_unsent, store):
+    for p, decided in await asyncio.to_thread(_unsent, store):
         try:
-            await client.send_packet(proposal_packet(p.id, p.target, p.payload, p.expires_at, **who))
+            await client.send_packet(proposal_packet(p.id, p.target, p.payload, p.expires_at, decided=decided,
+                                                     **who))
         except EgressRejected as e:
             # It stays local, and so do its moves: recorded once, never retried.
             await asyncio.to_thread(_set, store, f"local:proposal:{p.id}", str(e))
@@ -167,11 +166,7 @@ async def sync_up(client: CloudClient, store: SqliteStore) -> int:
         except Refused as e:
             print(f"[worker] not sent (proposal {p.id}): {e}", file=sys.stderr)
             continue
-        if p.state != "proposed" or (p.expires_at and p.expires_at <= now):
-            # Decided while unpaired, or past its deadline: the server learns
-            # what became of it from this laptop (see _updates).
-            await asyncio.to_thread(_set, store, f"history:proposal:{p.id}", now)
-        await asyncio.to_thread(_set, store, f"sent:proposal:{p.id}", now)
+        await asyncio.to_thread(_set, store, f"sent:proposal:{p.id}", ts(datetime.now(UTC)))
         sent += 1
     stuck: set[str] = set()  # a refused move holds back the later moves of its proposal
     for u in await asyncio.to_thread(_updates, store):

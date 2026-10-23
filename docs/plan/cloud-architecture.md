@@ -253,8 +253,8 @@ packet carries this envelope:
 | Packet | Stage | Carries | Never carries |
 |---|---|---|---|
 | `ReflectionPacket` (today's `CloudReflection`) | A | The day's reflection: mood, questions, friction points, recommendations, insight, short evidence quotes | Stage-1 output, raw turns, file paths outside an alias |
-| `ProposalPacket` | A | A Gardener proposal: target file (as `project alias + relative path`), the unified diff, rationale, evidence refs and short quotes, eval results if any, the daily batch it belongs to | The rest of the target repo |
-| `ProposalUpdatePacket` | A (step 5) | A git state the laptop decided (`applied`, `failed`, `merged`, `abandoned`, `measuring`, `kept`, `revert_proposed`), the branch name, a short note (why it failed, why it was kept, why it was rejected), and the measured numbers before and after; for a proposal decided while unpaired, also that decision or expiry | Repo paths, commit contents |
+| `ProposalPacket` | A | A Gardener proposal: target file (as `project alias + relative path`), the unified diff, rationale, evidence refs and short quotes, eval results if any, the daily batch it belongs to; for a proposal decided while unpaired, that decision or expiry and its note | The rest of the target repo |
+| `ProposalUpdatePacket` | A (step 5) | A git state the laptop decided (`applied`, `failed`, `merged`, `abandoned`, `measuring`, `kept`, `revert_proposed`), the branch name, a short note (why it failed, why it was kept), and the measured numbers before and after | Repo paths, commit contents |
 | `MetricsPacket` | A (step 5) | One day's verification-loop numbers ([§5.4](#54-verification-loop-climbing-the-hill)): user turns, corrections by detector, tokens, problems solved, human turns per PR | Sessions, prompts, file names |
 | `JobStatusPacket` | A | Job id, state, timings, error class | Stack traces with local paths or content |
 | `AnswerPacket` | A | A chat answer written by a model, with short quotes and dates | Raw search hits |
@@ -575,11 +575,12 @@ Rules:
   for the decision states.
 - **Proposals made before pairing upload with their history.** On the first
   sync after pairing the laptop sends each proposal the server lacks, in any
-  state, then replays its moves in order. A decision made while unpaired is
-  recorded through the server's normal decision record, as of the time it was
-  made (so one made before the deadline still counts), and only if it predates
-  the upload. A proposal the egress gate refuses stays local, with its moves;
-  the reason is logged once.
+  state, carrying the decision or expiry it got while unpaired, then its git
+  moves in order. The server records that decision through its normal decision
+  record, as of the time it was made (so one made before the deadline still
+  counts), only as part of the proposal's first upload: once the server holds
+  a proposal, no device packet decides it. A proposal the egress gate refuses
+  stays local, with its moves; the reason is logged once.
 
 ### 6.2 The job engine
 

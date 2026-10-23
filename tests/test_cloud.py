@@ -380,21 +380,23 @@ async def _poll(creds: Credentials, http: httpx.AsyncClient, cursor: int) -> dic
 async def check_prepairing_proposals():
     """Local-only mode first: 3 proposals decided on the laptop (one merged,
     one rejected, one expired), all past their deadline by the time the laptop
-    pairs, plus one the egress gate refuses. Pairing then uploads each with
-    its history, and no cycle repeats a refusal."""
+    pairs, plus one the egress gate refuses and one left open. Pairing then
+    uploads each with its history, and no cycle repeats a refusal. Once the
+    server holds a proposal, no device packet decides it, back-dated or not."""
     server = _server("prepairing")
     store = get_store()
     early = Clock()
     early.now = T0 - timedelta(days=10)
     local = Proposals(store, early)
 
-    async def make(target: str, diff: str = DIFF):
+    async def make(target: str, diff: str = DIFF, days: int = 7):
         return await local.create(target, {"diff": diff, "rationale": "r", "evidence": []},
                                   request_id=f"gardener:{target}", actor="gardener",
-                                  expires_at=early.now + timedelta(days=7))
+                                  expires_at=early.now + timedelta(days=days))
 
     merged, rejected, expired, too_big = (await make("wisen:A.md"), await make("wisen:B.md"),
                                          await make("wisen:C.md"), await make("wisen:D.md", "x" * 20_001))
+    still_open = await make("wisen:E.md", days=60)
     early.now += timedelta(days=1)
     await local.decide(merged.id, "approved", request_id=f"cli:{'1' * 32}", actor="cli")
     await local.transition(merged.id, "approved", "applied", request_id=f"applied:{merged.id}", actor="applier")
@@ -413,12 +415,30 @@ async def check_prepairing_proposals():
                     await worker.run(creds, store, http=http, once=True)
                 # The laptop file is shared with earlier checks (paired to
                 # other servers): only this check's proposals count here.
-                ids = (merged.id, rejected.id, expired.id, too_big.id)
+                ids = (merged.id, rejected.id, expired.id, too_big.id, still_open.id)
                 errors.append("".join(line for line in err.getvalue().splitlines(keepends=True)
                                       if any(i in line for i in ids)))
+            # A device cannot decide a proposal the server already holds: a
+            # back-dated decision is refused whether sent with the proposal
+            # or as a move of its own.
+            back_dated = (early.now - timedelta(days=30)).isoformat()
+            decided = proposal_packet(still_open.id, still_open.target, still_open.payload, still_open.expires_at,
+                                      decided={"request_id": f"cli:{'4' * 32}", "state": "approved",
+                                               "at": back_dated}, user=USER, device_id=creds.device_id)
+            move = {"packet_type": "proposal_update", "schema_version": decided["schema_version"],
+                    "user_id": USER, "device_id": creds.device_id, "proposal_id": still_open.id,
+                    "request_id": f"cli:{'5' * 32}", "from_state": "proposed", "to_state": "approved",
+                    "at": back_dated, "branch": None, "note": None, "measure": None}
+            move = {**move, "packet_id": content_id(move), "created_at": decided["created_at"]}
+            for packet, status in ((decided, 409), (move, 422)):
+                r = await http.post("/api/device/packets", content=json.dumps(packet), headers={
+                    "Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"})
+                assert r.status_code == status, (r.status_code, r.text)
         inbox = {p["id"]: p["state"] for p in (await browser.get("/api/proposals")).json()}
         timeline = (await browser.get("/api/timeline")).json()
-    assert inbox == {merged.id: "merged", rejected.id: "rejected", expired.id: "expired"}, inbox
+    assert inbox == {merged.id: "merged", rejected.id: "rejected", expired.id: "expired",
+                     still_open.id: "proposed"}, inbox
+    assert [e.to_state for e in await server.mailbox.proposals(USER).history(still_open.id)] == ["proposed"]
     remote = server.mailbox.proposals(USER)
     for p in (merged, rejected, expired):
         assert [(e.from_state, e.to_state) for e in await remote.history(p.id)] == [
