@@ -324,8 +324,9 @@ function renderChart(logs) {
 }
 
 // The hill (cloud-architecture §5.4): corrections per 100 user turns and
-// tokens per problem solved per day, with a marker at each merged Gardener
-// change. Climbing shows as both lines stepping down after markers.
+// the two headline costs (tokens per problem solved, human-in-the-loop turns
+// per PR) per day, with a marker at each merged Gardener change. Climbing
+// shows as the lines stepping down after markers.
 const VERDICT = { helped: "▼ helped", no_change: "• kept", worse: "▲ worse" };
 
 function renderHill(t) {
@@ -363,6 +364,7 @@ function renderHill(t) {
   el.innerHTML = `<h2>Climbing the hill</h2>
     ${series("corrections_per_100_turns", "Corrections per 100 user turns", "var(--friction)")}
     ${series("tokens_per_problem", "Tokens per problem solved", "var(--aligned)")}
+    ${series("hitl_turns_per_pr", "Human-in-the-loop turns per PR", "var(--text)")}
     <div class="tip">${esc(dates[0].slice(5))} – ${esc(dates[dates.length - 1].slice(5))} · dashed line = merged Gardener change</div>
     ${marks ? `<ul class="meta">${marks}</ul>` : ""}`;
   el.style.display = "block";

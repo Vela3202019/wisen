@@ -411,7 +411,7 @@ so the next proposal learns from it.
 
 | Layer | Metric | Better is | Source |
 |---|---|---|---|
-| 1. Outcome | **Problems solved** per day ([definition below](#problems-solved-proposed-definition)), with a quality guard: the share of solved problems later reverted or re-fixed | more solved, smaller guard share | local git repos of the projects the sessions ran in |
+| 1. Outcome | **Problems solved** per day ([definition below](#problems-solved-definition)), with a quality guard: the share of solved problems later reverted or re-fixed | more solved, smaller guard share | local git repos of the projects the sessions ran in |
 | 2. Cost | **Tokens per problem solved**, $ per problem solved (only where the transcript records cost), user turns per problem solved, and **human-in-the-loop turns per PR**: the user turns spent across the sessions that led to one PR, from the first related session until the PR merged | lower | transcripts (token usage per assistant message) |
 | 3. Friction | **Corrections per 100 user turns**, by detector (tool rejection, interruption, explicit correction, rephrase storm); **friction half-life** (mean days a friction persisted before it resolved) | lower | transcripts (`wisen/evals/miner.py`), reflections (`friction_deltas`) |
 | 4. Controlled check | **Replay pass rate** per config version on the confirmed eval cases, plus the **clean set** (smooth moments a change must not break) | eval up, clean not down | `wisen/evals/replay.py`, `wisen/evals/runner.py` |
@@ -420,17 +420,26 @@ so the next proposal learns from it.
 Tokens per problem solved and human-in-the-loop turns per PR are the two
 headline cost numbers.
 
-<a id="problems-solved-proposed-definition"></a>
-**Problems solved: proposed definition, pending the owner's confirmation.** A
+<a id="problems-solved-definition"></a>
+**Problems solved: the definition, confirmed by the owner on 2026-10-22.** A
 problem is solved when the work of a coding session lands:
 
+- Only the owner's commits count: a commit's author email must match the
+  owner's identity (`[gardener].owner_email` in the wisen config, else the
+  repo's `git config user.email`). A teammate's PR merged during your session
+  is not your solved problem.
+- Each landed commit counts once, for one problem at most.
 - Sessions on a feature branch belong to that branch. The branch is one
   problem (one "PR"). It is solved when it reaches the project's default
   branch: a merge commit on the default branch names it, or its tip is
-  contained in the default branch. It counts on the day it landed.
-- A session on the default branch itself is one problem. It is solved when a
-  commit lands on the default branch between the session's start and one hour
-  after its end.
+  contained in the default branch; at least one commit it landed must be the
+  owner's. It counts on the day it landed.
+- A session on the default branch itself is one problem. It is solved when one
+  of the owner's commits lands on the default branch between the session's
+  start and one hour after its end. A commit inside several sessions' windows
+  (say a Q&A session and a working session open at once in one repo) is
+  credited to the nearest one only: the session it is closest to the end of,
+  then the one that started latest.
 - Quality guard: a solved problem is **reverted** when a later default-branch
   commit says `This reverts commit <sha>` for one of its commits, and
   **re-fixed** when, within 7 days, a default-branch commit whose subject
@@ -453,7 +462,16 @@ each replay spent are recorded. The result goes on the proposal, so you see the
 expected gain before you approve. The **accept rule**: approve only if the
 replay pass rate rises and the clean-set pass rate does not drop. wisen shows
 whether a proposal meets it; you still decide. A proposal with no cases says
-so.
+so. The proposal also shows the two headline cost numbers as they stand (7-day
+medians of tokens per problem solved and human-in-the-loop turns per PR), in
+the dashboard and in `wisen gardener list`.
+
+**The clean set.** `wisen eval mine` saves one clean case (kind
+`clean`) from each session with no detection: its last user turn, with the
+turns before it as context. Its behavior check is fixed (did the replay do
+something the user would have had to correct, stop or undo?), so it needs no
+model to label it. Like a correction case, it joins the replay only once you
+confirm it with `wisen eval review <id> --confirm`.
 
 **After you merge: the field check.** Two weeks after merge, the measure job
 compares 7-day rolling medians: the 7 days before the merge against the last 7
@@ -464,6 +482,7 @@ of the 14 days after it (the first week lets the change settle).
 | Corrections per 100 user turns | down by more than 5% | up by more than 5% |
 | Friction half-life | down | — |
 | Tokens per problem solved | down or flat (within 5%) | up by more than 10% |
+| Human-in-the-loop turns per PR | shown in the reason, not judged | — |
 
 Helped: corrections down, friction half-life down (or not measurable in either
 window), and tokens per problem solved down or flat. Worse: corrections or
@@ -476,9 +495,10 @@ reason are stored with the proposal, and the next Gardener run reads them, so
 solved rose 18%" shapes what it proposes next.
 
 **On the dashboard: the hill.** A timeline of corrections per 100 user turns
-and tokens per problem solved per day, with a marker at each merged Gardener
-change, labelled with its file and verdict. A climb shows as both lines
-stepping down after markers.
+and the two headline costs, tokens per problem solved and human-in-the-loop
+turns per PR, per day, with a marker at each merged Gardener change, labelled
+with its file and verdict. A climb shows as the lines stepping down after
+markers.
 
 ### 5.5 Step 5 decisions in practice
 

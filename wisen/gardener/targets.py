@@ -32,6 +32,7 @@ SKILL_ROOTS = (".claude", ".agents")
 # Where wisen looks for editable files outside any repo, relative to home.
 HOME_FILES = (".claude/CLAUDE.md", ".codex/AGENTS.md", ".config/opencode/AGENTS.md")
 HOME_SKILL_DIRS = (".claude/skills", ".agents/skills")
+FILE_MODES = ("100644", "100755")   # regular files in a git tree; not symlinks (120000) or submodules
 
 
 class Refused(Exception):
@@ -163,7 +164,15 @@ def resolve(name: str, repos: dict[str, Path] | None = None) -> Target:
     root = (repos if repos is not None else project_repos()).get(alias)
     if root is None:
         raise Refused(f"no project {alias!r} (or more than one repo has that name)")
-    return Target(alias, path, Repo(work_tree=root))
+    t = Target(alias, path, Repo(work_tree=root))
+    base = t.base()
+    if base:
+        parts = PurePosixPath(path).parts
+        prefixes = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+        for line in t.repo.out("ls-tree", base, "--", *prefixes).splitlines():
+            if line.split(" ", 1)[0] not in (*FILE_MODES, "040000"):
+                raise Refused(f"{name} is a symlink or submodule in the repo; change the file it points to instead")
+    return t
 
 
 def editable_files(repos: dict[str, Path] | None = None) -> list[str]:
@@ -183,6 +192,8 @@ def editable_files(repos: dict[str, Path] | None = None) -> list[str]:
         refs = repo.default_refs()
         if not refs:
             continue
-        files = repo.out("ls-tree", "-r", "--name-only", refs[0]).splitlines()
-        names += [f"{alias}:{f}" for f in files if allowed(f)]
+        for line in repo.out("ls-tree", "-r", refs[0]).splitlines():
+            meta, f = line.split("\t", 1)
+            if meta.split(" ", 1)[0] in FILE_MODES and allowed(f):
+                names.append(f"{alias}:{f}")
     return names

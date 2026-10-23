@@ -38,6 +38,7 @@ os.environ.update({
     "GIT_SCAN_DIRS": str(DEV),
     "WISEN_GARDENER_HOME_REPO": str(_TMP / "laptop" / "home.git"),
     "WISEN_GARDENER_REPLAY_CASES": "2",
+    "WISEN_OWNER_EMAIL": "dev@example.invalid",   # the fixtures' commits are the owner's unless they say otherwise
     "WISEN_MODEL": "test",
     "PYDANTIC_AI_NO_BANNER": "1",
     # Never the owner's git config, hooks or templates.
@@ -67,8 +68,9 @@ from wisen.cloud.server import create_app
 from wisen.evals import runner, verification
 from wisen.evals.cases import Case, ContextTurn, save_case
 from wisen.gardener import loop
+from wisen.gardener.agent import Deps, build_agent
 from wisen.gardener.git import Repo, one_file_diff
-from wisen.gardener.targets import allowed
+from wisen.gardener.targets import Refused, allowed, editable_files, resolve
 from wisen.jobs import LEASE, JobEngine
 from wisen.proposals import Proposals
 from wisen.store import SqliteStore
@@ -94,9 +96,9 @@ class Crash(BaseException):
 
 # ── fixtures: repos, a home dir, transcripts ──────────────────────────────────
 
-def git(cwd: Path, *args: str, at: datetime | None = None) -> str:
+def git(cwd: Path, *args: str, at: datetime | None = None, email: str = "dev@example.invalid") -> str:
     stamp = f"{int((at or T0 - timedelta(days=30)).timestamp())} +0000"
-    env = {**os.environ, "GIT_AUTHOR_NAME": "Dev", "GIT_AUTHOR_EMAIL": "dev@example.invalid",
+    env = {**os.environ, "GIT_AUTHOR_NAME": "Dev", "GIT_AUTHOR_EMAIL": email,
            "GIT_COMMITTER_NAME": "Dev", "GIT_COMMITTER_EMAIL": "dev@example.invalid",
            "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp}
     return subprocess.run(["git", "-C", str(cwd), *args], env=env, capture_output=True, text=True,
@@ -218,7 +220,15 @@ def _setup(name: str) -> tuple[SqliteStore, JobEngine, Clock, Script]:
     jobs_mod._engine = engine
     script = Script()
     loop.gardener_model = script.model
+    # Never the real replay runner or the package's case bank (on the owner's
+    # machine it holds mined cases, and replaying them runs `claude -p`).
+    loop.load_cases = list
+    loop.replay_case = no_real_replay
     return store, engine, clock, script
+
+
+async def no_real_replay(case, variant, k):
+    raise AssertionError("a test reached the replay runner")
 
 
 async def drain(engine: JobEngine) -> None:
@@ -261,6 +271,7 @@ async def check_propose_and_batch(store, engine, clock, script) -> dict:
         # Q10: a proposal expires 7 days after it is made.
         assert datetime.fromisoformat(p.expires_at) == clock.now + timedelta(days=7)
         assert "Replay" in p.payload["eval_summary"]
+        assert "human-in-the-loop turns per PR" in p.payload["eval_summary"], p.payload["eval_summary"]
     assert "+Run tests: make test" in made["demo:CLAUDE.md"].payload["diff"]
     (run,) = _rows(store, "SELECT state FROM gardener_runs WHERE id = ?", result["run_id"])
     assert run["state"] == "paused"
@@ -412,6 +423,7 @@ async def check_measure_after_merge(store, engine, clock) -> None:
     assert result["before"]["corrections_per_100_turns"] == 30.0 and result["after"]["corrections_per_100_turns"] == 10.0
     assert result["before"]["tokens_per_problem"] == 30_000 and result["after"]["tokens_per_problem"] == 20_000
     assert "corrections per 100 user turns 30.0 → 10.0" in m["reason"], m["reason"]
+    assert "human-in-the-loop turns per PR n/a → n/a" in m["reason"], m["reason"]   # no PRs, only main
     # The next run learns the outcome and its reason.
     prompt = await loop.build_prompt(store, (T0 + timedelta(days=15)).date().isoformat())
     assert "measured helped: corrections per 100 user turns 30.0 → 10.0" in prompt, prompt
@@ -444,11 +456,26 @@ def check_problems_solved() -> None:
     transcript(repo, "feat-1", start, "feat-x", ["add the cart", "no, keep it simple", "ok"], 9_000)
     transcript(repo, "feat-2", start + timedelta(hours=3), "feat-x", ["now tests"], 3_000)
     transcript(repo, "main-1", start + timedelta(hours=6), "main", ["bump version"], 2_000)
+    # A Q&A session open at the same time: the bump is credited to one of them only.
+    transcript(repo, "main-2", start + timedelta(hours=6, minutes=2), "main", ["what is in VERSION?"], 1_000)
+    # A teammate's commit lands during this session: not the owner's problem.
+    transcript(repo, "main-3", start + timedelta(hours=3), "main", ["what does the cart do?"], 1_000)
+    # A branch that never landed.
+    transcript(repo, "feat-y-1", start + timedelta(hours=2), "feat-y", ["try a wishlist"], 1_000)
+    git(repo, "checkout", "-q", "-b", "feat-y")
+    (repo / "wish.py").write_text("wish\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "feat: wishlist", at=start + timedelta(hours=2, minutes=10))
+    git(repo, "checkout", "-q", "main")
     git(repo, "checkout", "-q", "-b", "feat-x")
     (repo / "cart.py").write_text("cart\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "feat: cart", at=start + timedelta(hours=1))
     git(repo, "checkout", "-q", "main")
+    (repo / "NOTES").write_text("mate\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "docs: notes", at=start + timedelta(hours=3, minutes=30),
+        email="mate@example.invalid")
     git(repo, "merge", "-q", "--no-ff", "feat-x", "-m", "Merge branch 'feat-x'", at=start + timedelta(hours=4))
     merge = git(repo, "rev-parse", "HEAD")
     (repo / "VERSION").write_text("2\n")
@@ -457,17 +484,58 @@ def check_problems_solved() -> None:
     git(repo, "revert", "--no-edit", "-m", "1", merge, at=start + timedelta(days=1))
     days = verification.daily_metrics(HOME / ".claude" / "projects", start.date(), start.date())
     d = days[start.date().isoformat()]
-    assert d["problems_solved"] == 2, d                # the merged branch, and the main session's commit
+    assert d["problems_solved"] == 2, d                # the merged branch, and the bump, once
     assert d["hitl_turns_per_pr"] == 4.0, d            # 3 + 1 user turns across the branch's sessions
-    assert d["by_detector"]["explicit_correction"] == 1 and d["user_turns"] == 5, d
-    assert d["tokens"] == 14_000 and d["tokens_per_problem"] == 7_000.0, d
+    assert d["by_detector"]["explicit_correction"] == 1 and d["user_turns"] == 8, d
+    assert d["tokens"] == 17_000 and d["tokens_per_problem"] == 8_500.0, d
     assert d["reverted"] == 1, d                       # the merge was reverted the next day
-    print("✓ verification: problems solved, human turns per PR, tokens per problem, reverted share")
+    print("✓ verification: problems solved (the owner's commits, each once), human turns per PR, tokens per "
+          "problem, reverted share")
+
+
+def check_symlink_targets() -> None:
+    """A symlink in a repo (AGENTS.md -> CLAUDE.md, or a linked .claude dir)
+    is neither offered nor accepted: a diff for it could never apply."""
+    repo = make_repo(DEV / "links")
+    (repo / "AGENTS.md").symlink_to("CLAUDE.md")
+    (repo / "shared").mkdir()
+    (repo / ".claude").symlink_to("shared")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "links")
+    repos = {"links": repo}
+    assert editable_files(repos) == [f for f in editable_files(repos) if f.startswith("home:")] + ["links:CLAUDE.md"]
+    for target in ("links:AGENTS.md", "links:.claude/skills/x/SKILL.md"):
+        try:
+            resolve(target, repos)
+            raise AssertionError(f"{target} was not refused")
+        except Refused as e:
+            assert "symlink" in str(e), e
+    assert resolve("links:CLAUDE.md", repos).current() == CLAUDE_MD
+    print("✓ gardener: symlinks in a repo are neither offered nor accepted")
+
+
+async def check_one_proposal_per_file_per_run() -> None:
+    """Two changes to one file in one run: the second is sent back, so each
+    file has at most one open proposal."""
+    edit = lambda cid, old, new: propose(cid, "links:CLAUDE.md", old, new)
+    responses = [ModelResponse(parts=[edit("d1", "A small demo app.\n", "A demo.\n"),
+                                      edit("d2", "# Demo\n", "# The demo\n")])]
+    seen = []
+
+    def respond(messages, info):
+        seen.append(messages)
+        return responses.pop(0)
+
+    deps = Deps(repos={"links": DEV / "links"})
+    result = await build_agent(FunctionModel(respond)).run("go", deps=deps)
+    assert [c.tool_call_id for c in result.output.approvals] == ["d1"], result.output
+    assert list(deps.drafts) == ["d1"] and "links:CLAUDE.md" in deps.open_targets, deps
+    print("✓ gardener: one run proposes at most one change per file")
 
 
 def check_verdicts() -> None:
     w = lambda c, t, h=None: {"corrections_per_100_turns": c, "tokens_per_problem": t,
-                              "friction_half_life_days": h}
+                              "friction_half_life_days": h, "hitl_turns_per_pr": 3}
     assert verification.verdict(w(4, 100, 3), w(2, 100, 2))[0] == "helped"
     assert verification.verdict(w(4, 100), w(4.1, 100))[0] == "no_change"   # within 5%
     assert verification.verdict(w(4, 100), w(2, 120))[0] == "worse"         # tokens up 20%
@@ -513,8 +581,9 @@ async def check_replay_before_proposal() -> None:
     assert report["current"] == {"pass_rate": 0.0, "clean_pass_rate": 1.0}
     assert report["proposed"] == {"pass_rate": 1.0, "clean_pass_rate": 1.0}
     assert report["meets_rule"] is True and report["tokens"] == 8_000 and report["cost_usd"] == 0.08
-    summary = loop.eval_summary(report)
+    summary = loop.eval_summary(report, {"tokens_per_problem": 7000.0, "hitl_turns_per_pr": 4.0})
     assert "pass rate 0% → 100%" in summary and "accept rule" in summary and "$0.08" in summary, summary
+    assert "7,000 tokens per problem solved, 4 human-in-the-loop turns per PR" in summary, summary
     # In the Gardener: the draft's cases are those of its project; the fake stands in for the runner.
     for case in cases:
         save_case(case, _TMP / "cases")
@@ -613,6 +682,8 @@ async def main():
     await check_worse_drafts_revert(store, engine, clock)
     world("metrics")
     check_problems_solved()
+    check_symlink_targets()
+    await check_one_proposal_per_file_per_run()
     await check_with_server()
     print("\nall gardener tests passed")
 

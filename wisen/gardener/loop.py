@@ -174,21 +174,38 @@ def _pct(rate: float | None) -> str:
     return "n/a" if rate is None else f"{rate:.0%}"
 
 
-def eval_summary(report: dict | None) -> str:
+def cost_now(store: SqliteStore, day: str) -> dict:
+    """The two headline cost numbers as they stand: 7-day medians up to `day`."""
+    end = date.fromisoformat(day)
+    first = end - timedelta(days=verification.ROLLING_DAYS - 1)
+    days = {r["date"]: json.loads(r["doc"]) for r in _rows(
+        store, "SELECT date, doc FROM daily_metrics WHERE user_id = ? AND date BETWEEN ? AND ?",
+        first.isoformat(), day)}
+    return {k: verification._median(days, k, first, end) for k in ("tokens_per_problem", "hitl_turns_per_pr")}
+
+
+def _num(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:,g}"
+
+
+def eval_summary(report: dict | None, cost: dict) -> str:
+    now = (f" Cost now (7-day medians): {_num(cost['tokens_per_problem'])} tokens per problem solved, "
+           f"{_num(cost['hitl_turns_per_pr'])} human-in-the-loop turns per PR.")
     if report is None:
-        return "Replay: no confirmed cases for this file yet, so the expected gain is unknown."
+        return "Replay: no confirmed cases for this file yet, so the expected gain is unknown." + now
     cur, new = report["current"], report["proposed"]
     rule = {True: "yes", False: "no", None: "not enough cases to tell"}[report["meets_rule"]]
-    cost = f"{report['tokens']:,} tokens" + (f", ${report['cost_usd']:.2f}" if report["cost_usd"] is not None else "")
+    spent = f"{report['tokens']:,} tokens" + (f", ${report['cost_usd']:.2f}" if report["cost_usd"] is not None else "")
     return (f"Replay on {report['cases']['eval']} eval and {report['cases']['clean']} clean-set cases: "
             f"pass rate {_pct(cur['pass_rate'])} → {_pct(new['pass_rate'])}; clean set "
             f"{_pct(cur['clean_pass_rate'])} → {_pct(new['clean_pass_rate'])}. Meets the accept rule "
-            f"(pass rate rises, clean set holds): {rule}. Replay cost: {cost}.")
+            f"(pass rate rises, clean set holds): {rule}. Replay cost: {spent}.{now}")
 
 
 def record_run(store: SqliteStore, proposals: Proposals, run: GardenerRun, replays: dict, day: str) -> list[str]:
     """The run and its proposals, in one transaction; a rerun finds them."""
     now = proposals.clock()
+    cost = cost_now(store, day)
     ids = []
     with store.transaction() as conn:
         conn.execute(
@@ -200,7 +217,7 @@ def record_run(store: SqliteStore, proposals: Proposals, run: GardenerRun, repla
         for d in run.drafts:
             report = replays.get(d.tool_call_id)
             payload = {"diff": d.diff, "rationale": d.rationale, "evidence": d.evidence,
-                       "eval_summary": eval_summary(report), "batch": day, "run_id": run.run_id,
+                       "eval_summary": eval_summary(report, cost), "batch": day, "run_id": run.run_id,
                        "tool_call_id": d.tool_call_id, "base_blob": d.base_blob, "replay": report}
             ids.append(proposals.create_in(conn, d.target, payload, f"gardener:{run.run_id}:{d.tool_call_id}",
                                            "gardener", now + EXPIRES_AFTER).id)

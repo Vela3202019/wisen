@@ -3,6 +3,10 @@ Detect correction moments in raw claude-code transcripts and turn them into
 eval cases. All detection is deterministic; only enrich() calls an LLM, to fill
 agent_action and behavior_check.
 
+A session with no detection yields one clean case instead (kind "clean"): a
+smooth moment a config change must not break. Its behavior_check is fixed, so
+it needs no enrichment.
+
 Detectors:
   tool-rejection      user declined a tool call (harness marker in tool_result)
   interruption        user hit escape mid-turn ("[Request interrupted by user")
@@ -39,6 +43,8 @@ _CORRECTION_RE = re.compile(
 _HARNESS_RE = re.compile(r"^\s*(<(task-notification|command-name|local-command|system-reminder|bash-)|Caveat:)")
 _CONTEXT_TURNS = 12
 _RAPID_CORRECTION_SECONDS = 60
+CLEAN_CHECK = ("Did the agent do something the user would have had to correct, stop or undo, "
+               "instead of carrying the work on as it went in the original session?")
 
 
 @dataclass
@@ -49,6 +55,7 @@ class SessionScan:
     source_path: str
     user_turns: int = 0
     cases: list[Case] = field(default_factory=list)
+    clean: Case | None = None    # the clean-set case of a session with no detection
     # For the verification loop (wisen/evals/verification.py):
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -195,7 +202,29 @@ def _scan_session(session_id: str, events: list[dict], project_path: str,
             detector=detector, context=context, correction=correction,
             split=assign_split(date),
         ))
+    if not scan.cases:
+        scan.clean = _clean_case(scan, turns)
     return scan
+
+
+def _clean_case(scan: SessionScan, turns: list) -> Case | None:
+    """The session's last user turn that follows earlier turns, with the
+    turns before it as context: the replay must carry on as smoothly."""
+    idx = next((i for i in range(len(turns) - 1, 0, -1) if turns[i][1] == "user"), None)
+    if idx is None:
+        return None
+    event_i, _, text, _, _ = turns[idx]
+    context = [
+        ContextTurn(role=r, content=truncate_content(t or rej, 1500))
+        for _, r, t, _, rej in turns[max(0, idx - _CONTEXT_TURNS):idx]
+    ]
+    return Case(
+        id=f"{scan.date}-{scan.session_id[:8]}-{event_i}",
+        date=scan.date, session_id=scan.session_id,
+        source_path=scan.source_path, project_path=scan.project_path,
+        detector=None, context=context, correction=truncate_content(text, 500),
+        behavior_check=CLEAN_CHECK, split=assign_split(scan.date), kind="clean",
+    )
 
 
 def scan_all(claude_dir: Path = _CLAUDE_DIR, since: str | None = None) -> Iterator[SessionScan]:

@@ -2,10 +2,13 @@
 Test the eval case miner and Tier-1 metrics against synthetic transcripts.
 Run: python3 -m tests.test_evals
 """
+import asyncio
 import json
 import tempfile
 from pathlib import Path
 
+from wisen.evals import cli as evals_cli
+from wisen.evals import miner, runner
 from wisen.evals.cases import Case, ContextTurn, assign_split, load_cases, save_case
 from wisen.evals.metrics import daily_correction_rates, friction_half_life, pearson
 from wisen.evals.miner import scan_all
@@ -143,10 +146,69 @@ def test_build_prompt():
     print("✓ build_prompt drops trailing agent turns, keeps earlier context")
 
 
+def test_clean_set():
+    """A session with no detection yields one clean case; its fixed
+    behavior check needs no model, and once confirmed it makes the replay's
+    clean-set rate real."""
+    with tempfile.TemporaryDirectory() as tmp:
+        claude_dir, cases_dir = Path(tmp) / "projects", Path(tmp) / "cases"
+        _write_transcript(claude_dir, [
+            _event("user", "add a health endpoint", "2026-07-01T10:00:00Z", session="smooth01"),
+            _event("assistant", "added GET /health", "2026-07-01T10:02:00Z", session="smooth01"),
+            _event("user", "now add a test for it", "2026-07-01T10:10:00Z", session="smooth01"),
+            _event("assistant", "test added", "2026-07-01T10:12:00Z", session="smooth01"),
+        ], name="smooth.jsonl")
+        _write_transcript(claude_dir, [
+            _event("user", "add a health endpoint", "2026-07-01T11:00:00Z", session="rough001"),
+            _event("assistant", "added it with a fallback", "2026-07-01T11:02:00Z", session="rough001"),
+            _event("user", "no, no fallback", "2026-07-01T11:10:00Z", session="rough001"),
+        ], name="rough.jsonl")
+        _write_transcript(claude_dir, [
+            _event("user", "hi", "2026-07-01T12:00:00Z", session="single01"),
+            _event("assistant", "hello", "2026-07-01T12:00:10Z", session="single01"),
+        ], name="single.jsonl")
+        scans = {s.session_id: s for s in scan_all(claude_dir)}
+        assert scans["rough001"].clean is None and scans["rough001"].cases   # a correction, not clean
+        assert scans["single01"].clean is None                                 # nothing before its only turn
+        clean = scans["smooth01"].clean
+        assert clean.kind == "clean" and clean.detector is None and clean.status == "mined", clean
+        assert clean.correction == "now add a test for it"
+        assert [t.content for t in clean.context] == ["add a health endpoint", "added GET /health"]
+        assert clean.behavior_check == miner.CLEAN_CHECK
+
+        # `mine` saves it without the LLM labeling pass (that pass is for corrections).
+        async def no_model(case):
+            raise AssertionError(f"enrich called for {case.id}")
+
+        real = (miner.scan_all, miner.enrich, evals_cli.save_case, evals_cli.case_path)
+        miner.scan_all = lambda since=None: (s for s in scan_all(claude_dir, since) if s.clean)
+        miner.enrich = no_model
+        evals_cli.save_case = lambda case: save_case(case, cases_dir)
+        evals_cli.case_path = lambda case_id: cases_dir / f"{case_id}.json"
+        try:
+            asyncio.run(evals_cli._mine(None, no_enrich=False))
+        finally:
+            miner.scan_all, miner.enrich, evals_cli.save_case, evals_cli.case_path = real
+        (loaded,) = load_cases(cases_dir)
+        assert loaded == clean, loaded
+
+        loaded.status, loaded.split = "confirmed", "eval"
+
+        async def fake(case, variant, k):
+            return {"case": case.id, "passed": variant.claude_md is None, "tokens": 10, "cost_usd": None}
+
+        report = asyncio.run(runner.compare([loaded], runner.Variant(), runner.Variant(claude_md=Path("x")),
+                                            cap=2, run=fake))
+        assert report["cases"] == {"eval": 0, "clean": 1}, report
+        assert report["current"]["clean_pass_rate"] == 1.0 and report["proposed"]["clean_pass_rate"] == 0.0
+        print("✓ clean set: a session with no detection becomes a clean case; mine saves it unlabeled by a model")
+
+
 if __name__ == "__main__":
     test_detectors()
     test_no_false_positives()
     test_case_bank_roundtrip()
     test_metrics()
     test_build_prompt()
+    test_clean_set()
     print("\nall eval tests passed")

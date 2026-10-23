@@ -12,8 +12,8 @@ and reflections only, no model.
                   medians before vs after, and a verdict (helped / no change /
                   worse) with its reason
 
-"Problems solved" is a proposed definition, pending the owner's confirmation;
-it lives in `problems_solved` alone, so changing it changes nothing else.
+"Problems solved" is the owner's confirmed definition; it lives in
+`problems_solved` alone, so changing it changes nothing else.
 """
 import re
 import statistics
@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from wisen import config
 from wisen.evals.metrics import friction_half_life
 from wisen.evals.miner import SessionScan, scan_all
 from wisen.gardener.git import GitError, Repo
@@ -45,6 +46,7 @@ _FIX = re.compile(r"^fix\b", re.IGNORECASE)
 class Commit:
     sha: str
     at: datetime
+    author: str           # the author's email, lowercased
     parents: list[str]
     subject: str
     body: str
@@ -69,6 +71,7 @@ class Solved:
 class _RepoHistory:
     repo: Repo
     default: str
+    refs: list[str]
     commits: list[Commit] = field(default_factory=list)   # first-parent, oldest first
 
 
@@ -90,7 +93,7 @@ def _history(root: str, since: datetime) -> _RepoHistory | None:
         if not refs:
             return None
         out = repo.out("log", "--first-parent", "--name-only", f"--since={since.isoformat()}",
-                       "--format=%x1e%H%x1f%cI%x1f%P%x1f%s%x1f%b%x1f", *refs)
+                       "--format=%x1e%H%x1f%cI%x1f%ae%x1f%P%x1f%s%x1f%b%x1f", *refs)
         default = repo.default_branch()
     except GitError:
         return None
@@ -98,33 +101,46 @@ def _history(root: str, since: datetime) -> _RepoHistory | None:
     for record in out.split("\x1e"):
         if "\x1f" not in record:
             continue
-        sha, at, parents, subject, body, files = record.split("\x1f", 5)
-        commits.append(Commit(sha.strip(), datetime.fromisoformat(at).astimezone(UTC), parents.split(),
-                              subject, body, {f for f in files.splitlines() if f.strip()}))
+        sha, at, author, parents, subject, body, files = record.split("\x1f", 6)
+        commits.append(Commit(sha.strip(), datetime.fromisoformat(at).astimezone(UTC), author.lower(),
+                              parents.split(), subject, body, {f for f in files.splitlines() if f.strip()}))
     commits.sort(key=lambda c: c.at)
-    return _RepoHistory(repo, default, commits)
+    return _RepoHistory(repo, default, refs, commits)
 
 
-def _merged_range(h: _RepoHistory, merge: Commit) -> tuple[list[str], set[str]]:
-    """The commits a merge brought in, and the files it changed."""
+def _owner(repo: Repo) -> str:
+    """The owner's git email: `[gardener].owner_email`, else the repo's `user.email`."""
+    return (config.get("gardener", "owner_email", "WISEN_OWNER_EMAIL")
+            or repo.run("config", "user.email", check=False).stdout.strip()).lower()
+
+
+def _merged_range(h: _RepoHistory, merge: Commit) -> tuple[list[str], set[str], set[str]]:
+    """The commits a merge brought in (the merge first), the files it
+    changed, and their authors."""
     try:
-        shas = h.repo.out("rev-list", f"{merge.parents[0]}..{merge.parents[1]}").split()
+        log = h.repo.out("log", "--format=%H %ae", f"{merge.parents[0]}..{merge.parents[1]}").splitlines()
         files = set(h.repo.out("diff", "--name-only", merge.parents[0], merge.sha).splitlines())
     except GitError:
-        shas, files = [], set()
-    return [merge.sha, *shas], files
+        log, files = [], set()
+    pairs = [line.split(" ", 1) for line in log if " " in line]
+    return [merge.sha, *(sha for sha, _ in pairs)], files, {merge.author, *(a.lower() for _, a in pairs)}
 
 
 def problems_solved(sessions: list[SessionScan], since: datetime) -> list[Solved]:
-    """THE PROPOSED DEFINITION (pending the owner's confirmation; §5.4):
+    """THE DEFINITION (confirmed by the owner; §5.4):
 
+    - only the owner's commits count (author email = `_owner`), and each
+      landed commit counts for one problem at most;
     - sessions on a feature branch belong to that branch, one problem (one
       PR); it is solved when it reaches the default branch: a merge commit
       names it ("Merge pull request #N from x/<branch>", "Merge branch
-      '<branch>'"), or the branch's tip is in the default branch;
+      '<branch>'"), or the branch's tip is in the default branch; it counts
+      when one of the commits it landed is the owner's;
     - a session on the default branch is one problem; it is solved when a
       commit lands on the default branch between its start and LAND_GRACE
-      after its end;
+      after its end; a commit inside several sessions' windows goes to the
+      nearest one (the one it is closest to the end of, then the latest
+      started);
     - human-in-the-loop turns of a PR: the user turns of every session on
       its branch that started before it landed;
     - quality guard: reverted when a later default-branch commit says
@@ -143,16 +159,19 @@ def problems_solved(sessions: list[SessionScan], since: datetime) -> list[Solved
         h = _history(root, since - SESSION_LOOKBACK)
         if h is None:
             continue
+        owner = _owner(h.repo)
         on_branch: dict[str, list[SessionScan]] = defaultdict(list)
         for s in repo_sessions:
             if s.git_branch and s.git_branch not in (h.default, "HEAD"):
                 on_branch[s.git_branch].append(s)
-        landed: dict[str, tuple[datetime, list[str], set[str]]] = {}
+        landed: dict[str, tuple[datetime, list[str], set[str]] | None] = {}   # None: landed, not the owner's
+        claimed: set[str] = set()
         for c in h.commits:
             m = _MERGE_PR.match(c.subject) or _MERGE_BRANCH.match(c.subject)
             if m and len(c.parents) > 1 and m.group(1) in on_branch and m.group(1) not in landed:
-                shas, files = _merged_range(h, c)
-                landed[m.group(1)] = (c.at, shas, files)
+                shas, files, authors = _merged_range(h, c)
+                claimed.update(shas)
+                landed[m.group(1)] = (c.at, shas, files) if owner in authors else None
         for branch, branch_sessions in on_branch.items():
             if branch in landed:
                 continue
@@ -161,20 +180,31 @@ def problems_solved(sessions: list[SessionScan], since: datetime) -> list[Solved
             # A tip from before the first session is old work, not this branch's.
             if tip is None or datetime.fromisoformat(h.repo.out("show", "-s", "--format=%cI", tip)) < start:
                 continue
-            for c in h.commits:
-                if c.at >= start and (c.sha == tip or h.repo.ok("merge-base", "--is-ancestor", tip, c.sha)):
-                    landed[branch] = (c.at, [c.sha], set(c.files))
-                    break
-        for branch, (at, shas, files) in landed.items():
+            if not any(h.repo.ok("merge-base", "--is-ancestor", tip, ref) for ref in h.refs):
+                continue
+            c = next((c for c in h.commits if c.at >= start
+                      and (c.sha == tip or h.repo.ok("merge-base", "--is-ancestor", tip, c.sha))), None)
+            if c is not None and c.sha not in claimed and c.author == owner:
+                claimed.add(c.sha)
+                landed[branch] = (c.at, [c.sha], set(c.files))
+        for branch, hit in landed.items():
+            if hit is None:
+                continue
+            at, shas, files = hit
             turns = sum(s.user_turns for s in on_branch[branch] if s.started_at <= at)
             solved.append(Solved(root, branch, at, shas, files, turns))
-        for s in repo_sessions:
-            if s.git_branch and s.git_branch != h.default:
+        on_default = [s for s in repo_sessions if not s.git_branch or s.git_branch == h.default]
+        credited: dict[int, list[Commit]] = defaultdict(list)
+        for c in h.commits:
+            if c.sha in claimed or c.author != owner:
                 continue
-            hits = [c for c in h.commits if s.started_at <= c.at <= s.ended_at + LAND_GRACE]
-            if hits:
-                solved.append(Solved(root, None, hits[0].at, [c.sha for c in hits],
-                                     set().union(*(c.files for c in hits)), s.user_turns))
+            near = [i for i, s in enumerate(on_default) if s.started_at <= c.at <= s.ended_at + LAND_GRACE]
+            if near:
+                credited[min(near, key=lambda i: (max(c.at - on_default[i].ended_at, timedelta(0)),
+                                                  c.at - on_default[i].started_at))].append(c)
+        for i, hits in credited.items():
+            solved.append(Solved(root, None, hits[0].at, [c.sha for c in hits],
+                                 set().union(*(c.files for c in hits)), on_default[i].user_turns))
         for p in solved:
             if p.repo != root:
                 continue
@@ -283,6 +313,7 @@ def verdict(before: dict, after: dict) -> tuple[str, str]:
         _describe("corrections per 100 user turns", before["corrections_per_100_turns"],
                   after["corrections_per_100_turns"]),
         _describe("tokens per problem solved", before["tokens_per_problem"], after["tokens_per_problem"]),
+        _describe("human-in-the-loop turns per PR", before["hitl_turns_per_pr"], after["hitl_turns_per_pr"]),
         _describe("friction half-life", b_half, a_half, " days"),
     ])
     if corr is None:

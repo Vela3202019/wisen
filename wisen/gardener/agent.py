@@ -101,6 +101,7 @@ def _draft(deps: Deps, tool_call_id: str, target: str, old_text: str, new_text: 
     else:
         base = t.base()
         base_blob = t.repo.blob(base, t.path) if base else None
+    deps.open_targets.add(t.name)
     return Draft(tool_call_id=tool_call_id, target=t.name, diff=diff, base_blob=base_blob,
                  rationale=rationale, evidence=evidence, current=current, proposed=proposed)
 

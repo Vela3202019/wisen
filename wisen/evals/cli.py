@@ -2,6 +2,7 @@
 Case-bank CLI.
 
   python -m evals mine [--since DATE] [--no-enrich]   scan transcripts, save new cases
+                                                       (corrections, and the clean set)
   python -m evals list                                 show the case bank
   python -m evals review <id> --confirm|--reject       curate a case
   python -m evals metrics [--since DATE]               Tier-1 outcome metrics (JSON)
@@ -21,19 +22,19 @@ from wisen.evals.cases import CASES_DIR, Case, case_path, load_cases, save_case
 async def _mine(since: str | None, no_enrich: bool) -> None:
     new = []
     for scan in miner.scan_all(since=since):
-        for case in scan.cases:
+        for case in [*scan.cases, *([scan.clean] if scan.clean else [])]:
             if case_path(case.id).exists():
                 continue
             new.append(case)
     print(f"{len(new)} new cases detected")
     for case in new:
-        if not no_enrich:
+        if not no_enrich and case.kind == "correction":
             try:
                 case = await miner.enrich(case)
             except (ValueError, RuntimeError) as e:
                 print(f"  enrich failed for {case.id}: {e}")
         save_case(case)
-        print(f"  [{case.detector}] {case.id} ({case.split})")
+        print(f"  [{case.detector or case.kind}] {case.id} ({case.split})")
 
 
 def _list() -> None:

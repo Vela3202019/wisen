@@ -40,3 +40,8 @@ root_dir = "~"
 # (CLAUDE.md, AGENTS.md, …). Entries may be parent dirs or specific repo
 # paths (GIT_SCAN_DIRS).
 git_scan_dirs = "~/Developer"
+
+[gardener]
+# Your git email: only your commits count as problems solved (WISEN_OWNER_EMAIL).
+# Default: each repo's `git config user.email`.
+# owner_email = "you@example.com"
