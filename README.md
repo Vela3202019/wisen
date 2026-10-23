@@ -54,13 +54,15 @@ wisen serve                             # API on :8000
 ```
 
 ```bash
-wisen synthesize [YYYY-MM-DD]   # ingest sessions + write one day's reflection
+wisen synthesize [YYYY-MM-DD]   # ingest sessions + write one day's reflection, then the Gardener batch
 wisen serve                     # POST /synthesize, GET /reflections, POST /chat (SSE)
 wisen export [dir]              # dump reflections to JSON files
 wisen egress                    # what passed the egress gate today
 wisen migrate-mongo             # one-off: copy a pre-SQLite MongoDB into SQLite
 wisen cloud pair https://<host> # pair this laptop with your wisen server
-wisen worker                    # laptop daemon for a paired server (outbound only)
+wisen worker                    # laptop daemon: syncs with a paired server (outbound only);
+                                #   unpaired, runs local Gardener jobs only
+wisen gardener list|approve|reject|status|run  # Gardener proposals when not paired
 wisen cloud serve               # run the server itself (on your server)
 ```
 
