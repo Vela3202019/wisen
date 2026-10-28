@@ -18,9 +18,6 @@ IDENTITY = {"name": "wisen gardener", "email": "gardener@wisen.invalid"}
 _SCRUB = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR")
 
 
-NO_PROMPT = {"GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
-
-
 class GitError(Exception):
     pass
 
@@ -80,11 +77,18 @@ class Repo:
         remotes = self.out("remote").split()
         return "origin" if "origin" in remotes else (remotes[0] if remotes else None)
 
+    def no_prompt(self) -> dict:
+        """Env for talking to a remote: the owner's ssh command (theirs, else
+        the repo's core.sshCommand, else ssh) in batch mode, so it never prompts."""
+        ssh = (os.environ.get("GIT_SSH_COMMAND")
+               or self.run("config", "core.sshCommand", check=False).stdout.strip() or "ssh")
+        return {"GIT_SSH_COMMAND": f"{ssh} -o BatchMode=yes"}
+
     def fetch(self, remote: str) -> bool:
         """Fetch `remote` (no pull, no checkout), never prompting and giving up
         after 30 seconds. False if it failed or timed out."""
         try:
-            return self.ok("fetch", "--quiet", remote, timeout=30, env=NO_PROMPT)
+            return self.ok("fetch", "--quiet", remote, timeout=30, env=self.no_prompt())
         except subprocess.TimeoutExpired:
             return False
 

@@ -583,6 +583,23 @@ async def check_publisher() -> None:
     refused(publisher.PushFailed, p.id)
     hook.unlink()
     publisher.TIMEOUT = 60
+    # The owner's own ssh command (here the repo's core.sshCommand) is kept,
+    # in batch mode, for the push and the fetch.
+    owner_ssh = os.environ.pop("GIT_SSH_COMMAND", None)
+    fake_ssh = _TMP / "publish" / "bin" / "ssh-work"
+    fake_ssh.write_text(f'#!/bin/sh\necho "$@" >> {_TMP / "publish" / "ssh.log"}\nexit 1\n')
+    fake_ssh.chmod(0o755)
+    git(demo, "config", "core.sshCommand", str(fake_ssh))
+    git(demo, "remote", "set-url", "origin", "ssh://git@example.invalid/demo.git")
+    refused(publisher.PushFailed, p.id)
+    assert not Repo(demo).fetch("origin")
+    calls = (_TMP / "publish" / "ssh.log").read_text().splitlines()
+    assert all(c.startswith("-o BatchMode=yes ") for c in calls), calls
+    assert any("git-receive-pack" in c for c in calls) and any("git-upload-pack" in c for c in calls), calls
+    git(demo, "remote", "set-url", "origin", str(origin))
+    git(demo, "config", "--unset", "core.sshCommand")
+    if owner_ssh is not None:
+        os.environ["GIT_SSH_COMMAND"] = owner_ssh
     assert (await proposals.get(p.id)).pr_url is None   # the failed create recorded nothing
     branch = f"wisen/gardener/{p.id}"
     url = publisher.publish(store, p.id)
