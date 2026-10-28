@@ -211,12 +211,17 @@ async def apply_decisions(store: SqliteStore, decisions: list[dict]) -> None:
 
 # ── 4. device jobs ────────────────────────────────────────────────────────────
 
-async def _synthesize(client: CloudClient, store: SqliteStore, args: dict) -> None:
-    from wisen.synthesis.job import garden_day, synthesize_day
+async def _synthesize(client: CloudClient, store: SqliteStore, args: dict) -> dict | None:
+    from wisen.synthesis.job import Skipped, garden_day, synthesize_day
 
     # The day's one local job (request id daily-synthesis:<date>): a run the
-    # laptop already started resumes from its last checkpoint.
+    # laptop already started resumes from its last checkpoint. A day with
+    # nothing new is left alone, and the job status says so.
     job = await synthesize_day(args["date"])
+    if isinstance(job, Skipped):
+        print(f"[worker] synthesize {job.date} skipped: {job.reason}")
+        await sync_up(client, store)
+        return {"skipped": job.reason}
     if job.state != "succeeded":
         raise SynthesisFailed(job.error)
     # The day's Gardener batch, so it arrives with the morning reflection.
@@ -224,6 +229,7 @@ async def _synthesize(client: CloudClient, store: SqliteStore, args: dict) -> No
     if garden.state != "succeeded":
         print(f"[worker] gardener failed for {args['date']}: {garden.error}", file=sys.stderr)
     await sync_up(client, store)
+    return None
 
 
 async def _measure(client: CloudClient, store: SqliteStore, args: dict) -> None:
@@ -257,12 +263,12 @@ async def run_device_job(client: CloudClient, store: SqliteStore, job: dict) -> 
     """Run one leased device job and report how it ended. Returns the state."""
     started = datetime.now(UTC)
     beat = asyncio.create_task(_heartbeat(client, job["id"]))
-    error = None
+    error, outcome = None, None
     try:
         handler = HANDLERS.get(job["kind"])
         if handler is None:
             raise UnknownJobKind(job["kind"])
-        await handler(client, store, job["args"])
+        outcome = await handler(client, store, job["args"])   # extra job status fields, if any
     except Revoked:
         raise
     except Exception as e:  # noqa: BLE001 - every failure is reported; the server retries
@@ -277,6 +283,7 @@ async def run_device_job(client: CloudClient, store: SqliteStore, job: dict) -> 
         "job_id": job["id"], "kind": job["kind"], "state": state, "error_class": error,
         "started_at": started.isoformat(timespec="seconds"),
         "finished_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        **(outcome or {}),
     }, user=client.creds.user_id, device_id=client.creds.device_id)
     try:
         await client.finish(job["id"], status)

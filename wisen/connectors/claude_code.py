@@ -42,6 +42,7 @@ Note the outer "type" and inner "role" disagree on purpose (a tool result is
 type=user); we trust message.role. sessionId groups lines after /resume.
 """
 import json
+import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,6 +66,18 @@ _SKIP_TYPES = {
 def _decode_project_path(encoded: str) -> str:
     """'-Users-me-projects-foo' → '/Users/me/projects/foo'"""
     return "/" + encoded.lstrip("-").replace("-", "/")
+
+
+def _encode_project_path(path: str) -> str:
+    """How Claude Code names a project directory: every character of the cwd
+    that is not a letter or a digit becomes a dash."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
+
+
+# wisen's own `claude -p` runs (synthesis on a subscription) are recorded like
+# any session. They are not the owner's work, so they are never ingested:
+# wisen does not reflect on its own reflection runs.
+_OWN_PROJECT = _encode_project_path(str(config.cli_cwd().resolve()))
 
 
 def _extract_text(content) -> str:
@@ -186,7 +199,7 @@ async def ingest(date: str | None = None) -> AsyncIterator[NormalizedSession]:
         return
 
     for project_dir in _CLAUDE_DIR.iterdir():
-        if not project_dir.is_dir():
+        if not project_dir.is_dir() or project_dir.name == _OWN_PROJECT:
             continue
 
         project_path = _decode_project_path(project_dir.name)

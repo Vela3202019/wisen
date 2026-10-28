@@ -84,10 +84,12 @@ def open_targets(store: SqliteStore) -> set[str]:
         store, f"SELECT target FROM proposals WHERE user_id = ? AND state IN ({', '.join('?' * len(OPEN))})", *OPEN)}
 
 
-def past_outcomes(store: SqliteStore, limit: int = 20) -> list[dict]:
-    """Recent proposals with the owner's decision note and the measured verdict."""
-    return [dict(r) for r in _rows(store, """
-        SELECT p.id, p.target, p.state, d.decision, d.note, m.verdict, m.reason
+def past_outcomes(store: SqliteStore, limit: int = 50) -> list[dict]:
+    """Past proposals in every state, newest first, with their content, the
+    owner's decision note, when they were merged, and the measured verdict."""
+    return [{**dict(r), "payload": json.loads(r["payload"])} for r in _rows(store, """
+        SELECT p.id, p.target, p.state, p.payload, p.created_at, d.decision, d.note, m.verdict, m.reason,
+               (SELECT at FROM proposal_events e WHERE e.proposal_id = p.id AND e.to_state = 'merged') AS merged_at
         FROM proposals p
         LEFT JOIN proposal_decisions d ON d.proposal_id = p.id
         LEFT JOIN proposal_measures m ON m.proposal_id = p.id
@@ -100,10 +102,15 @@ def wants_tending(reflection: dict) -> bool:
             or any(f.get("type") == "missing-skill" for f in reflection.get("friction_points", [])))
 
 
-async def build_prompt(store: SqliteStore, day: str) -> str:
+async def recent_reflections(store: SqliteStore, day: str) -> list[dict]:
+    """The week the Gardener reads on `day`: that day's reflection and the six before it."""
     after = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+    return await store.list_reflections(limit=7, before=after)
+
+
+async def build_prompt(store: SqliteStore, day: str) -> str:
     lines = [f"Today is {day}.", "", "## Recent reflections, newest first"]
-    for r in await store.list_reflections(limit=7, before=after):
+    for r in await recent_reflections(store, day):
         lines.append(f"\n### {r.get('date')} ({r.get('alignment_label', '?')})")
         for f in r.get("friction_points", []):
             lines.append(f"- friction [{f.get('type')}]: {f.get('description')} (evidence: {f.get('evidence')})")
@@ -112,7 +119,7 @@ async def build_prompt(store: SqliteStore, day: str) -> str:
         if r.get("insight"):
             lines.append(f"- insight: {r['insight']}")
     outcomes = await asyncio.to_thread(past_outcomes, store)
-    lines += ["", "## Your past proposals and what happened to them"]
+    lines += ["", "## Your past proposals and what happened to them (past_proposals has their content)"]
     for o in outcomes:
         what = o["state"]
         if o["decision"] == "rejected":
@@ -128,7 +135,9 @@ async def build_prompt(store: SqliteStore, day: str) -> str:
 # ── garden: propose ───────────────────────────────────────────────────────────
 
 async def propose(store: SqliteStore, day: str) -> GardenerRun:
-    deps = Deps(open_targets=await asyncio.to_thread(open_targets, store))
+    deps = Deps(open_targets=await asyncio.to_thread(open_targets, store),
+                reflection_dates={r["date"] for r in await recent_reflections(store, day)},
+                history=await asyncio.to_thread(past_outcomes, store))
     result = await build_agent(gardener_model()).run(await build_prompt(store, day), deps=deps)
     conversation = ConversationTypeAdapter.dump_json(result.conversation).decode()
     if isinstance(result.output, DeferredToolRequests):
@@ -244,6 +253,10 @@ async def garden_job(ctx: JobContext, args: dict) -> dict:
     reflection = await store.get_reflection(day)
     if reflection is None or not wants_tending(reflection):
         return {"date": day, "proposals": 0}
+    # A proposal needs the problem on two different days, so one reflection
+    # alone can propose nothing: no model run.
+    if len(await recent_reflections(store, day)) < 2:
+        return {"date": day, "proposals": 0, "skipped": "only one reflection so far"}
     run = await ctx.step("propose", lambda: propose(store, day), replay_safe=True, output=GardenerRun)
     replays = {}
     for d in run.drafts:

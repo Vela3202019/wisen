@@ -768,6 +768,24 @@ async def check_no_marker_reaches_server():
     print("✓ cloud: after a full laptop -> server sync of the fixtures, no marker is in the server database")
 
 
+async def check_device_job_skips_empty_day():
+    """A device job for a day with no sessions makes no reflection; it ends
+    succeeded, and the server's record of it says why."""
+    server = _server("skip")
+    store = get_store()
+    async with server.browser() as browser:
+        creds = await server.device(browser)
+        await browser.post("/api/trigger", json={"date": "2026-02-01"})   # no fixture session that day
+        async with server.http() as http:
+            await worker.run(creds, store, http=http, once=True)
+            await worker.run(creds, store, http=http, once=True)
+        assert "2026-02-01" not in [log["date"] for log in (await browser.get("/api/logs")).json()]
+    await server.run_jobs()
+    (job,) = server.mailbox.device_jobs(USER, ("succeeded",))
+    assert job.result["state"] == "succeeded" and job.result["skipped"] == "no new sessions", job.result
+    print("✓ cloud: a device job for a day with no sessions is skipped, and the server's record says why")
+
+
 async def main():
     await check_login()
     await check_pairing()
@@ -781,6 +799,7 @@ async def main():
     await check_body_limit()
     await check_no_model_key()
     await check_no_marker_reaches_server()
+    await check_device_job_skips_empty_day()
     await check_prepairing_proposals()
     await check_batch_after_briefing()
     print("\nall cloud tests passed")

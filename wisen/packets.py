@@ -248,6 +248,7 @@ class JobStatus(BaseModel):
     started_at: Label
     finished_at: Label
     error_class: ErrorClass | None = None  # an exception's class name, never its message or traceback
+    skipped: Text | None = None            # a synthesize job that left the day alone, and why
 
 
 class JobStatusPacket(JobStatus, Envelope):

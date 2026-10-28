@@ -333,6 +333,21 @@ proposal that names any other path is refused even after approval.
 Every change lands as a **git branch** that the human approves. wisen never
 pushes to, or merges into, a default branch.
 
+**What is worth proposing.** Decided by the owner on 2026-10-28, after a
+batch of proposals that were each rejected for one of these reasons. The
+Gardener's instructions carry all of them; the draft check in
+`wisen/gardener/agent.py` enforces the ones the code can see.
+
+| Rule | In the prompt | Enforced in code |
+|---|---|---|
+| Recurring: the problem shows on at least two different days | yes | each evidence quote names its reflection date; fewer than two distinct dates, or a date the prompt did not show, is sent back; a day with only one reflection makes no run |
+| General: guidance across cases, not a one-situation procedure | yes | — |
+| Ownership: personal workflow goes in the owner's own files, never a shared team repo; a team repo gets only what every contributor needs | yes | — |
+| Load frequency: every-turn rules in a `CLAUDE.md`/`AGENTS.md` at the narrowest scope that covers them; task-only rules in a skill | yes | — |
+| Harness match: a rule about one harness's behaviour goes in that harness's own instruction file | yes | — |
+| Not about wisen: friction in wisen's own pipeline is a wisen bug, not an agent-file edit | yes | — |
+| Not already handled: compare with past proposals' content, even at another file; applied ones stand unless the problem recurs after the merge; rejected ones are dropped or moved where the note points | yes, through the `past_proposals` tool (content, note, merge date, verdict) | the same change to the same file is refused |
+
 ### 5.2 The loop
 
 propose → approve → apply as a branch → measure weeks later.
@@ -520,6 +535,18 @@ Decided by the owner on 2026-10-22 (open questions 6, 10 and 11):
   reflection, and its proposals arrive as one batch with the morning briefing
   (one push: "Reflection ready · 2 proposals waiting"). You approve or reject
   each item on its own.
+- **A day with nothing new is skipped** (owner, 2026-10-28: "no run if no
+  history"). `synthesize_day` in `wisen/synthesis/job.py`, which the CLI, the
+  launchd script and the server's device job all go through, leaves a day
+  alone when it has no sessions, or when its reflection was already made
+  after its last session ended (so the laptop's and the server's schedules
+  asking for the same day make one reflection). No reflection, no Gardener
+  run. The skip is returned, printed, and reported on the device job
+  (`skipped: no new sessions`), never silent; `wisen synthesize <date>
+  --force` runs the day anyway. wisen's own `claude -p` synthesis runs are
+  never ingested as sessions (they run in `~/.wisen/claude-cli`, which the
+  Claude Code connector skips), so wisen does not reflect on its own
+  reflection runs.
 
 How the applier writes a branch without touching your checkout: it builds the
 commit in a temporary index (`git apply --cached`, `commit-tree`) and creates

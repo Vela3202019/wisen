@@ -9,6 +9,10 @@ The step-5 checks (docs/plan/cloud-architecture.md §12):
   - a proposal for a disallowed path is refused after approval
   - a rejection note reaches the next run (the resumed run, and the next
     day's run)
+  - a proposal needs evidence from two different days, each quote dated; one
+    reflection alone makes no model run
+  - past proposals, with their content, note, merge date and verdict, are a
+    tool the run reads; the same change to the same file is refused
   - a measure job fires after merge and records its result
 and the decisions behind them (§5.5): files outside a repo go through wisen's
 home repo; proposals expire after 7 days; a day's proposals arrive as one
@@ -77,6 +81,7 @@ from wisen.store import SqliteStore
 
 T0 = datetime.now(UTC).replace(microsecond=0)
 DAY = (T0 - timedelta(days=1)).date().isoformat()
+DAY_BEFORE = (T0 - timedelta(days=2)).date().isoformat()   # the second day the evidence must come from
 CLAUDE_MD = "# Demo\n\nA small demo app.\n"
 HOME_MD = "# My rules\n\n- Be brief.\n"
 NOTE = "too vague: name the actual test command"
@@ -178,9 +183,13 @@ class Script:
                          for p in m.parts if isinstance(p, UserPromptPart))
 
 
-def propose(call_id: str, target: str, old: str, new: str, rationale: str = "Agents guess the test command.") -> ToolCallPart:
+EVIDENCE = [{"date": DAY_BEFORE, "quote": "how do I run the tests?"}, {"date": DAY, "quote": "which test command?"}]
+
+
+def propose(call_id: str, target: str, old: str, new: str, rationale: str = "Agents guess the test command.",
+            evidence: list[dict] = EVIDENCE) -> ToolCallPart:
     return ToolCallPart("propose_change", {"target": target, "old_text": old, "new_text": new,
-                                           "rationale": rationale, "evidence": ["how do I run the tests?"]},
+                                           "rationale": rationale, "evidence": evidence},
                         tool_call_id=call_id)
 
 
@@ -237,6 +246,8 @@ async def drain(engine: JobEngine) -> None:
 
 
 async def garden(store, engine, day: str) -> dict:
+    # The day's reflection and the one before it: evidence must span two days.
+    await store.upsert_reflection(reflection((datetime.fromisoformat(day) - timedelta(days=1)).date().isoformat()))
     await store.upsert_reflection(reflection(day))
     job = await engine.enqueue("garden", {"date": day}, request_id=f"garden:{day}")
     done = await engine.run_until_done(job.id)
@@ -272,6 +283,8 @@ async def check_propose_and_batch(store, engine, clock, script) -> dict:
         assert datetime.fromisoformat(p.expires_at) == clock.now + timedelta(days=7)
         assert "Replay" in p.payload["eval_summary"]
         assert "human-in-the-loop turns per PR" in p.payload["eval_summary"], p.payload["eval_summary"]
+        # Each quote carries the day it comes from, so the owner sees the recurrence.
+        assert p.payload["evidence"] == [f"{DAY_BEFORE}: how do I run the tests?", f"{DAY}: which test command?"]
     assert "+Run tests: make test" in made["demo:CLAUDE.md"].payload["diff"]
     (run,) = _rows(store, "SELECT state FROM gardener_runs WHERE id = ?", result["run_id"])
     assert run["state"] == "paused"
@@ -536,11 +549,97 @@ async def check_one_proposal_per_file_per_run() -> None:
         seen.append(messages)
         return responses.pop(0)
 
-    deps = Deps(repos={"links": DEV / "links"})
+    deps = Deps(repos={"links": DEV / "links"}, reflection_dates={DAY_BEFORE, DAY})
     result = await build_agent(FunctionModel(respond)).run("go", deps=deps)
     assert [c.tool_call_id for c in result.output.approvals] == ["d1"], result.output
     assert list(deps.drafts) == ["d1"] and "links:CLAUDE.md" in deps.open_targets, deps
     print("✓ gardener: one run proposes at most one change per file")
+
+
+async def check_recurrence_required() -> None:
+    """Evidence from one day, or dated with a day the prompt did not show, is
+    sent back; nothing is drafted until two days show the problem."""
+    one_day = [{"date": DAY, "quote": "how do I run the tests?"}, {"date": DAY, "quote": "which test command?"}]
+    made_up = [{"date": DAY, "quote": "how do I run the tests?"}, {"date": "2020-01-01", "quote": "tests?"}]
+    responses = [
+        ModelResponse(parts=[propose("one", "links:CLAUDE.md", "A small demo app.\n", "A demo.\n", evidence=one_day)]),
+        ModelResponse(parts=[propose("fake", "links:CLAUDE.md", "A small demo app.\n", "A demo.\n", evidence=made_up)]),
+        ModelResponse(parts=[TextPart("Not yet: it happened on one day only.")]),
+    ]
+    seen = []
+
+    def respond(messages, info):
+        seen.append(messages)
+        return responses.pop(0)
+
+    deps = Deps(repos={"links": DEV / "links"}, reflection_dates={DAY_BEFORE, DAY})
+    result = await build_agent(FunctionModel(respond)).run("go", deps=deps)
+    assert result.output.startswith("Not yet") and not deps.drafts and not deps.open_targets, (result.output, deps)
+    retries = {p.tool_call_id: str(p.content) for m in seen[-1] for p in getattr(m, "parts", [])
+               if isinstance(p, RetryPromptPart | ToolReturnPart)}
+    assert "two different days" in retries["one"] and "2020-01-01" in retries["fake"], retries
+    print("✓ gardener: a proposal needs dated evidence from two different days of the reflections shown")
+
+
+async def check_past_proposals() -> None:
+    """The run can read every past proposal with its content: one rejected
+    with a note, one applied and merged at another file. Proposing the
+    rejected change again, at the same place, is refused; the same idea at
+    the file the note points to goes through."""
+    world("history")
+    store, engine, clock, script = _setup("history")
+    proposals = Proposals(store, clock)
+    demo = Repo(DEV / "demo")
+    test_line = one_file_diff(demo, "CLAUDE.md", CLAUDE_MD, CLAUDE_MD + "\nRun tests: make test\n")
+    rejected = await proposals.create("demo:CLAUDE.md", {"diff": test_line, "rationale": "Agents guess the command.",
+                                                         "evidence": []}, request_id="old-1", actor="gardener")
+    await proposals.decide(rejected.id, "rejected", request_id="tap-old-1", actor="web:vela",
+                           note="put this in my home CLAUDE.md, it is how I work everywhere")
+    clock.now += timedelta(minutes=1)
+    brief = one_file_diff(demo, ".claude/CLAUDE.md", HOME_MD, HOME_MD + "- Answer in one line.\n")
+    merged = await proposals.create("home:.claude/CLAUDE.md", {"diff": brief, "rationale": "Long answers.",
+                                                               "evidence": []}, request_id="old-2", actor="gardener")
+    await proposals.decide(merged.id, "approved", request_id="tap-old-2", actor="web:vela")
+    clock.now += timedelta(days=1)
+    await proposals.transition(merged.id, "approved", "applied", request_id="applied:old-2", actor="apply")
+    await proposals.transition(merged.id, "applied", "merged", request_id="merged:old-2", actor="tend")
+    merged_on = clock.now.date().isoformat()
+    script.runs.append([
+        ModelResponse(parts=[ToolCallPart("past_proposals", {}, tool_call_id="h1")]),
+        # The rejected change, at the same place: refused by the code, whatever the model read.
+        ModelResponse(parts=[propose("same", "demo:CLAUDE.md", "A small demo app.\n",
+                                     "A small demo app.\n\nRun tests: make test\n")]),
+        # The same idea where the note points.
+        ModelResponse(parts=[propose("moved", "home:.claude/CLAUDE.md", "- Be brief.\n",
+                                     "- Be brief.\n- Run tests with `make test`.\n")]),
+    ])
+    result = await garden(store, engine, DAY)
+    assert result["proposals"] == 1, result
+    (made,) = await proposals.list(states=("proposed",))
+    assert made.target == "home:.claude/CLAUDE.md" and "+- Run tests with `make test`." in made.payload["diff"]
+    parts = {p.tool_call_id: p for m in script.seen[-1] for p in getattr(m, "parts", [])
+             if isinstance(p, RetryPromptPart | ToolReturnPart)}
+    history = parts["h1"].content
+    assert history.index("home:.claude/CLAUDE.md") < history.index("demo:CLAUDE.md"), history   # newest first
+    assert "rejected; the owner's note: put this in my home" in history, history
+    assert "+Run tests: make test" in history and "rationale: Agents guess the command." in history, history
+    assert f"merged {merged_on}" in history and "+- Answer in one line." in history, history
+    assert "already proposed" in parts["same"].content and "rejected" in parts["same"].content, parts["same"]
+    print("✓ gardener: past proposals are read with their content and fate; the same change again is refused")
+
+
+async def check_one_reflection_no_run() -> None:
+    """The first reflection ever cannot show a problem twice: the garden job
+    records that and makes no model run."""
+    world("first-day")
+    store, engine, _, script = _setup("first-day")
+    await store.upsert_reflection(reflection(DAY))
+    job = await engine.enqueue("garden", {"date": DAY}, request_id=f"garden:{DAY}")
+    done = await engine.run_until_done(job.id)
+    assert done.state == "succeeded" and done.result == {"date": DAY, "proposals": 0,
+                                                         "skipped": "only one reflection so far"}, done
+    assert not script.seen, "the model was called with one reflection"
+    print("✓ gardener: one reflection alone makes no proposal and no model run")
 
 
 def check_verdicts() -> None:
@@ -620,6 +719,7 @@ async def check_with_server() -> None:
     base = "http://localhost"
     first_run(script)
     script.runs.append([ModelResponse(parts=[TextPart("Noted.")])])
+    await store.upsert_reflection(reflection(DAY_BEFORE))
     await store.upsert_reflection(reflection(DAY))
     await drain(engine)
     job = await engine.enqueue("garden", {"date": DAY}, request_id=f"garden:{DAY}")
@@ -629,10 +729,10 @@ async def check_with_server() -> None:
         code = (await http.post("/api/pairing-codes", json={})).json()["code"]
         creds = await pair(base, code, "laptop", http=http)
         await worker.run(creds, store, http=http, once=True)
-        # Q11: one push, the morning briefing, carrying the batch.
+        # Q11: one push per reflection, the morning briefing, carrying the day's batch.
         pushes = [j.args for j in _jobs(mailbox, "push")]
-        assert [p["title"] for p in pushes] == ["Reflection ready"], pushes
-        assert pushes[0]["body"].endswith("· 2 proposals waiting"), pushes
+        assert {p["title"] for p in pushes} == {"Reflection ready"} and len(pushes) == 2, pushes
+        assert {p["body"] for p in pushes} == {f"{DAY} · friction · 2 proposals waiting", f"{DAY_BEFORE} · friction"}, pushes
         inbox = by_target([p for p in (await mailbox.inbox("vela")) if p.state == "proposed"])
         assert inbox["demo:CLAUDE.md"].payload["batch"] == DAY
         # Approved item by item: one yes, one no with a note.
@@ -694,6 +794,9 @@ async def main():
     check_problems_solved()
     check_symlink_targets()
     await check_one_proposal_per_file_per_run()
+    await check_recurrence_required()
+    await check_past_proposals()
+    await check_one_reflection_no_run()
     await check_with_server()
     print("\nall gardener tests passed")
 

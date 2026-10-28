@@ -9,14 +9,15 @@ like everything else. Only synthesis reads this var; chat is unaffected.
 
 `claude -p` is an agent, not a single-shot structured-output API: run inside the project
 it loads MCP servers/skills/tools and wanders instead of answering. So we run it in a
-neutral cwd with MCP and agentic tools disabled, embed the JSON Schema in the prompt, ask
-for a bare JSON object, and validate the text result into the pydantic model ourselves.
+neutral cwd of wisen's own (`config.cli_cwd()`, which the Claude Code connector skips, so
+a run never shows up as a session to reflect on) with MCP and agentic tools disabled,
+embed the JSON Schema in the prompt, ask for a bare JSON object, and validate the text
+result into the pydantic model ourselves.
 """
 import json
 import os
 import re
 import subprocess
-import tempfile
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -91,13 +92,15 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
     ]
     # Scrub the API key so the CLI always uses subscription auth, never API billing.
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    cwd = config.cli_cwd()
+    cwd.mkdir(parents=True, exist_ok=True)
 
     last_err: Exception | None = None
     for _ in range(2):
         try:
             proc = subprocess.run(
                 cmd, input=user_prompt, capture_output=True, text=True,
-                env=env, timeout=_TIMEOUT_S, cwd=tempfile.gettempdir(),
+                env=env, timeout=_TIMEOUT_S, cwd=cwd,
                 check=False,
             )
         except FileNotFoundError:

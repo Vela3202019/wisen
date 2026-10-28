@@ -1,7 +1,9 @@
 """
 wisen command-line interface.
 
-  wisen synthesize [YYYY-MM-DD]   ingest + synthesize one day (default: yesterday)
+  wisen synthesize [YYYY-MM-DD] [--force]   ingest + synthesize one day (default: yesterday);
+                                  skipped when the day has no sessions or its reflection
+                                  already covers them, unless --force
   wisen serve [--host] [--port]   run the API server (needs the [server] extra)
   wisen export [dir]              dump reflections from the local store to JSON files
   wisen egress [--date] [--list]  show what passed the egress gate today
@@ -26,11 +28,14 @@ from pathlib import Path
 from wisen import __version__, config
 
 
-async def _synthesize(date: str) -> None:
-    from wisen.synthesis.job import garden_day, synthesize_day
+async def _synthesize(date: str, force: bool) -> None:
+    from wisen.synthesis.job import Skipped, garden_day, synthesize_day
 
     print(f"[{datetime.now(UTC).isoformat()}] synthesizing {date}")
-    job = await synthesize_day(date)
+    job = await synthesize_day(date, force=force)
+    if isinstance(job, Skipped):
+        print(f"skipped {date}: {job.reason} (wisen synthesize {date} --force runs it anyway)")
+        return
     if job.state != "succeeded":
         raise SystemExit(f"synthesis failed: {job.error}")
     print(f"done — reflection saved for {date}")
@@ -187,6 +192,8 @@ def main() -> None:
 
     sy = sub.add_parser("synthesize", help="ingest + synthesize one day")
     sy.add_argument("date", nargs="?", help="YYYY-MM-DD (default: yesterday)")
+    sy.add_argument("--force", action="store_true",
+                    help="run even if the day has no sessions or its reflection already covers them")
 
     sv = sub.add_parser("serve", help="run the API server")
     sv.add_argument("--host", default="127.0.0.1")
@@ -251,7 +258,7 @@ def main() -> None:
 
     if args.cmd == "synthesize":
         date = args.date or (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
-        asyncio.run(_synthesize(date))
+        asyncio.run(_synthesize(date, args.force))
     elif args.cmd == "serve":
         _serve(args.host, args.port, args.reload)
     elif args.cmd == "export":
