@@ -32,7 +32,6 @@ from wisen.gardener.targets import HOME
 from wisen.proposals import Proposals
 from wisen.store import SqliteStore
 
-
 TIMEOUT = 60
 
 

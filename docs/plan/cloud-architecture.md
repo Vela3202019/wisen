@@ -601,7 +601,7 @@ stateDiagram-v2
     proposed --> superseded: a newer proposal for the same file
     approved --> applied: laptop commits the branch
     approved --> failed: file changed, path refused, git error
-    applied --> merged: branch reached the default branch
+    applied --> merged: branch reached the default branch (or its PR merged)
     applied --> abandoned: branch deleted (or its PR closed) unmerged
     merged --> measuring: N weeks after merge
     measuring --> kept: helped or no change
