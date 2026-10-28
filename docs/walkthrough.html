@@ -1,0 +1,761 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Wisen Walkthrough</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a night-to-morning walkthrough for a technical audience. NREM indigo, REM violet, morning amber. */
+:root{
+  --bg:#f4f4f8; --surface:#ffffff; --ink:#171a2b; --muted:#5d6177; --line:#d6d8e4; --soft:#ebecf3;
+  --nrem:#3d4fd1; --rem:#8a45c9; --dawn:#cf7f12; --ok:#1d8a58; --bad:#c23a32;
+  --nrem-bg:#e8eafc; --rem-bg:#f2e8fb; --dawn-bg:#fcf0dd; --ok-bg:#e1f3ea; --bad-bg:#fbe6e4;
+  --sky1:#1b2050; --sky2:#3b3f86; --sky3:#f2b25c;
+  --f-display:"Sora","Helvetica Neue",Arial,sans-serif;
+  --f-body:"Source Sans 3","Segoe UI",Roboto,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1120; --surface:#171a2e; --ink:#e7e8f2; --muted:#9a9db4; --line:#2e3250; --soft:#1f2338;
+  --nrem:#8b97ff; --rem:#c58cf2; --dawn:#f0b257; --ok:#5fd09a; --bad:#f2817a;
+  --nrem-bg:#1e2350; --rem-bg:#2c1c45; --dawn-bg:#3a2a12; --ok-bg:#14362a; --bad-bg:#3d1c1a;
+  --sky1:#0b0d22; --sky2:#262a63; --sky3:#c98a3a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1120; --surface:#171a2e; --ink:#e7e8f2; --muted:#9a9db4; --line:#2e3250; --soft:#1f2338;
+  --nrem:#8b97ff; --rem:#c58cf2; --dawn:#f0b257; --ok:#5fd09a; --bad:#f2817a;
+  --nrem-bg:#1e2350; --rem-bg:#2c1c45; --dawn-bg:#3a2a12; --ok-bg:#14362a; --bad-bg:#3d1c1a;
+  --sky1:#0b0d22; --sky2:#262a63; --sky3:#c98a3a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:17px/1.6 var(--f-body);padding-inline:20px;padding-block:0 72px}
+.wrap{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:60px}
+h1,h2,h3{font-family:var(--f-display);line-height:1.15;text-wrap:balance;margin:0}
+h1{font-size:clamp(2.4rem,6vw,3.8rem);letter-spacing:-.025em}
+h2{font-size:1.65rem;letter-spacing:-.01em}
+h3{font-size:1.05rem}
+p{margin:0;max-width:72ch}
+code{font-family:var(--f-mono);font-size:.84em;background:var(--soft);padding:.08em .35em;border-radius:4px}
+.eyebrow{font:500 .74rem/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+section{display:flex;flex-direction:column;gap:16px;min-width:0}
+section h3{margin-top:10px}
+.two .tablewrap{min-width:0}
+.sec-head{display:flex;flex-direction:column;gap:8px}
+header.hero{padding-top:52px;display:flex;flex-direction:column;gap:20px}
+.lede{font-size:1.2rem;max-width:66ch}
+.arc{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font:500 .82rem/1 var(--f-mono)}
+.arc span{padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface)}
+.arc i{color:var(--muted);font-style:normal}
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;min-width:0}
+figure .scroll{overflow-x:auto}
+figure svg{display:block;width:100%;height:auto;color:var(--ink)}
+figure svg text{font-family:var(--f-mono);font-size:12px;fill:currentColor}
+figure svg .lbl{font-family:var(--f-display);font-size:13px;font-weight:600}
+figure svg .dim{fill:var(--muted)}
+figure.sys svg{min-width:1040px}
+figure.sys .tb{fill:none;stroke:currentColor;stroke-width:1.2;stroke-dasharray:7 5}
+figure.sys .proc{fill:var(--soft);stroke:var(--line);stroke-width:1.2}
+figure.sys .pt{font-size:11px;font-weight:500;fill:var(--muted)}
+figure.sys .c rect,figure.sys .c path,figure.sys .c ellipse{fill:var(--surface);stroke:currentColor;stroke-width:1.1}
+figure.sys .c .nrem{fill:var(--nrem-bg);stroke:var(--nrem)}
+figure.sys .c .rem{fill:var(--rem-bg);stroke:var(--rem)}
+figure.sys .c .note{fill:none;stroke:var(--muted);stroke-dasharray:3 3}
+figure.sys .c .group{fill:none;stroke:var(--line);stroke-dasharray:4 3}
+figure.sys .c .route{fill:var(--surface);stroke:var(--line)}
+figure.sys .c .proxy{fill:var(--soft);stroke:currentColor}
+figure.sys .r{font-size:11px;fill:currentColor}
+figure.sys .c .gate{fill:var(--surface);stroke:var(--rem);stroke-width:2}
+figure.sys .ext rect{fill:var(--bg);stroke:var(--muted);stroke-dasharray:4 3}
+figure.sys .e{fill:none;stroke:currentColor;stroke-width:1.2}
+figure.sys .dash{fill:none;stroke-dasharray:5 4}
+figure.sys .ex{fill:none;stroke:var(--rem);stroke-width:2.2}
+figure.sys .t{font-family:var(--f-display);font-size:12.5px;font-weight:600}
+figure.sys .s{font-size:10.5px;fill:var(--muted)}
+figure.sys .bt{font-size:11px;letter-spacing:.06em;fill:var(--muted)}
+figure.sys .n{font-family:var(--f-display);font-size:14px;font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:.82rem;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.lg{display:inline-block;width:26px;height:0;border-top:2px solid var(--ink)}
+.lg.dash{border-top-style:dashed}
+.lg.cross{border-top:3px solid var(--rem)}
+.lg.box{width:16px;height:12px;border:1px solid var(--line);background:var(--soft)}
+.lg.db{width:16px;height:12px;border:1px solid var(--ink);border-radius:8px/4px;background:var(--surface)}
+.flows td:first-child{font-family:var(--f-display);font-weight:600}
+figcaption{font-size:.88rem;color:var(--muted);max-width:84ch}
+.plate{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;overflow-x:auto}
+.plate .cap{font-size:.86rem;color:var(--muted);margin-top:12px}
+.mermaid{margin:0;display:flex;justify-content:center;min-width:660px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.93rem}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 .72rem/1.2 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--soft)}
+tr:last-child td{border-bottom:0}
+.note{border-left:3px solid var(--dawn);padding:4px 0 4px 14px;color:var(--muted);font-size:.93rem;max-width:72ch}
+.gate{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.g{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:4px;font-size:.86rem;min-width:0}
+.g b{font-family:var(--f-display);font-size:.92rem}
+.g span{color:var(--muted)}
+.tiers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.tier{border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.tier b{font-family:var(--f-display)}
+.tier p{font-size:.9rem}
+.t1{background:var(--nrem-bg)} .t2{background:var(--dawn-bg)} .t3{background:var(--rem-bg)}
+.concepts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cc{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.cc b{font-family:var(--f-display);font-size:.98rem}
+.cc p{font-size:.9rem;color:var(--muted)}
+.cc .w{font:500 .7rem/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--nrem)}
+.layers{display:flex;flex-direction:column;gap:14px}
+.layer{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:grid;grid-template-columns:150px minmax(0,1fr);gap:18px}
+.layer .tag{display:flex;flex-direction:column;gap:6px}
+.layer .tag .n{font:600 2rem/1 var(--f-display);color:var(--rem)}
+.layer .tag b{font-family:var(--f-display)}
+.layer .tag span{font-size:.82rem;color:var(--muted)}
+.metric{display:flex;flex-direction:column;gap:6px;padding-block:10px;border-top:1px solid var(--line)}
+.metric:first-child{border-top:0;padding-top:0}
+.metric h3{font-size:1rem}
+.formula{font:400 .86rem/1.55 var(--f-mono);background:var(--soft);border-radius:6px;padding:10px 12px;overflow-x:auto;white-space:pre}
+.metric p{font-size:.92rem;color:var(--muted)}
+.src{font:500 .72rem/1 var(--f-mono);color:var(--muted)}
+.rule{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.rule div{border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:6px;font-size:.92rem}
+.rule b{font-family:var(--f-display)}
+.r1{background:var(--rem-bg)} .r2{background:var(--ok-bg)} .r3{background:var(--dawn-bg)}
+.chart{min-width:640px}
+.chart text{font-family:var(--f-mono);font-size:11px;fill:var(--muted)}
+.chart .ttl{font-family:var(--f-display);font-size:13px;fill:var(--ink)}
+.dash{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:6px}
+.panel b{font-family:var(--f-display);font-size:.98rem}
+.panel p{font-size:.88rem;color:var(--muted)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.col{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.col ul{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:7px;font-size:.93rem}
+.col h3{display:flex;gap:8px;align-items:center}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+footer{color:var(--muted);font-size:.84rem;border-top:1px solid var(--line);padding-top:16px}
+@media (max-width:820px){.tiers,.rule,.dash,.two,.concepts{grid-template-columns:minmax(0,1fr)}.gate{grid-template-columns:repeat(2,minmax(0,1fr))}.layer{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <span class="eyebrow">Target architecture · steps 0–4 shipped · 5 in validation · 6–7 next</span>
+  <h1>wisen</h1>
+  <p class="lede">A harness that learns from how I work with coding agents. Every night it reads the day's agent sessions and finds where the work was hard. By morning it proposes a small change to the instructions my agents read. I approve it from my phone, it lands as a git branch, and two weeks later wisen measures whether the change helped.</p>
+  <div class="arc"><span>observe</span><i>→</i><span>reflect</span><i>→</i><span>propose</span><i>→</i><span>approve</span><i>→</i><span>apply</span><i>→</i><span>measure</span><i>↺</i></div>
+</header>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">The problem</span><h2>Agents produce transcripts nobody reads</h2></div>
+  <p>I run Claude Code, Codex, Cursor, opencode, Gemini CLI and Pi every day. Each session leaves a transcript full of signal: the tool calls I rejected, the times I interrupted, the requests I rephrased three times. None of it changes how the agents behave tomorrow. wisen closes that loop without uploading my coding logs anywhere.</p>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">One night with wisen</span><h2>The pipeline is modelled on sleep</h2></div>
+  <p>The brain does not replay everything; it replays what mattered, then consolidates it. wisen has two model stages that work the same way. The <b>Observer</b> (NREM) reads a day's raw sessions and turns them into short, redacted notes called <b>packets</b>. The <b>Synthesizer</b> (REM) reads only packets and writes the morning reflection. That split is also where the laptop ends and the server begins.</p>
+<figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 250" role="img" aria-label="Target schedule from 22:00 to 08:00: the laptop's Observer runs at 23:00 and uploads packets; the server's Synthesizer and Gardener run at 23:30 while the laptop sleeps; the morning brief reaches the phone at 07:00.">
+      <defs>
+        <linearGradient id="sky" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stop-color="var(--sky1)"/><stop offset=".75" stop-color="var(--sky2)"/><stop offset="1" stop-color="var(--sky3)"/>
+        </linearGradient>
+        <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker>
+      </defs>
+      <rect x="120" y="40" width="840" height="20" rx="10" fill="url(#sky)"/>
+      <g class="dim">
+        <text x="120" y="30" text-anchor="middle">22:00</text><text x="288" y="30" text-anchor="middle">00:00</text><text x="456" y="30" text-anchor="middle">02:00</text><text x="624" y="30" text-anchor="middle">04:00</text><text x="792" y="30" text-anchor="middle">06:00</text><text x="960" y="30" text-anchor="middle">08:00</text>
+      </g>
+      <text class="lbl" x="20" y="110">Laptop</text>
+      <text class="lbl" x="20" y="170">Server</text>
+      <text class="lbl" x="20" y="228">Phone</text>
+      <line x1="120" y1="106" x2="960" y2="106" stroke="var(--line)"/>
+      <line x1="120" y1="166" x2="960" y2="166" stroke="var(--line)"/>
+      <line x1="120" y1="224" x2="960" y2="224" stroke="var(--line)"/>
+      <text x="204" y="84" font-size="12">Observer (NREM): raw sessions → packets</text>
+      <rect x="204" y="92" width="42" height="28" rx="6" fill="var(--nrem)"/>
+      <rect x="252" y="98" width="700" height="16" rx="8" fill="var(--soft)"/>
+      <text x="600" y="110" class="dim" text-anchor="middle">laptop asleep: nothing needed from it</text>
+      <line x1="236" y1="120" x2="250" y2="150" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar1)"/>
+      <text x="160" y="140" class="dim" font-size="11">packets</text>
+      <rect x="246" y="152" width="46" height="28" rx="6" fill="var(--rem)"/>
+      <rect x="296" y="152" width="40" height="28" rx="6" fill="var(--rem)" opacity=".7"/>
+      <text x="346" y="162">Synthesizer (REM) + Gardener</text>
+      <text x="346" y="177" class="dim">packets only · reflection + proposals</text>
+      <line x1="876" y1="180" x2="876" y2="210" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar1)"/>
+      <circle cx="876" cy="224" r="9" fill="var(--dawn)"/>
+      <text x="862" y="220" text-anchor="end">07:00 morning brief</text>
+      <text x="862" y="236" text-anchor="end" class="dim">3 bullets + proposal batch</text>
+      <text x="884" y="196" class="dim" font-size="11">push</text>
+    </svg>
+    </div>
+    <figcaption>Target schedule for stage B. Model work that touches raw text happens before the laptop sleeps; everything after it runs on the server from packets, so the brief is ready by morning whether or not the laptop is awake. Today, in stage A, the server asks the laptop at 07:00 to synthesize the previous day.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Stage A → stage B</span><h2>One boundary, two deployments</h2></div>
+  <p>The server was built in two stages. In <b>stage A</b> every model call runs on the laptop and the server is only a mailbox: schedule, approval inbox, push notifications, with no model key at all. In <b>stage B</b> the REM half moves to the server so it can "dream" while the laptop sleeps. The privacy rule did not change between the two, because the packet boundary was there from the start: REM only ever needed packets.</p>
+  <div class="tablewrap"><table>
+    <tr><th>Component</th><th>Local-only</th><th>Stage A</th><th>Stage B</th></tr>
+    <tr><td>Connectors, normalizer, Observer (NREM)</td><td>laptop</td><td>laptop</td><td>laptop</td></tr>
+    <tr><td>Synthesizer (REM), Gardener (propose), chat</td><td>laptop</td><td>laptop</td><td><b>server</b></td></tr>
+    <tr><td>Apply a change as a branch, measure, raw search</td><td>laptop</td><td>laptop</td><td>laptop</td></tr>
+    <tr><td>Schedule, approval inbox, push, Telegram</td><td>local dashboard only</td><td>server</td><td>server</td></tr>
+    <tr><td>Model API key</td><td>laptop</td><td>laptop</td><td>laptop + server</td></tr>
+  </table></div>
+  <p class="note">Local-only mode stays first-class: with no server configured, the laptop runs everything and I approve in the local dashboard or CLI. The server is an add-on, never a requirement.</p>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Diagram 1</span><h2>System: laptop and server</h2></div>
+  <p>Raw transcripts never leave the laptop. The only thing that crosses to the server is a typed packet, and the server rejects anything that does not match a packet schema.</p>
+  <figure class="sys">
+    <div class="scroll">
+    <svg viewBox="0 0 1300 610" role="img" aria-label="wisen system. The laptop runs one wisen worker process: connectors, Observer and egress gate in a chain, plus device jobs for apply, measure and raw search, with local SQLite and git. The server runs Caddy in front of one wisen cloud serve process with two route groups: device routes for the laptop (pair, packets up, poll for work) and app routes for me (dashboard, decisions, push). The laptop pushes packets and polls for work, both outbound through Caddy; my phone reaches the app routes through Caddy and gets push notifications.">
+      <defs>
+        <marker id="sa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker>
+        <marker id="sx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="var(--rem)"/></marker>
+      </defs>
+
+      <!-- LAPTOP -->
+      <rect x="16" y="16" width="454" height="514" rx="8" class="tb"/>
+      <text class="bt" x="30" y="36">LAPTOP · macOS · raw data never leaves</text>
+      <g class="c">
+        <path d="M40,56 a80,7 0 0 1 160,0 v40 a80,7 0 0 1 -160,0 z"/><ellipse cx="120" cy="56" rx="80" ry="7"/>
+        <text class="t" x="52" y="80">Agent histories</text><text class="s" x="52" y="94">[JSONL · read-only]</text>
+      </g>
+      <rect x="36" y="114" width="418" height="282" rx="8" class="proc"/>
+      <text class="pt" x="444" y="388" text-anchor="end">wisen worker · job engine [launchd]</text>
+      <g class="c">
+        <rect x="52" y="140" width="122" height="50" rx="5"/><text class="t" x="62" y="161">Connectors</text><text class="s" x="62" y="177">[8 → 1 shape]</text>
+        <rect x="190" y="140" width="122" height="50" rx="5" class="nrem"/><text class="t" x="200" y="161">Observer</text><text class="s" x="200" y="177">[pydantic-ai]</text>
+        <rect x="328" y="140" width="112" height="50" rx="5" class="gate"/><text class="t" x="338" y="161">Egress gate</text><text class="s" x="338" y="177">[6 checks]</text>
+        <rect x="52" y="226" width="388" height="88" rx="6" class="group"/>
+        <text class="t" x="64" y="246">Device jobs</text><text class="s" x="148" y="246">claimed from the server</text>
+        <rect x="64" y="258" width="112" height="44" rx="5"/><text class="t" x="74" y="277">Apply</text><text class="s" x="74" y="292">[git branch]</text>
+        <rect x="188" y="258" width="122" height="44" rx="5"/><text class="t" x="198" y="277">Measure</text><text class="s" x="198" y="292">[2-week check]</text>
+        <rect x="322" y="258" width="106" height="44" rx="5"/><text class="t" x="332" y="277">Raw search</text><text class="s" x="332" y="292">[grep-first]</text>
+      </g>
+      <text class="s" x="140" y="344">every box here runs as durable job steps</text>
+      <text class="s" x="140" y="358">(saved steps · leases · retries)</text>
+      <g class="c">
+        <path d="M40,438 a92,7 0 0 1 184,0 v44 a92,7 0 0 1 -184,0 z"/><ellipse cx="132" cy="438" rx="92" ry="7"/>
+        <text class="t" x="52" y="464">wisen.db</text><text class="s" x="52" y="479">[SQLite · jobs · ledger]</text>
+        <path d="M244,438 a105,7 0 0 1 210,0 v44 a105,7 0 0 1 -210,0 z"/><ellipse cx="349" cy="438" rx="105" ry="7"/>
+        <text class="t" x="256" y="464">Git repos + home.git</text><text class="s" x="256" y="479">[instruction files]</text>
+      </g>
+      <g class="e">
+        <path d="M120,103 V138" marker-end="url(#sa)"/>
+        <path d="M174,165 H188" marker-end="url(#sa)"/>
+        <path d="M312,165 H326" marker-end="url(#sa)"/>
+        <path d="M120,302 V412 H349 V429" marker-end="url(#sa)"/>
+      </g>
+      <text class="n" x="128" y="126">①</text>
+      <text class="n" x="226" y="408">⑦</text>
+
+      <!-- SERVER -->
+      <rect x="644" y="16" width="456" height="514" rx="8" class="tb"/>
+      <text class="bt" x="658" y="36">SERVER · Hetzner VM · Ubuntu</text>
+      <g class="c">
+        <rect x="660" y="50" width="424" height="36" rx="5" class="proxy"/><text class="t" x="672" y="73">Caddy</text><text class="s" x="722" y="73">[TLS · reverse proxy · routes by path]</text>
+      </g>
+      <rect x="660" y="102" width="424" height="324" rx="8" class="proc"/>
+      <text class="pt" x="1074" y="418" text-anchor="end">wisen cloud serve · job engine [systemd]</text>
+      <g class="c">
+        <rect x="676" y="118" width="392" height="104" rx="6" class="route"/>
+        <text class="t" x="688" y="137">Device routes</text><text class="s" x="790" y="137">for the laptop · device token</text>
+        <text class="r" x="688" y="158">POST /api/device/pair</text><text class="s" x="930" y="158">code → token</text>
+        <text class="r" x="688" y="176">POST /api/device/packets</text><text class="s" x="930" y="176" style="fill:var(--rem)">data up · checked</text>
+        <text class="r" x="688" y="194">POST /api/device/poll</text><text class="s" x="930" y="194">jobs + decisions</text>
+        <text class="r" x="688" y="212">POST …/jobs/{id}/heartbeat|finish</text><text class="s" x="976" y="212">results</text>
+        <rect x="676" y="232" width="392" height="78" rx="6" class="route"/>
+        <text class="t" x="688" y="251">App routes</text><text class="s" x="778" y="251">for me · login session</text>
+        <text class="r" x="688" y="272">GET /  dashboard (PWA)</text><text class="r" x="900" y="272">/api/push/*</text>
+        <text class="r" x="688" y="290">POST /api/proposals/{id}/decision</text><text class="r" x="980" y="290">/api/devices</text>
+        <rect x="676" y="322" width="250" height="52" rx="5" class="rem"/><text class="t" x="688" y="343">Synthesizer · Gardener · Chat</text><text class="s" x="688" y="360">[REM · reads packets only]</text>
+        <rect x="938" y="322" width="130" height="52" rx="5"/><text class="t" x="950" y="343">Notifier</text><text class="s" x="950" y="360">[push · Telegram]</text>
+      </g>
+      <g class="c">
+        <path d="M660,458 a212,7 0 0 1 424,0 v44 a212,7 0 0 1 -424,0 z"/><ellipse cx="872" cy="458" rx="212" ry="7"/>
+        <text class="t" x="672" y="484">server.db</text><text class="s" x="740" y="484">[SQLite · packets · proposals · jobs]</text>
+      </g>
+      <g class="e">
+        <path d="M872,86 V116" marker-end="url(#sa)"/>
+        <path d="M872,426 V449" marker-end="url(#sa)" marker-start="url(#sa)"/>
+      </g>
+      
+      <text class="n" x="880" y="444">⑧</text>
+
+      <!-- crossings laptop → Caddy -->
+      <path d="M440,160 H560 V62 H658" class="ex" marker-end="url(#sx)"/>
+      <path d="M440,270 H600 V78 H658" class="e dash" marker-end="url(#sa)" marker-start="url(#sa)"/>
+      <text class="n" x="568" y="120" style="fill:var(--rem)">③</text><text class="s" x="568" y="138" style="fill:var(--rem)">packets up</text>
+      <text class="n" x="608" y="210">④</text><text class="s" x="490" y="290">polls for work · outbound</text>
+
+      <!-- externals -->
+      <g class="c ext">
+        <rect x="40" y="556" width="220" height="44" rx="22"/><text class="t" x="150" y="575" text-anchor="middle">Model provider</text><text class="s" x="150" y="590" text-anchor="middle">[configured · or claude -p]</text>
+        <rect x="1130" y="48" width="160" height="44" rx="22"/><text class="t" x="1210" y="67" text-anchor="middle">Me · phone</text><text class="s" x="1210" y="82" text-anchor="middle">[PWA · Telegram]</text>
+        <rect x="1130" y="378" width="160" height="44" rx="22"/><text class="t" x="1210" y="397" text-anchor="middle">Model provider</text><text class="s" x="1210" y="412" text-anchor="middle">[API key / claude -p]</text>
+      </g>
+      <g class="e dash">
+        <path d="M250,190 V208 H24 V578 H38" marker-end="url(#sa)"/>
+        <path d="M1128,70 H1086" marker-end="url(#sa)" marker-start="url(#sa)"/>
+        <path d="M1068,348 H1160 V94" marker-end="url(#sa)"/>
+        <path d="M900,374 V400 H1128" marker-end="url(#sa)"/>
+      </g>
+      <text class="n" x="30" y="548">②</text>
+      <text class="n" x="1100" y="62">⑤</text><text class="s" x="1168" y="230">push</text>
+      <text class="n" x="1104" y="394">⑥</text>
+    </svg>
+    </div>
+    <div class="legend">
+      <span><i class="lg solid"></i>call or read</span>
+      <span><i class="lg dash"></i>outbound or polled</span>
+      <span><i class="lg cross"></i>the only data path across the boundary</span>
+      <span><i class="lg box"></i>process</span>
+      <span><i class="lg db"></i>data store</span>
+    </div>
+    <div class="tablewrap flows"><table>
+      <tr><th>#</th><th>From → to</th><th>Protocol</th><th>Carries</th></tr>
+      <tr><td>①</td><td>Agent histories → connectors</td><td>local file read</td><td>raw sessions, never copied by wisen</td></tr>
+      <tr><td>②</td><td>Observer → model provider</td><td>HTTPS</td><td>excerpts: ≤ 400 characters per turn, ≤ 20 config files at 1,000 each</td></tr>
+      <tr><td>③</td><td>Egress gate → Caddy → <code>/api/device/packets</code></td><td>HTTPS POST · device token</td><td>typed packets only; anything else is rejected by the schema check</td></tr>
+      <tr><td>④</td><td>Device jobs ⇄ Caddy ⇄ <code>/api/device/poll</code>, <code>/jobs/{id}/heartbeat|finish</code></td><td>HTTPS polling · outbound only</td><td>down: jobs to claim and my decisions; up: heartbeats and results</td></tr>
+      <tr><td>⑤</td><td>Me ⇄ Caddy ⇄ app routes; Notifier → phone</td><td>HTTPS session · Web Push · Telegram Bot API</td><td>dashboard and decisions (each with a request id); pushes carry title, short description and a link</td></tr>
+      <tr><td>⑥</td><td>Synthesizer · Gardener · Chat → model provider</td><td>HTTPS or <code>claude -p</code></td><td>packets only; file text arrives as a redacted ConfigSnapshotPacket</td></tr>
+      <tr><td>⑦</td><td>Apply → git</td><td>git CLI</td><td>one commit on <code>wisen/gardener/&lt;id&gt;</code>, after re-checking approval and the allow-list</td></tr>
+      <tr><td>⑧</td><td>Server process ⇄ server.db</td><td>in-process SQLite</td><td>packets (idempotent by content hash), reflections, proposals, jobs</td></tr>
+    </table></div>
+    <figcaption>One program on each machine. Caddy sends every request to the single <code>wisen cloud serve</code> process, which has two route groups: device routes for the laptop and app routes for me. The laptop always starts the connection, pushing packets up and polling for work; the server never connects into the laptop.</figcaption>
+  </figure>
+
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Production-grade 1</span><h2>The privacy line is code, not a promise</h2></div>
+  <div class="tiers">
+    <div class="tier t1"><b>1 · At rest: local</b><p>Raw transcripts stay where the agents wrote them. wisen stores only derived data in <code>~/.wisen/wisen.db</code>.</p></div>
+    <div class="tier t2"><b>2 · Inference: excerpts</b><p>The laptop's model calls get capped excerpts: 400 characters per turn, up to 20 config files at 1,000 characters each.</p></div>
+    <div class="tier t3"><b>3 · Cloud: packets only</b><p>If it is not a packet type, it does not cross. Both ends import the same schema module.</p></div>
+  </div>
+  <p>Every packet goes through the egress gate (the laptop's one exit check) in this order. A value that redaction would change inside a diff or an identifier rejects the whole packet; a human never approves a cut-short diff.</p>
+  <div class="gate">
+    <div class="g"><b>Select</b><span>allow-listed fields only</span></div>
+    <div class="g"><b>Redact</b><span>keys, tokens, home paths, emails</span></div>
+    <div class="g"><b>Truncate</b><span>free text and quotes to caps</span></div>
+    <div class="g"><b>Validate</b><span>strict model, extra fields forbidden</span></div>
+    <div class="g"><b>Record</b><span>local egress ledger (<code>wisen egress</code>)</span></div>
+    <div class="g"><b>Send</b><span>idempotent by content hash</span></div>
+  </div>
+  <p><b>How it is proven.</b> Tests plant a marker string and a fake API key in fixture transcripts and assert that neither appears in any packet, that an off-schema packet is rejected, and that the same content always hashes to the same packet id. In stage B, a mock model that echoes its prompt checks that no marker reaches any server-side prompt or row.</p>
+  <p><b>Durability is an egress risk too.</b> A durable job saves each step's output, so the Observer step saves its packet output, never raw turns, and any journal that held raw text is pruned when the job succeeds.</p>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Experimental</span><h2>The Gardener</h2></div>
+  <p>The Gardener is the agent that turns reflections into proposed changes. It may edit only the instructions agents read: <code>CLAUDE.md</code>, <code>AGENTS.md</code> and skills, in each repo and in my home directory. Never repo code, settings or MCP config. The allow-list is a path check in the laptop's applier, so a proposal for any other path is refused even after approval. Files outside any repo, like <code>~/.claude/CLAUDE.md</code>, are tracked by a wisen-managed git history (<code>~/.wisen/gardener/home.git</code>) whose working folder is my home directory, so every change is still a branch.</p>
+  <p>Before a proposal reaches me, wisen runs a <b>replay</b>: it re-runs past moments where I had to correct an agent, once with the current file and once with the proposed one, and checks whether the problem came back. It also replays a <b>clean set</b>, moments that went smoothly, which the change must not break. The proposal tool is declared <code>requires_approval</code>: the agent run pauses at that call and is stored until I decide.</p>
+  <div class="plate">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant G as Gardener (server)
+  participant R as Replay (laptop)
+  participant S as Server inbox
+  participant H as Me (phone)
+  participant L as Laptop applier
+  G->>G: read reflections, friction, current file
+  G->>R: replay past correction cases: current vs proposed
+  R-->>G: pass rates + clean set + cost
+  G->>S: ProposalPacket: diff, rationale, evidence, replay result
+  S->>H: morning batch: "3 proposals waiting"
+  H->>S: approve / reject with note / let expire
+  S->>L: decision (laptop polls)
+  L->>L: re-check approval, path allow-list, file unchanged
+  L->>L: branch wisen/gardener/{id}, one commit
+  Note over H,L: I merge when I choose
+  L->>S: merged (detected locally)
+  S->>L: 2 weeks later: measure job
+  L->>S: helped / no change / worse
+  G->>S: if worse: a revert proposal
+</pre>
+    <div class="cap">Approval is not authorization: the server authenticates whoever approves, and the laptop re-checks the stored decision and the allow-list before it writes anything. The commit is built in a temporary index with author, time and parent fixed by the approval, so a laptop that reconnects mid-apply makes the same commit and never a second branch.</div>
+  </div>
+  <div class="plate">
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> proposed: Gardener drafts a change + replay evidence
+  proposed --> approved: I approve
+  proposed --> rejected: I reject with a note
+  proposed --> expired: 7 days, no decision
+  proposed --> superseded: newer proposal, same file
+  approved --> applied: laptop commits wisen/gardener/id
+  approved --> failed: path refused or file changed
+  applied --> merged: I merge the branch
+  applied --> abandoned: branch deleted
+  merged --> measuring: 2 weeks after merge
+  measuring --> kept: helped or no change
+  measuring --> revert_proposed: worse
+  rejected --> [*]
+  expired --> [*]
+  superseded --> [*]
+  failed --> [*]
+  abandoned --> [*]
+  kept --> [*]
+  revert_proposed --> [*]: the revert starts its own life
+</pre>
+    <div class="cap">The proposal state machine. One function moves a proposal: a compare-and-set update plus an audit row in the same transaction, so a stale or illegal move changes nothing. Every decision carries a request id, so approving on the phone and in Telegram records one decision. The laptop owns the git states; the server owns the decision states.</div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Verification loop</span><h2>How wisen knows it is climbing the hill</h2></div>
+  <p>Each approved proposal is one step up the hill. A step counts only if it makes the work measurably better without making anything worse. Five metric layers, from "did work get done" down to "can we trust our own judge". Today the friction and cost metrics read Claude Code transcripts only; the other agents' transcripts lack the markers they rely on.</p>
+  <div class="layers">
+    <div class="layer"><div class="tag"><span class="n">1</span><b>Outcome</b><span>Did work get done?</span></div><div>
+      <div class="metric"><h3>Problems solved</h3><div class="formula">solved = count(commits I authored that land on the default branch),
+         each credited once, to the nearest session in that repo
+         (a feature branch counts as one problem when it lands)</div><p>Read from each project's local git history. Squash-merged PRs are counted once a GitHub connector supplies merged-PR data.</p><span class="src">wisen/evals/verification.py</span></div>
+      <div class="metric"><h3>Revert or re-fix rate (quality guard)</h3><div class="formula">revert_rate = solved items reverted, or re-fixed within 7 days / solved</div><p>Stops "solved" from rewarding fast, wrong commits.</p></div>
+    </div></div>
+    <div class="layer"><div class="tag"><span class="n">2</span><b>Cost</b><span>What did it take?</span></div><div>
+      <div class="metric"><h3>Human-in-the-loop turns per PR</h3><div class="formula">hitl_turns(PR) = Σ user turns across the sessions linked to that PR,
+                from the first related session to the merge</div><p>My attention is the scarcest resource; this is the headline cost, shown next to tokens per problem.</p></div>
+      <div class="metric"><h3>Tokens and dollars per problem solved</h3><div class="formula">tokens_per_solved = Σ tokens / solved
+dollars_per_solved = Σ costUSD / solved      (where the transcript records it)</div><span class="src">Claude Code transcripts · wisen/evals/miner.py</span></div>
+    </div></div>
+    <div class="layer"><div class="tag"><span class="n">3</span><b>Friction</b><span>How hard was it?</span></div><div>
+      <div class="metric"><h3>Corrections per 100 user turns</h3><div class="formula">corrections = tool_rejections + interruptions
+            + explicit_corrections + rephrase_storms
+rate = corrections / user_turns × 100      (per day, per detector)</div><p>Deterministic code, no model: the "user doesn't want to proceed" marker, "[Request interrupted by user", a message starting with no / stop / wait / revert / wrong, and a rephrase storm (a second message within 60 seconds).</p><span class="src">wisen/evals/miner.py</span></div>
+      <div class="metric"><h3>Friction half-life</h3><div class="formula">half_life = mean(days_persisting) over frictions marked resolved</div><p>Days a friction survives before it stops recurring, from the nightly reflection's new / persisting / resolved labels.</p><span class="src">wisen/evals/metrics.py</span></div>
+    </div></div>
+    <div class="layer"><div class="tag"><span class="n">4</span><b>Controlled check</b><span>Did the change cause it?</span></div><div>
+      <div class="metric"><h3>Replay pass rate, per config version</h3><div class="formula">pass(case, config) = majority of 3 judge votes that the corrected behaviour
+                      did not recur when the case is replayed under config
+replay_rate(config) = Σ pass / cases
+clean_rate(config)  = same, over the clean set</div><p>Shown on the proposal, for example "fixed 7 of 10 past cases, broke 0 of 20 clean ones", with the replay's model cost.</p><span class="src">wisen/evals/replay.py · judge.py · runner.py</span></div>
+    </div></div>
+    <div class="layer"><div class="tag"><span class="n">5</span><b>Trust</b><span>Is our own judge sane?</span></div><div>
+      <div class="metric"><h3>Alignment vs corrections</h3><div class="formula">r = pearson(alignment_score(day), corrections_per_100(day))</div><p>The nightly reflection gives each day an LLM-judged alignment score; the code counts corrections independently. A healthy judge scores hard days low, so r should be clearly negative. Near zero means the score is noise. Reported by <code>wisen eval</code>.</p></div>
+    </div></div>
+  </div>
+  <div class="rule">
+    <div class="r1"><b>Before: accept rule, shown</b><span>Each proposal shows whether it meets the rule (replay rate up, clean rate not down): yes, no, or not enough cases to tell. I still decide.</span></div>
+    <div class="r2"><b>After: field check</b><span>2 weeks after merge, before vs after: <b>helped</b> if corrections per 100 turns fall more than 5% and tokens per problem rise no more than 5%; <b>worse</b> if corrections rise more than 5% or tokens rise more than 10%; otherwise no change.</span></div>
+    <div class="r3"><b>Record</b><span>Kept or revert proposed, with the reason. Rejection notes and results feed the next Gardener run.</span></div>
+  </div>
+  <p class="note">Why both: daily field metrics are noisy because the work changes (a refactor day has more friction than a docs day). Replay holds the moments fixed and changes only the config, so it is the causal evidence; the field check confirms it held in real life.</p>
+  <div class="plate">
+    <svg class="chart" viewBox="0 0 760 270" role="img" aria-label="Illustrative chart: corrections per 100 turns falling across four merged config changes">
+      <text class="ttl" x="20" y="22">Climbing the hill: corrections per 100 user turns</text>
+      <text x="20" y="40">illustrative shape, not measured data</text>
+      <line x1="60" y1="230" x2="740" y2="230" stroke="var(--line)"/>
+      <line x1="60" y1="60" x2="60" y2="230" stroke="var(--line)"/>
+      <text x="22" y="234">0</text><text x="22" y="174">4</text><text x="22" y="117">8</text><text x="18" y="64">12</text>
+      <line x1="60" y1="173" x2="740" y2="173" stroke="var(--soft)"/><line x1="60" y1="116" x2="740" y2="116" stroke="var(--soft)"/>
+      <polyline fill="none" stroke="var(--rem)" stroke-width="2.5" points="60,82 110,86 160,80 210,90 260,108 310,104 360,112 410,128 460,124 510,132 560,150 610,146 660,160 710,158 740,162"/>
+      <g stroke="var(--dawn)" stroke-dasharray="4 4"><line x1="230" y1="60" x2="230" y2="230"/><line x1="390" y1="60" x2="390" y2="230"/><line x1="540" y1="60" x2="540" y2="230"/><line x1="640" y1="60" x2="640" y2="230"/></g>
+      <g fill="var(--dawn)"><circle cx="230" cy="60" r="5"/><circle cx="390" cy="60" r="5"/><circle cx="540" cy="60" r="5"/><circle cx="640" cy="60" r="5"/></g>
+      <text x="236" y="76">#1 kept</text><text x="396" y="76">#2 kept</text><text x="546" y="76">#3 kept</text><text x="646" y="76">#4 no change</text>
+      <text x="60" y="250">weeks →</text><text x="560" y="250">● config change merged</text>
+    </svg>
+    <div class="cap">The hill as the dashboard shows it, with a marker where each Gardener change was merged. The dashboard plots daily corrections per 100 turns and tokens per problem solved.</div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Production-grade 2</span><h2>Durability, end to end: the life of one Approve tap</h2></div>
+  <p>Two machines, two doors, one meeting point. I use the <b>app routes</b> with my login; the laptop uses the <b>device routes</b> with its device token. They never call each other: the server's database is where they meet. Every step writes its fact before acting, every request carries an id so a retry is harmless, and the laptop pulls work with a cursor, so nothing is lost when either side crashes or sleeps.</p>
+  <div class="plate">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant P as Me (phone)
+  participant A as App route
+  participant DB as server.db
+  participant D as Device route
+  participant L as Laptop (job engine)
+  P->>A: POST /api/proposals/{id}/decision (approve, request_id)
+  A->>DB: one transaction: proposed → approved (compare-and-set), decision row, audit row
+  A-->>P: 200 (or "already decided" for a repeat)
+  Note over DB: decision is now a stored event #N
+  L->>D: POST /api/device/poll (decisions after cursor)
+  D->>DB: read events after cursor
+  D-->>L: event #N: proposal approved
+  L->>L: enqueue job "apply proposal" (request id = proposal id)
+  L->>L: step: re-check approval, allow-list, file unchanged
+  L->>L: step (not replay-safe): one deterministic commit on wisen/gardener/{id}
+  L->>D: POST /api/device/packets (status: applied, branch)
+  D->>DB: proposal approved → applied (laptop owns git states)
+</pre>
+    <div class="cap">The app route only writes the decision; the laptop finds it through its own poll. If the laptop is asleep, the event waits in the database until the next poll.</div>
+  </div>
+  <div class="tablewrap"><table>
+    <tr><th>What goes wrong</th><th>What happens</th><th>Mechanism</th></tr>
+    <tr><td>I tap Approve twice, or on both the phone and Telegram</td><td>One decision is recorded; the second tap gets "already decided"</td><td>Request id; first decision wins</td></tr>
+    <tr><td>The proposal expired a second before my tap</td><td>409; nothing changes</td><td>Compare-and-set: only <code>proposed</code> can become <code>approved</code></td></tr>
+    <tr><td>The server crashes right after my tap</td><td>The decision survives; the laptop still receives it</td><td>Committed in one transaction before the response</td></tr>
+    <tr><td>The laptop is asleep</td><td>The decision waits; the next poll after wake-up picks it up</td><td>Stored events plus a per-device cursor, so none are missed or repeated</td></tr>
+    <tr><td>The laptop crashes mid-apply</td><td>The lease expires and the job reruns; the commit is identical, so no second branch</td><td>Leases, saved steps, deterministic commit (fixed author, time, parent)</td></tr>
+    <tr><td>The file changed after the proposal was written</td><td>Apply refuses and the proposal becomes <code>failed</code>; nothing is written</td><td>Re-check before writing</td></tr>
+    <tr><td>A revoked laptop tries to act</td><td>401 on every device route</td><td>Device token checked on each call; app and device credentials are separate</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Production-grade 3</span><h2>Durable execution, built from scratch</h2></div>
+  <p><b>The concept.</b> A durable workflow is code that survives its own process dying. Each step's result is written down before the next step starts, so after a crash, a deploy or a laptop going to sleep, the work resumes from the last finished step instead of starting over. wisen needs this because model calls cost money and minutes, because a proposal legitimately waits hours for my decision and two weeks for its measure, and because the work is split across a laptop that sleeps and a server that does not.</p>
+  <div class="concepts">
+    <div class="cc"><span class="w">record</span><b>Memoized steps</b><p>A job is a list of named steps. A finished step's output is saved; a rerun returns the saved output instead of calling the model again.</p></div>
+    <div class="cc"><span class="w">claim</span><b>Leases</b><p>A worker claims a job with an expiring lease and heartbeats to keep it. A dead or sleeping worker's lease expires and the job goes back to the queue.</p></div>
+    <div class="cc"><span class="w">safety</span><b>Replay policy per step</b><p>Reads and model calls are safe to repeat. Side effects (create a branch, send a push) are not: an interrupted one fails the job for a human instead of running twice.</p></div>
+    <div class="cc"><span class="w">pause</span><b>Waits</b><p>A job parks until an event arrives, for example waiting for my decision on a proposal, or for the laptop's result.</p></div>
+    <div class="cc"><span class="w">later</span><b>Timers</b><p>A job with <code>run_after</code> in the future: the 7-day proposal expiry and the measure job 2 weeks after merge. Wake-ups may repeat, so handlers are idempotent.</p></div>
+    <div class="cc"><span class="w">dedupe</span><b>Request ids</b><p>Each request carries a unique id; the job row is its receipt. A resent request returns the existing job instead of starting a second one.</p></div>
+  </div>
+<figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 230" role="img" aria-label="Attempt 1 runs the Observer and saves its output, then crashes during the Synthesizer. The lease expires and the job requeues. Attempt 2 reads the Observer output from the checkpoint without a model call, runs the Synthesizer, and stores exactly one reflection.">
+      <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="currentColor"/></marker></defs>
+      <text class="lbl" x="20" y="64">lease</text>
+      <text class="lbl" x="20" y="114">Observer</text>
+      <text class="lbl" x="20" y="164">Synthesizer</text>
+      <line x1="130" y1="200" x2="980" y2="200" stroke="currentColor" marker-end="url(#ar3)"/>
+      <text x="960" y="220" class="dim">time</text>
+      <!-- attempt 1 -->
+      <text x="140" y="30" class="lbl">attempt 1</text>
+      <rect x="140" y="52" width="330" height="16" rx="8" fill="var(--nrem-bg)" stroke="var(--nrem)"/>
+      <text x="150" y="64" font-size="11">leased · heartbeat</text>
+      <rect x="140" y="98" width="200" height="26" rx="6" fill="var(--nrem)"/>
+      <text x="240" y="115" text-anchor="middle" style="fill:#fff">model call · 6 min</text>
+      <text x="345" y="115" style="fill:var(--ok)">✓ saved</text>
+      <rect x="345" y="148" width="100" height="26" rx="6" fill="var(--rem)" opacity=".5"/>
+      <text x="455" y="166" style="fill:var(--bad)" font-size="16">✗</text>
+      <text x="470" y="166" style="fill:var(--bad)" font-size="11">process killed</text>
+      <!-- expiry -->
+      <line x1="470" y1="40" x2="470" y2="190" stroke="var(--bad)" stroke-dasharray="4 4"/>
+      <text x="480" y="45" class="dim" font-size="11">lease expires → queued</text>
+      <!-- attempt 2 -->
+      <text x="640" y="30" class="lbl">attempt 2</text>
+      <rect x="640" y="52" width="300" height="16" rx="8" fill="var(--nrem-bg)" stroke="var(--nrem)"/>
+      <rect x="640" y="98" width="20" height="26" rx="4" fill="var(--nrem)" opacity=".35"/>
+      <text x="668" y="115" font-size="11">read from checkpoint · no model call</text>
+      <rect x="665" y="148" width="190" height="26" rx="6" fill="var(--rem)"/>
+      <text x="760" y="165" text-anchor="middle" style="fill:#fff">model call</text>
+      <text x="865" y="166" style="fill:var(--ok)">✓ 1 reflection</text>
+    </svg>
+    </div>
+    <figcaption>Stage A, where both steps run as one job on the laptop; this is the step-3 crash test. Steps declare whether rerunning is safe. Reads and model calls are; side effects like creating a branch or sending a push are not, so an interrupted side effect fails the job for a human to check instead of running twice.</figcaption>
+  </figure>
+  <p><b>My approach.</b> pydantic-ai runs each single agent call; everything between calls and between machines is a small engine I wrote on SQLite, the same code on the laptop and the server, each with its own database. One agent run is one step. On the server a job's <code>runner</code> column says who may claim it: the server runs its own jobs in-process, and device jobs are claimed by the laptop over HTTPS with the same lease rules.</p>
+  <div class="tablewrap"><table>
+    <tr><th>Choice</th><th>Why</th></tr>
+    <tr><td>Hand-built engine on SQLite</td><td>Two processes, one of which sleeps; one file per machine; no extra service on a 2 vCPU box. Building it is also the point of the project: learning orchestration from scratch.</td></tr>
+    <tr><td>DBOS as the fallback</td><td>If the engine fails its crash tests or keeps costing more than the features on it, DBOS (in-process, SQLite) swaps in behind the same job interface. The proposal state machine stays hand-built either way.</td></tr>
+    <tr><td>Proven by crash tests</td><td>Kill the process between Observer and Synthesizer: the Observer is not called again and exactly one reflection is stored. A duplicate request id returns the existing job. An expired lease is requeued on startup.</td></tr>
+  </table></div>
+  <h3>Inside the job engine</h3>
+  <p>The whole engine is three SQLite tables and a handful of functions (<code>wisen/jobs.py</code>, tables in <code>wisen/store.py</code>). It keeps nothing in memory that a restart would lose: every function commits its change before it returns.</p>
+  <div class="plate">
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> queued: enqueue (runnable once run_after passes)
+  queued --> leased: claim (lease 60 s, heartbeats extend it)
+  leased --> succeeded: finish
+  leased --> waiting: ctx.wait (parked until a signal or timeout)
+  waiting --> queued: signal arrives / timeout passes
+  leased --> queued: attempt failed, retry with backoff / lease expired
+  leased --> failed: attempts used up / unsafe step interrupted
+  failed --> queued: same request id rerun
+  succeeded --> [*]
+</pre>
+    <div class="cap">Job states. A failed attempt goes back to the queue after a backoff that starts at 30 seconds and doubles each attempt, capped at 1 hour.</div>
+  </div>
+  <div class="tablewrap"><table>
+    <tr><th colspan="2">jobs · one row per piece of work</th><th>Why it exists</th></tr>
+    <tr><td><code>id</code></td><td>TEXT, primary key</td><td>Addresses the job everywhere: steps, logs, the API.</td></tr>
+    <tr><td><code>user_id</code></td><td>TEXT</td><td>Every row is scoped to a user, so the same engine can serve a hosted, multi-user wisen later.</td></tr>
+    <tr><td><code>kind</code>, <code>args</code></td><td>TEXT, JSON</td><td>Which handler runs, with what input (for example <code>daily-synthesis</code>, <code>{"date": "2026-10-21"}</code>).</td></tr>
+    <tr><td><code>runner</code></td><td><code>local</code> | <code>device</code></td><td>Who may claim it: this process, or the paired laptop over HTTPS.</td></tr>
+    <tr><td><code>state</code></td><td>queued · leased · waiting · succeeded · failed</td><td>The one source of truth for where the job is.</td></tr>
+    <tr><td><code>attempts</code>, <code>max_attempts</code></td><td>INTEGER</td><td>Retries with backoff, and a hard stop so a job that keeps crashing its process gives up.</td></tr>
+    <tr><td><code>run_after</code></td><td>timestamp</td><td>Timers and backoff: the job is not due before this. The 7-day expiry and the 2-week measure are just jobs with a future <code>run_after</code>.</td></tr>
+    <tr><td><code>wait_key</code></td><td>TEXT</td><td>What a parked job is waiting for, for example a decision on one proposal.</td></tr>
+    <tr><td><code>lease_owner</code>, <code>lease_expires_at</code></td><td>TEXT, timestamp</td><td>Who holds the job and until when. An expired lease means the worker died or slept, so the job is requeued.</td></tr>
+    <tr><td><code>request_id</code></td><td>UNIQUE per user</td><td>The receipt. The same request twice returns the same job instead of doing the work twice.</td></tr>
+    <tr><td><code>result</code>, <code>error</code></td><td>JSON, TEXT</td><td>The outcome, or why it failed.</td></tr>
+    <tr><td><code>created_at</code>, <code>updated_at</code></td><td>timestamp</td><td>Audit and debugging.</td></tr>
+  </table></div>
+  <div class="two">
+    <div class="tablewrap"><table>
+      <tr><th colspan="2">job_steps · one row per finished step</th></tr>
+      <tr><td><code>(job_id, name)</code></td><td>primary key: one checkpoint per step</td></tr>
+      <tr><td><code>state</code></td><td>started or done; a started step found after a crash was interrupted</td></tr>
+      <tr><td><code>replay_safe</code></td><td>may this step run again after a crash? Model calls yes; git branches and pushes no</td></tr>
+      <tr><td><code>output</code></td><td>the saved result a rerun returns instead of calling the model again; dropped once the job succeeds</td></tr>
+      <tr><td><code>started_at</code>, <code>finished_at</code></td><td>timing</td></tr>
+    </table></div>
+    <div class="tablewrap"><table>
+      <tr><th colspan="2">job_signals · events for parked jobs</th></tr>
+      <tr><td><code>(user_id, key)</code></td><td>primary key: one event per key</td></tr>
+      <tr><td><code>payload</code></td><td>what arrived, for example "approved, request id r-91"</td></tr>
+      <tr><td><code>at</code></td><td>when</td></tr>
+      <tr><td colspan="2">Stored even if no job is waiting yet, so a decision that arrives before the job parks is not lost. The first write wins.</td></tr>
+    </table></div>
+  </div>
+  <div class="tablewrap"><table>
+    <tr><th>Function</th><th>When it is called</th><th>Why</th></tr>
+    <tr><td><code>enqueue(kind, args, run_after, request_id)</code></td><td>The 07:00 schedule, the CLI, an approval, a merge (to set the 2-week measure)</td><td>Turns a request into a durable row; a known request id returns the existing job</td></tr>
+    <tr><td><code>run_once()</code> / <code>run_forever()</code></td><td>The worker loop in each process</td><td>Recovers expired leases, then claims and runs one due job. The next wake-up is recomputed from the table every pass, so no timer lives in memory</td></tr>
+    <tr><td><code>ctx.step(name, fn, replay_safe)</code></td><td>Inside a handler, around each phase: the Observer call, the Synthesizer call, the git commit</td><td>Runs <code>fn</code> once and saves its output; a rerun returns the saved output</td></tr>
+    <tr><td><code>ctx.wait(name, key, timeout)</code></td><td>When a job needs an outside event: my decision, the laptop's result</td><td>Parks the job and ends this run without holding a worker</td></tr>
+    <tr><td><code>signal(key, payload)</code></td><td>When the event arrives: an approval from the phone or Telegram</td><td>Stores the event and wakes the parked job</td></tr>
+    <tr><td><code>recover()</code></td><td>On startup and every worker pass</td><td>Requeues jobs whose lease expired; fails a job whose unsafe step was interrupted</td></tr>
+    <tr><td><code>claim_as</code> · <code>heartbeat_as</code> · <code>finish_as</code> · <code>fail_as</code></td><td>The laptop, over HTTPS, for <code>runner = device</code> jobs</td><td>The same lease rules for an outside worker. Each call returns False and changes nothing if that worker has lost the lease</td></tr>
+  </table></div>
+  <p class="note">Design rules the engine follows: only committed state exists; every job checkpoints after each phase; every step declares whether it is safe to rerun; request ids make retries harmless; timers are recomputed from stored jobs and wakes may repeat, so handlers are idempotent; crash-safe decisions are first-write-wins. These follow the lessons in Earendil's "Pi Durable" posts.</p>
+
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">The dashboard</span><h2>What I open every morning</h2></div>
+  <p>An installable web app (a PWA) the server builds from packets.</p>
+  <div class="dash">
+    <div class="panel"><b>Morning brief</b><p>Three bullets: what won yesterday, what hurt, what to try today.</p></div>
+    <div class="panel"><b>Approval inbox</b><p>Today's proposals with diff, evidence quotes, replay result and whether each meets the accept rule.</p></div>
+    <div class="panel"><b>Hill timeline</b><p>Corrections per 100 turns and tokens per problem solved, with a marker per merged change.</p></div>
+    <div class="panel"><b>Friction</b><p>Typed friction points and the ones that refuse to die.</p></div>
+    <div class="panel"><b>Alignment over time</b><p>The nightly alignment score; its correlation with counted corrections is in <code>wisen eval</code>.</p></div>
+    <div class="panel"><b>Usage</b><p>Claude and Codex subscription usage and reset times; only percentages reach the server.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Running it</span><h2>Deployment</h2></div>
+  <div class="tablewrap"><table>
+    <tr><th>Where</th><th>What</th></tr>
+    <tr><td>Laptop</td><td><code>wisen worker</code> under launchd; SQLite at <code>~/.wisen/wisen.db</code>; egress ledger; <code>~/.wisen/gardener/home.git</code> for instruction files outside any repo</td></tr>
+    <tr><td>Server</td><td><code>wisen cloud serve</code>: one Python process under systemd on a 2 vCPU / 3.7 GiB Hetzner box, behind Caddy HTTPS; SQLite with a backup timer; restore refuses while the server runs</td></tr>
+    <tr><td>Devices</td><td>Pairing codes and revocable per-device tokens; the laptop connects outbound only. Every row carries <code>user_id</code>, so each developer can self-host</td></tr>
+    <tr><td>Approvals</td><td>Web Push to the installed app, and a Telegram bot with approve and reject buttons</td></tr>
+    <tr><td>Long-term record</td><td>Claude Code deletes transcripts after 30 days, so the server's packets and reflections become the long-term history; that is why backups go off the box</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">For the review</span><h2>Production-grade and experimental, side by side</h2></div>
+  <div class="two">
+    <div class="col"><h3><span class="dot" style="background:var(--ok)"></span>Production-grade</h3><ul>
+      <li>A privacy boundary enforced by one shared schema at both ends, proven by marker tests</li>
+      <li>Durable execution on SQLite: leases, memoized steps, replay policies, crash tests</li>
+      <li>A proposal state machine with compare-and-set moves and an audit log</li>
+      <li>Idempotent decisions across two approval channels; deterministic commits</li>
+      <li>A path allow-list enforced in the applier, not the prompt</li>
+      <li>A self-hosted server: systemd, Caddy, backups, device tokens</li>
+    </ul></div>
+    <div class="col"><h3><span class="dot" style="background:var(--rem)"></span>Experimental</h3><ul>
+      <li>Sleep as architecture: NREM on the laptop, REM on the server</li>
+      <li>An agent that edits its operator's agent instructions, behind a human gate</li>
+      <li>Correction moments mined from my own transcripts as an eval set</li>
+      <li>Counterfactual replay before every proposal</li>
+      <li>Measuring the judge: alignment score against counted corrections</li>
+      <li>Grep-first search: no vector index, so no second copy of the transcripts; search re-reads the originals at question time</li>
+    </ul></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="eyebrow">Still open</span><h2>What I would decide next</h2></div>
+  <div class="tablewrap"><table>
+    <tr><th>Question</th><th>Why it matters</th></tr>
+    <tr><td>A local model for the Observer</td><td>No provider would ever see raw text; quality unknown until measured with replay.</td></tr>
+    <tr><td>Friction half-life without the model</td><td>Count days until a correction signal stops recurring, so the metric does not depend on the judge.</td></tr>
+    <tr><td>A configurable per-turn excerpt cap (400 today, up to about 4,000)</td><td>More context may improve reflections; measure it with replay before raising it.</td></tr>
+    <tr><td>Metrics for the other agents</td><td>Codex, Cursor and the rest need their own correction detectors.</td></tr>
+  </table></div>
+</section>
+
+<footer>Written from wisen's README, docs/plan/cloud-architecture.md, docs/plan/eval-loop.md and the code on main plus the step 5 branch, describing the target architecture. Steps 0–4 are shipped, step 5 is in validation, steps 6 and 7 are next. The hill chart shows the intended shape, not measured data.</footer>
+
+</div>
+
+<!--claude-mermaid-runtime-begin:3477-->
+<style>.mermaid-diagram{margin-block:4px}.mermaid-diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.1/dist/mermaid.min.js"></script>
+<script>(function(){
+var CFG={"palettes":{"light":{"surface":"#f4efe4","text":"#42392e","line":"#8a7f6d","border":"#7a6c52","bg":"#fffdf8"},"dark":{"surface":"#262b34","text":"#f2f3f5","line":"#a8adb8","border":"#9aa4b8","bg":"#1f232b"}}};
+if(typeof mermaid==='undefined')return;
+var pres=Array.prototype.slice.call(document.querySelectorAll('pre.mermaid')).filter(function(p){if(p.hasAttribute('data-claude-mermaid-claimed'))return false;p.setAttribute('data-claude-mermaid-claimed','1');return true;});
+if(!pres.length)return;
+var mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+var root=document.documentElement;
+var items=pres.map(function(pre){
+var mount=document.createElement('div');mount.className='mermaid-diagram';
+return {pre:pre,mount:mount,src:pre.textContent||''};
+});
+var seq=0;
+var renderGen=0;
+var lastKey='';
+function pageBg(fallback){
+var els=[document.body,document.documentElement];
+for(var i=0;i<els.length;i++){
+var c=els[i]&&getComputedStyle(els[i]).backgroundColor;
+if(c&&c!=='transparent'&&c!=='rgba(0, 0, 0, 0)')return c;
+}
+return fallback;
+}
+function render(){
+var theme=root.getAttribute('data-theme');
+var dark=theme==='dark'||(!!(mq&&mq.matches)&&theme!=='light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'base',
+flowchart:nat,sequence:nat,er:nat,state:nat,class:nat,pie:nat,
+gantt:nat,journey:nat,timeline:nat,gitGraph:nat,mindmap:nat,xyChart:nat,
+quadrantChart:nat,sankey:nat,c4:nat,requirement:nat,block:nat,
+packet:nat,kanban:nat,architecture:nat,radar:nat,
+themeVariables:{background:bg,mainBkg:pal.surface,primaryColor:pal.surface,
+primaryTextColor:pal.text,lineColor:pal.line,primaryBorderColor:pal.border,
+nodeBorder:pal.border,clusterBorder:pal.border,edgeLabelBackground:bg,
+clusterBkg:'rgba(127,127,127,0.07)',titleColor:pal.text,
+darkMode:dark,rowOdd:bg,rowEven:'rgba(127,127,127,0.07)',
+attributeBackgroundColorOdd:bg,attributeBackgroundColorEven:'rgba(127,127,127,0.07)',
+fontSize:'16px',fontFamily:font},
+themeCSS:'.node rect, .node circle, .node polygon, .node path, .cluster rect { stroke-width: 2px; }'
+});
+items.forEach(function(it){
+var id='claude-mermaid-'+seq++;
+mermaid.render(id,it.src).then(function(r){
+if(gen!==renderGen)return;
+var prev=it.pre.previousElementSibling;
+if(prev&&prev.className==='mermaid-diagram'&&prev!==it.mount)return;
+it.mount.innerHTML=r.svg;
+if(!it.mount.parentNode)it.pre.parentNode.insertBefore(it.mount,it.pre);
+it.pre.style.display='none';
+},function(){
+var scratch=document.getElementById(id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+scratch=document.getElementById('d'+id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+if(gen!==renderGen)return;
+if(it.mount.parentNode)it.mount.parentNode.removeChild(it.mount);
+it.pre.style.display='';
+});
+});
+}
+render();
+if(mq&&mq.addEventListener)mq.addEventListener('change',render);
+if(typeof MutationObserver!=='undefined')new MutationObserver(render).observe(root,{attributes:true,attributeFilter:['data-theme']});
+})();</script>
+<!--claude-mermaid-runtime-end-->
+
+</body></html>
