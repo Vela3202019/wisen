@@ -16,12 +16,15 @@ Applying an approved change stays on the laptop that sent the file.
 Synthesis runs on `claude -p` on the owner's subscription by default
 (WISEN_SYNTH_MODEL, set by `wisen cloud serve` in stage B;
 wisen/synthesis/claude_cli.py), or on the API model with WISEN_SYNTH_MODEL=api.
-The Gardener and chat need the API model (WISEN_MODEL and its key, in the
-service's environment file): they use tools, which `claude -p` does not serve.
+The Gardener needs the API model (WISEN_MODEL and its key, in the service's
+environment file): it uses tools, which `claude -p` does not serve. Chat runs
+on DeepSeek (WISEN_CHAT_MODEL; wisen/chat/agent.py).
 
 Imported only when a stage-B job runs, so a stage-A server loads no model code.
 """
 import asyncio
+import hashlib
+import json
 from typing import get_origin
 
 from wisen.gardener import loop
@@ -70,17 +73,17 @@ async def synthesize_job(mailbox, ctx: JobContext, args: dict) -> dict:
         print(f"[server] synthesize {day} skipped: {reason}")
         return {"date": day, "skipped": reason}
 
-    async def merge() -> DayObservation:
-        notes = await asyncio.to_thread(mailbox.observations, user, day)
-        return merge_observations([(device, note) for device, note, _ in notes])
-
-    observation = await ctx.step("merge", merge, replay_safe=True, output=DayObservation)
+    # Merged afresh on every run, so a retry or a rerun takes in notes sent
+    # since the last one; the steps that use them are named by those notes.
+    notes = await asyncio.to_thread(mailbox.observations, user, day)
+    observation = merge_observations([(device, note) for device, note, _ in notes])
+    merged = hashlib.sha256(json.dumps([(device, at) for device, _, at in notes]).encode()).hexdigest()[:16]
     yesterday, past = await _history(store, day)
-    reflection = await ctx.step("synthesize", lambda: _reflect(observation, yesterday, past, day),
+    reflection = await ctx.step(f"synthesize:{merged}", lambda: _reflect(observation, yesterday, past, day),
                                 replay_safe=True, output=Reflection)
     # Saved before the Gardener runs, which reads it; published after it, so
     # the one push names the day's batch. Both are upserts by date.
-    await ctx.step("save", lambda: store.upsert_reflection(
+    await ctx.step(f"save:{merged}", lambda: store.upsert_reflection(
         {**reflection.model_dump(), "synthesized_at": ts(ctx.engine.clock())}), replay_safe=True)
     garden = await ctx.step("garden", lambda: garden_day(mailbox, user, day), replay_safe=True, output=dict)
     await ctx.step("publish", lambda: asyncio.to_thread(mailbox.publish_result, user, day), replay_safe=True)

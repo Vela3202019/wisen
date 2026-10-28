@@ -38,7 +38,8 @@ Environment (stage A holds no model key: it makes no model calls):
   WISEN_CLOUD_STAGE         a (default) or b: the Synthesizer and Gardener run here over
                             packets (wisen/cloud/rem.py). Synthesis runs on `claude -p`
                             (WISEN_SYNTH_MODEL, default claude-cli:sonnet; "api" falls back to
-                            WISEN_MODEL); the Gardener and chat use WISEN_MODEL and its key
+                            WISEN_MODEL); the Gardener uses WISEN_MODEL and its key; chat
+                            runs on DeepSeek (WISEN_CHAT_MODEL, DEEPSEEK_API_KEY)
   WISEN_CLOUD_PUBLIC_URL    e.g. https://wisen.example.org; https makes the
                             session cookie Secure, and it is the VAPID contact
   WISEN_VAPID_PRIVATE_KEY   from `wisen cloud vapid-keys`; both unset = no push
@@ -78,7 +79,8 @@ MAX_WAIT = 30.0  # seconds a device poll may hang; under the proxy's timeouts
 LOGIN_WINDOW, LOGIN_TRIES = 15 * 60, 5  # per user id, per process
 # Provider keys the laptop uses. The stage-A server needs none; /health
 # reports whether one is set anyway, so a deploy can prove it has none. A
-# stage-B server needs the key of its WISEN_MODEL.
+# stage-B server needs the key of its WISEN_MODEL (the Gardener) and
+# DEEPSEEK_API_KEY (chat).
 MODEL_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY")
 # Stage B synthesizes on the owner's Claude subscription unless told otherwise
 # (WISEN_SYNTH_MODEL=api: the API model, WISEN_MODEL). Owner's own box, own use.
@@ -492,9 +494,10 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
         if not config.get("model", "synth_model", "WISEN_SYNTH_MODEL", ""):
             os.environ["WISEN_SYNTH_MODEL"] = SERVER_SYNTH_MODEL
         synth = config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
+        chat = config.get("model", "chat_model", "WISEN_CHAT_MODEL", "WISEN_CHAT_MODEL unset")
         # Names only: a key's value is never printed or logged.
-        print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener and chat on WISEN_MODEL; "
-              f"model keys set: {', '.join(keys) or 'none'}")
+        print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener on WISEN_MODEL; chat on DeepSeek "
+              f"({chat}); model keys set: {', '.join(keys) or 'none'}")
     db = db or Path(os.environ.get("WISEN_CLOUD_DB", "~/.wisen/cloud/wisen.db")).expanduser()
     return create_app(Mailbox(db, sender=sender, stage=stage), vapid_public_key=public if sender else None,
                       secure_cookies=public_url.startswith("https://"), run_engines=run_engines)

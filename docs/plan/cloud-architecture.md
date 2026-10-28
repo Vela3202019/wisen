@@ -206,7 +206,8 @@ the new packet types.
   the one push names the day's batch. The §5.5 skip holds on the server:
   no notes on the day, or a reflection newer than every note, is left alone.
   Notes that arrive after the run (a laptop that slept through it) run the
-  day again.
+  day again. Every run, retry or rerun merges the notes afresh, so a run
+  that failed and runs again takes in notes sent since.
 - **The same code on both ends.** Received result, metrics and measurement
   packets are mirrored into the tables the laptop's agents read
   (`reflections`, `daily_metrics`, `proposal_measures`), so the Synthesizer,
@@ -234,8 +235,10 @@ the new packet types.
   conversation each turn. No dashboard UI calls it yet.
 - **Models.** Synthesis runs on `claude -p` on the owner's subscription by
   default (`WISEN_SYNTH_MODEL`, `claude-cli:sonnet`); `WISEN_SYNTH_MODEL=api`
-  is the fallback to the API model. The Gardener and chat use tools, so they
-  run on `WISEN_MODEL` and its API key.
+  is the fallback to the API model. The Gardener uses tools, so it runs on
+  `WISEN_MODEL` and its API key (moving it to `claude -p` is a follow-up).
+  Chat runs on DeepSeek (`WISEN_CHAT_MODEL`, `DEEPSEEK_API_KEY`; owner's
+  decision): the reflections it reads, already redacted, reach DeepSeek.
 
 ### 3.3 What runs where
 

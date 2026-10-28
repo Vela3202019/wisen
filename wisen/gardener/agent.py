@@ -30,7 +30,7 @@ from pydantic_ai import Agent, DeferredToolRequests, ModelRetry, RunContext
 
 from wisen.gardener.git import GitError
 from wisen.gardener.targets import LocalFiles, Refused, SnapshotFiles
-from wisen.redact import EMAIL, SECRET, redact
+from wisen.redact import PLACEHOLDERS, redact
 
 MAX_DIFF = 20_000   # the proposal packet's cap on a diff (wisen/packets.py)
 MAX_READ = 20_000
@@ -154,10 +154,10 @@ def _draft(deps: Deps, tool_call_id: str, target: str, old_text: str, new_text: 
         raise ModelRetry(str(e)) from None
     if t.name in deps.open_targets:
         raise ModelRetry(f"{t.name} already has a proposal waiting or being applied; leave it for now")
-    if deps.snapshot is not None and (SECRET in new_text or EMAIL in new_text):
-        # The server reads files secret-redacted; copying a placeholder
-        # would write it over the real value.
-        raise ModelRetry(f"new_text holds {SECRET} or {EMAIL}, a placeholder for text you cannot see; leave it out")
+    if deps.snapshot is not None and (held := [p for p in PLACEHOLDERS if p in new_text]):
+        # The server reads files redacted; copying a placeholder would write
+        # it over the real value.
+        raise ModelRetry(f"new_text holds {', '.join(held)}, a placeholder for text you cannot see; leave it out")
     current = t.current()
     if old_text:
         if current is None:

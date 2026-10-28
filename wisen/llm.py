@@ -13,6 +13,9 @@ string and set that provider's API key env var.
 Synthesis uses the same model by default; set WISEN_SYNTH_MODEL=claude-cli:<model>
 to run it on a Claude subscription via the Claude Code CLI — see synthesis/claude_cli.py.
 
+A stage-B server's chat (wisen/cloud) runs on DeepSeek instead: WISEN_CHAT_MODEL
+names the DeepSeek model, and DEEPSEEK_API_KEY is its key.
+
 Note: Claude Pro/Max subscription auth only works inside the Claude Code CLI —
 it cannot back an API integration like this one. Anthropic access here
 requires an API key.
@@ -34,3 +37,11 @@ def get_model() -> str:
         # pydantic-ai's Google provider reads GOOGLE_API_KEY; we document GEMINI_API_KEY
         os.environ.setdefault("GOOGLE_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
     return model
+
+
+def chat_model() -> str:
+    """The stage-B server's chat model: DeepSeek, named by WISEN_CHAT_MODEL."""
+    name = config.get("model", "chat_model", "WISEN_CHAT_MODEL")
+    if not name:
+        raise RuntimeError("set WISEN_CHAT_MODEL to the DeepSeek model the server's chat runs on")
+    return f"deepseek:{name}"

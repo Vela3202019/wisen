@@ -10,8 +10,9 @@ Backed by the WISEN_MODEL-configured model (see llm.py) with four tools:
 Designed to be called via POST /chat (SSE streaming).
 
 On a stage-B server (wisen/cloud) the same agent answers from reflections
-only (`raw_history=False`): the two search tools read the laptop's raw
-history and configs, which never reach the server.
+only (`raw_history=False`), on DeepSeek (WISEN_CHAT_MODEL; see llm.py): the
+two search tools read the laptop's raw history and configs, which never
+reach the server.
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ from pydantic_ai.settings import ModelSettings
 
 from wisen.chat.search import search_agent_configs as _search_configs
 from wisen.chat.search import search_chat_history as _search
-from wisen.llm import get_model
+from wisen.llm import chat_model, get_model
 from wisen.store import Store, get_store
 
 load_dotenv()
@@ -92,7 +93,7 @@ class ChatDeps:
 
 
 def _make_agent(raw_history: bool = True) -> Agent:
-    model = get_model()
+    model = get_model() if raw_history else chat_model()
     # thinking=False keeps Gemini fast; other providers may not accept it
     settings = ModelSettings(thinking=False) if model.startswith("google:") else None
     agent = Agent(

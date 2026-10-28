@@ -17,7 +17,9 @@ every model is a fake.
   - a laptop that wakes late with notes makes the day run again; nothing
     new, no second reflection
   - stage A on either side keeps stage-B packets and jobs out
-  - reflection chat on the server reads reflections only
+  - a failed run that runs again takes in notes sent since
+  - the server's Gardener never drafts a redaction placeholder into a file
+  - reflection chat on the server reads reflections only, on DeepSeek
 
 No network or model needed. Run: python3 -m tests.test_stage_b
 """
@@ -437,6 +439,77 @@ async def check_late_notes():
     print("✓ stage B: a day with no notes yet is skipped; notes that arrive later make its reflection")
 
 
+async def check_failed_run_takes_late_notes():
+    """The morning run merges laptop D's notes, then fails (the CLI's login
+    expired). Laptop E's notes arrive after; the rerun reflects on both."""
+    server = Server("failed")
+    server_prompts.clear()
+    browser = await server.browser()
+    creds_d = await server.device(browser, "laptop-d")
+    creds_e = await server.device(browser, "laptop-e")
+    _home("laptop-d", "# D\n", ["tidy the release notes"])
+    _home("laptop-e", "# E\n", ["profile the slow report query"])
+    async with server.http() as http:
+        with laptop("laptop-d") as store:
+            async with CloudClient(creds_d, http) as client:
+                await worker.dream_up(client, store)
+    await server.mailbox.ensure_schedule(USER)
+    server.clock.now = datetime.combine(TODAY, time(7, 0), UTC)
+    await server.run_jobs()
+    server.clock.now += timedelta(minutes=31)
+
+    async def expired(system_prompt, user_prompt, output_type, model):
+        server_prompts.append(user_prompt)
+        raise RuntimeError("Failed to authenticate")
+
+    agent._generate = expired
+    try:
+        for _ in range(3):
+            await server.run_jobs()
+            server.clock.now += timedelta(hours=1)
+    finally:
+        agent._generate = generate
+    (synth,) = await asyncio.to_thread(_jobs, server, "synthesize")
+    assert synth.state == "failed" and "tidy the release notes" in server_prompts[0], synth
+    async with server.http() as http:
+        with laptop("laptop-e") as store:
+            async with CloudClient(creds_e, http) as client:
+                await worker.dream_up(client, store)
+    await server.run_jobs()
+    (synth,) = await asyncio.to_thread(_jobs, server, "synthesize")
+    assert synth.state == "succeeded", synth
+    assert "tidy the release notes" in server_prompts[-1] and "profile the slow report query" in server_prompts[-1]
+    assert "profile the slow report query" in (await browser.get("/api/logs")).json()[0]["synthesis_context"]
+    await browser.aclose()
+    print("✓ stage B: a failed run that runs again takes in the notes sent since")
+
+
+def check_no_placeholder_written():
+    """The server's Gardener sees files redacted: a draft that would write a
+    placeholder over the real value is refused."""
+    from pydantic_ai import ModelRetry
+
+    from wisen.gardener.agent import Deps, Evidence, _draft
+    from wisen.gardener.targets import SnapshotFiles
+
+    shown = redact(HOME_MD)
+    evidence = [Evidence(date=DAY_BEFORE, quote="q"), Evidence(date=DAY, quote="q")]
+
+    def draft(new_text: str):
+        deps = Deps(snapshot=SnapshotFiles({"home:.claude/CLAUDE.md": {
+            "text": shown, "base_blob": "a" * 40, "device_id": "d1"}}), reflection_dates={DAY, DAY_BEFORE})
+        return _draft(deps, "c1", "home:.claude/CLAUDE.md", "- Be brief.\n", new_text, "why", evidence)
+
+    for placeholder in ("<secret>", "<email>", "~/", "…/"):
+        try:
+            draft(f"- Be brief.\n- Run {placeholder}test first.\n")
+            raise AssertionError(f"a draft holding {placeholder} was accepted")
+        except ModelRetry as e:
+            assert placeholder in str(e), e
+    assert draft("- Be brief.\n- Run the tests first.\n").proposed == shown + "- Run the tests first.\n"
+    print("✓ stage B: the server's Gardener never drafts a redaction placeholder into a file")
+
+
 def _jobs(server: Server, kind: str) -> list:
     from contextlib import closing
 
@@ -501,6 +574,7 @@ async def check_chat():
             yield {0: DeltaToolCall("get_reflection", json.dumps({"date": DAY_BEFORE}), tool_call_id="g1")}
 
     events = []
+    os.environ.update({"WISEN_CHAT_MODEL": "deepseek-v4-flash", "DEEPSEEK_API_KEY": "fake-deepseek-key"})
     with chat._get_agent(raw_history=False).override(model=FunctionModel(stream_function=respond)):
         async for event in chat.stream_chat([{"role": "user", "content": "how was it?"}], store=store,
                                             raw_history=False):
@@ -534,6 +608,36 @@ async def check_chat():
     print("✓ stage B: reflection chat answers from the server's reflections only, over POST /api/chat")
 
 
+def check_chat_model():
+    """The server's chat runs on DeepSeek, named by WISEN_CHAT_MODEL, with
+    DEEPSEEK_API_KEY; neither has a default. The laptop's chat keeps WISEN_MODEL."""
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    saved = {k: os.environ.get(k) for k in ("WISEN_CHAT_MODEL", "DEEPSEEK_API_KEY")}
+    try:
+        for k in saved:
+            os.environ.pop(k, None)
+        for env, missing in (({}, "WISEN_CHAT_MODEL"), ({"WISEN_CHAT_MODEL": "deepseek-v4-flash"}, "DEEPSEEK_API_KEY")):
+            os.environ.update(env)
+            try:
+                chat._make_agent(raw_history=False)
+                raise AssertionError(f"the server's chat built without {missing}")
+            except RuntimeError as e:
+                assert missing in str(e), e
+        os.environ["DEEPSEEK_API_KEY"] = "fake-deepseek-key"
+        model = chat._make_agent(raw_history=False).model
+        assert isinstance(model, OpenAIChatModel) and model.system == "deepseek", model
+        assert model.model_name == "deepseek-v4-flash" and "deepseek.com" in model.base_url, model.base_url
+        assert getattr(chat._make_agent(raw_history=True).model, "system", None) != "deepseek"
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    print("✓ stage B: the server's chat runs on DeepSeek by WISEN_CHAT_MODEL and DEEPSEEK_API_KEY")
+
+
 def check_server_synthesis_path():
     """A stage-B server synthesizes on `claude -p` unless told otherwise; the
     API model is the fallback by config."""
@@ -562,8 +666,11 @@ async def main():
     check_merge_and_apply()
     await check_reflection_while_asleep()
     await check_late_notes()
+    await check_failed_run_takes_late_notes()
+    check_no_placeholder_written()
     await check_stage_a_keeps_out()
     await check_chat()
+    check_chat_model()
     check_server_synthesis_path()
     print("\nall stage B tests passed")
 

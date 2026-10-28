@@ -139,22 +139,33 @@ still applied by the laptop whose file they change.
 
 Synthesis runs on `claude -p`, on the owner's Claude subscription (the
 owner's own box, for the owner's own use; a server that serves other people
-must use an API key). The Gardener and reflection chat use tools, which
-`claude -p` does not serve, so they run on `WISEN_MODEL` and its API key.
-`WISEN_SYNTH_MODEL=api` moves synthesis to the API model too: that is the
-fallback, by config.
+must use an API key). The Gardener uses tools, which `claude -p` does not
+serve, so for now it runs on `WISEN_MODEL` and its API key. Reflection chat
+runs on DeepSeek, through pydantic-ai's DeepSeek provider. `WISEN_SYNTH_MODEL=api`
+moves synthesis to the API model too: that is the fallback, by config.
+
+What each job needs:
+
+| Job        | Runs on                         | Needs                                         |
+|------------|---------------------------------|-----------------------------------------------|
+| Synthesis  | `claude -p` (`WISEN_SYNTH_MODEL`) | the CLI logged in for the service's user (step 2) |
+| Chat       | DeepSeek (`WISEN_CHAT_MODEL`)    | `DEEPSEEK_API_KEY`                            |
+| Gardener   | `WISEN_MODEL`                   | that provider's API key                       |
 
 1. Upgrade the server first (see above), then add to `/etc/wisen/wisen.env`:
 
    ```bash
    WISEN_CLOUD_STAGE=b
-   WISEN_MODEL=anthropic:claude-sonnet-5   # the Gardener and chat; any pydantic-ai model string
+   WISEN_MODEL=anthropic:claude-sonnet-5   # the Gardener; any pydantic-ai model string
    ANTHROPIC_API_KEY=…                     # the key for that provider
+   WISEN_CHAT_MODEL=deepseek-v4-flash      # chat: the DeepSeek model name; no default
+   DEEPSEEK_API_KEY=…                      # chat's key; no default
    # WISEN_SYNTH_MODEL=claude-cli:sonnet   # the default in stage B; "api" falls back to WISEN_MODEL
    ```
 
-   The key lives only in the env file; wisen never prints or logs it (the
-   start-up line names which key variables are set, never their values).
+   The keys live only in the env file; wisen never prints or logs them, nor
+   puts them in a packet (the start-up line names which key variables are
+   set, never their values).
 2. Log the CLI in **for the user the service runs as**, once, and make sure
    the service can read that login:
    - `deploy/wisen.service` runs as `wisen` with `ProtectHome=true`, so it
@@ -188,7 +199,10 @@ the service's cgroup next to the server (~130 MB), so both units set
 **Chat.** `POST /api/chat` (logged in, stage B only) answers questions from
 the server's reflections and streams the answer as server-sent events. It is
 stateless: the caller sends the conversation each turn, and nothing is
-stored.
+stored. It runs on DeepSeek, so the reflection text it answers from (already
+redacted by the egress gate on the laptop) and the questions asked reach
+DeepSeek's servers. Without `WISEN_CHAT_MODEL` or `DEEPSEEK_API_KEY`, chat
+answers with an error; synthesis and the Gardener are not affected.
 
 ## Checks on the box (step 4)
 
