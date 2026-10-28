@@ -158,14 +158,18 @@ def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, s
     with closing(store._connect()) as conn:
         applied = conn.execute(
             "SELECT id, pr_url FROM proposals WHERE user_id = ? AND state = 'applied'", (store.user_id,)).fetchall()
+    fetched = set()
     for proposal_id, pr_url in applied:
         row = git_row(store, proposal_id)
         if row is None:
             continue
         repo = Repo(Path(row["work_tree"]), Path(row["git_dir"]) if row["git_dir"] else None)
         try:
-            if pr_url and not repo.ok("fetch", "--quiet", repo.remote()):
-                print(f"[gardener] cannot fetch for {row['branch']}; checking local refs")
+            if pr_url and repo not in fetched:
+                fetched.add(repo)
+                remote = repo.remote()
+                if remote and not repo.fetch(remote):
+                    print(f"[gardener] cannot fetch {remote} in {repo.work_tree}; checking local refs")
             merged = _merged(repo, row)
         except GitError as e:
             print(f"[gardener] cannot check {row['branch']}: {e}")

@@ -591,6 +591,14 @@ async def check_publisher() -> None:
     git(demo, "update-ref", f"refs/heads/wisen/gardener/{new_file.id}", "main")
     refused(publisher.NotApplied, new_file.id)
     assert git(origin, "for-each-ref", "--format=%(refname)") == f"refs/heads/{branch}"
+    # No remote, or a fetch that fails: the pass goes on with local refs.
+    git(demo, "remote", "remove", "origin")
+    assert applier.detect_merges(store, proposals) == []
+    git(demo, "remote", "add", "origin", str(_TMP / "publish" / "missing.git"))
+    git(demo, "branch", "-D", f"wisen/gardener/{new_file.id}")
+    assert applier.detect_merges(store, proposals) == [(new_file.id, "abandoned")]
+    assert (await proposals.get(p.id)).state == "applied"
+    git(demo, "remote", "set-url", "origin", str(origin))
     # The pull request merges on GitHub: only the remote's main has the branch.
     local_main = git(demo, "rev-parse", "main")
     git(origin, "update-ref", "refs/heads/main", git(demo, "rev-parse", branch))

@@ -35,11 +35,11 @@ class Repo:
         return ["git", "-C", str(self.work_tree), *args]
 
     def run(self, *args: str, env: dict | None = None, input: str | None = None,
-            check: bool = True) -> subprocess.CompletedProcess:
+            check: bool = True, timeout: float | None = None) -> subprocess.CompletedProcess:
         full_env = {k: v for k, v in os.environ.items() if k not in _SCRUB}
         full_env.update({"GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C", **(env or {})})
         r = subprocess.run(self._cmd(args), capture_output=True, text=True, input=input, env=full_env,
-                           check=False)
+                           check=False, timeout=timeout)
         if check and r.returncode != 0:
             raise GitError(f"git {args[0]} failed: {r.stderr.strip()[:300]}")
         return r
@@ -77,10 +77,20 @@ class Repo:
         remotes = self.out("remote").split()
         return "origin" if "origin" in remotes else (remotes[0] if remotes else None)
 
+    def fetch(self, remote: str) -> bool:
+        """Fetch `remote` (no pull, no checkout), never prompting and giving up
+        after 30 seconds. False if it failed or timed out."""
+        try:
+            return self.ok("fetch", "--quiet", remote, timeout=30,
+                           env={"GIT_SSH_COMMAND": "ssh -o BatchMode=yes"})
+        except subprocess.TimeoutExpired:
+            return False
+
     def default_refs(self) -> list[str]:
         """Where the default branch can be seen: the remote's copy and the local one."""
-        name = self.default_branch()
-        return [ref for ref in (f"refs/remotes/{self.remote()}/{name}", f"refs/heads/{name}") if self.resolve(ref)]
+        name, remote = self.default_branch(), self.remote()
+        refs = [f"refs/remotes/{remote}/{name}"] if remote else []
+        return [ref for ref in (*refs, f"refs/heads/{name}") if self.resolve(ref)]
 
     @contextmanager
     def scratch_index(self) -> Iterator[dict]:
