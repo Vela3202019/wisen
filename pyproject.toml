@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wisen"
 version = "0.1.0"
-description = "A reflection harness for coding agents — reads your agent sessions, synthesizes daily reflections, answers questions about them via a chat search agent, and learns what makes your harness work better"
+description = "A continuous-learning harness for coding agents: it learns from your real agent sessions with a private daily reflection, a chat you can ask about your work, and instruction files that keep improving as your agents work"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

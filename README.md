@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="wisen/dashboard/icon.svg" width="96" height="96" alt="wisen">
+<img src="docs/assets/logo.svg" width="112" height="112" alt="wisen logo: a trail climbing a hill">
 
 # wisen
 
-**A reflection harness for coding agents.** It reads your real agent sessions,
-writes one private daily reflection, lets you chat with it, and tends the
-instruction files your agents read.
+**A continuous-learning harness for coding agents.** It learns from your real
+agent sessions: a private daily reflection, a chat you can ask about your work,
+and instruction files that keep improving as your agents work.
 
 [![CI](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml/badge.svg)](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Built with pydantic-ai](https://img.shields.io/badge/built%20with-pydantic--ai-E92063.svg)](https://ai.pydantic.dev)
 
@@ -18,10 +18,14 @@ instruction files your agents read.
 
 You generate hours of coding-agent transcripts every day: corrections,
 rephrases, rejected tool calls, the occasional flow state. Then it all
-evaporates. wisen turns that exhaust into a daily feedback loop. It reads your
-sessions from Claude Code, Codex, Cursor, opencode, Gemini CLI, Pi, exports and
-git commits, synthesizes one *reflection* for the day, and lets you inspect it
-through a dashboard, a chat agent, or a voice briefing.
+evaporates. wisen turns that exhaust into a continuous learning loop. It reads
+your sessions from Claude Code, Codex, Cursor, opencode, Gemini CLI, Pi, exports
+and git commits, synthesizes one *reflection* for the day, and lets you inspect
+it through a dashboard, a chat agent, or a voice briefing. The reflection is one
+step of the loop: the Gardener reads it and proposes small changes to the
+instruction files your agents read, you approve, the change is applied as a
+branch, and later sessions show whether it helped. Observe, reflect, propose,
+apply, repeat.
 
 ![wisen local reflection flow](docs/assets/wisen-flow.gif)
 
