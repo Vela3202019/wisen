@@ -463,13 +463,11 @@ function isWaiting(p) {
   return p.state === "proposed" && (!p.expires_at || new Date(p.expires_at) > new Date());
 }
 
-// The main page holds what still needs the owner: a decision, or Push &
-// create PR for an applied branch. Everything resolved (rejected, expired,
-// failed, published, merged, a personal file's local branch, ...) is the
-// change log's.
+// The main page holds what is still open: a decision, or an approved
+// proposal until its branch or pull request is merged. Everything resolved
+// (rejected, expired, failed, merged, kept, reverted, ...) is the change log's.
 function onMainPage(p) {
-  return isWaiting(p) || p.state === "approved"
-      || (p.state === "applied" && !p.pr_url && !p.target.startsWith("home:"));
+  return isWaiting(p) || p.state === "approved" || p.state === "applied";
 }
 
 function showTab(name) {
@@ -540,7 +538,7 @@ function renderChangeLog(proposals) {
   const done = proposals.filter(p => !onMainPage(p));
   const entry = p => {
     const d = p.decision, o = p.outcome;
-    const state = p.pr_url && p.state === "applied" ? "published" : p.state === "proposed" ? "expired" : p.state;
+    const state = p.state === "proposed" ? "expired" : p.state;
     const when = new Date((o && o.at) || (d && d.at) || p.updated_at).toLocaleString();
     const batch = p.payload.batch ? ` · from ${esc(p.payload.batch)}'s reflection` : "";
     const lines = [];
@@ -550,8 +548,8 @@ function renderChangeLog(proposals) {
     const branch = `wisen/gardener/${p.id}`;
     let link = "";
     if (p.pr_url) link = `Pull request <a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.pr_url)}</a>`;
-    else if (["applied", "merged", "measuring", "kept", "revert_proposed"].includes(p.state))
-      link = `Branch <code>${esc(branch)}</code>${p.state === "applied" ? " on the laptop: merge it there when you choose" : ""}`;
+    else if (["merged", "measuring", "kept", "revert_proposed"].includes(p.state))
+      link = `Branch <code>${esc(branch)}</code>`;
     return `<div class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}">
       <div class="row" style="display:flex;justify-content:space-between;gap:8px">
         <span class="target">${esc(p.target)}</span><span class="state ${esc(state)}">${esc(state)}</span>

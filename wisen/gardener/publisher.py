@@ -1,9 +1,9 @@
 """
 Publishing an applied proposal: push its branch, `wisen/gardener/<id>`, to
-the repo's remote and open a pull request against the default branch with the
-`gh` CLI. It runs on the laptop, as a device job that `wisen worker` claims
-when the owner taps "Push & create PR" in the dashboard; the server cannot
-reach GitHub and holds no token for it.
+the repo's remote and open a pull request with the `gh` CLI, which bases it on
+the GitHub repo's default branch. It runs on the laptop, as a device job that
+`wisen worker` claims when the owner taps "Push & create PR" in the dashboard;
+the server cannot reach GitHub and holds no token for it.
 
 Before anything leaves the machine it re-checks, from local records only, as
 the applier does: the approval record exists, the proposal is applied, and
@@ -127,9 +127,8 @@ def body(proposal_id: str, branch: str, payload: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def create_pr(repo: Repo, branch: str, base: str, title: str, body: str) -> str:
-    r = _gh(repo, "pr", "create", "--head", branch, "--base", base, "--title", title, "--body-file", "-",
-            input=body)
+def create_pr(repo: Repo, branch: str, title: str, body: str) -> str:
+    r = _gh(repo, "pr", "create", "--head", branch, "--title", title, "--body-file", "-", input=body)
     url = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
     if r.returncode != 0 or not url.startswith("https://"):
         raise PrFailed(f"gh pr create failed: {(r.stderr or r.stdout).strip()[:300]}")
@@ -154,8 +153,7 @@ def publish(store: SqliteStore, proposal_id: str) -> str:
             raise PushFailed(str(e)) from None
         except subprocess.TimeoutExpired:
             raise PushFailed(f"git push timed out after {TIMEOUT}s") from None
-        url = create_pr(repo, branch, repo.default_branch(), title(info["target"]),
-                        body(proposal_id, branch, info["payload"]))
+        url = create_pr(repo, branch, title(info["target"]), body(proposal_id, branch, info["payload"]))
     with store.transaction() as conn:
         Proposals(store).record_pr_in(conn, proposal_id, url)
     return url

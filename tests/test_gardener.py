@@ -280,7 +280,8 @@ elif args[:2] == ["pr", "create"]:
         print("pull request create failed: boom", file=sys.stderr)
         sys.exit(1)
     url = f"https://github.com/example/demo/pull/{{len(prs) + 1}}"
-    prs.append({{"head": opt("--head"), "base": opt("--base"), "title": opt("--title"), "url": url}})
+    base = opt("--base") if "--base" in args else os.environ.get("GH_DEFAULT_BRANCH", "main")
+    prs.append({{"head": opt("--head"), "base": base, "title": opt("--title"), "url": url}})
     json.dump(prs, open(prs_path, "w"))
     print(url)
 else:
@@ -602,7 +603,12 @@ async def check_publisher() -> None:
         os.environ["GIT_SSH_COMMAND"] = owner_ssh
     assert (await proposals.get(p.id)).pr_url is None   # the failed create recorded nothing
     branch = f"wisen/gardener/{p.id}"
+    # The base is GitHub's default branch, not a local guess: the clone has a
+    # `main` but no origin/HEAD, and the GitHub repo's default is `develop`.
+    assert not Repo(demo).resolve("refs/remotes/origin/HEAD")
+    os.environ["GH_DEFAULT_BRANCH"] = "develop"
     url = publisher.publish(store, p.id)
+    del os.environ["GH_DEFAULT_BRANCH"]
     assert url == "https://github.com/example/demo/pull/1", url
     assert (await proposals.get(p.id)).pr_url == url and (await proposals.get(p.id)).state == "applied"
     # Only the branch reached the remote, at the applier's commit.
@@ -610,7 +616,8 @@ async def check_publisher() -> None:
     assert git(origin, "rev-parse", branch) == git(demo, "rev-parse", branch)
     create = gh_calls(log, "pr", "create")[-1]
     a = create["args"]
-    assert a[a.index("--head") + 1] == branch and a[a.index("--base") + 1] == "main", a
+    assert a[a.index("--head") + 1] == branch and "--base" not in a, a
+    assert json.loads((_TMP / "publish" / "prs.json").read_text())[0]["base"] == "develop"
     assert a[a.index("--title") + 1] == "wisen gardener: update demo:CLAUDE.md", a
     assert "Agents guess the test command." in create["stdin"] and '"how do I run the tests?"' in create["stdin"]
     assert "Replay: no cases yet." in create["stdin"] and p.id in create["stdin"], create["stdin"]

@@ -479,7 +479,40 @@ async def check_publish():
             assert (await browser.post(url(other), json={})).status_code == 202
             (retry,) = server.mailbox.device_jobs(USER, ("queued",))
             assert retry.args == {"proposal_id": other.id} and retry.attempts == 0 and retry.error is None, retry
+            # The served dashboard keeps an applied card on the main page,
+            # with its pull request's link or, for a personal file, its local
+            # branch; the change log holds neither until it is merged.
+            pages = render_dashboard((await browser.get("/")).text, (await inbox()).json())
+            main, log = pages["approvals"], pages["tab-log"]
+            assert f'id="proposal-{repo.id}"' in main and f'href="{PR}"' in main, main
+            assert f'id="proposal-{home.id}"' in main and f"wisen/gardener/{home.id}" in main, main
+            assert f"proposal-{repo.id}" not in log and f"proposal-{home.id}" not in log, log
     print("✓ cloud: Push & create PR queues one device job, records the laptop's link, and shows a failure by class")
+
+
+# The dashboard's own script, run in node against a stub DOM: every element is
+# a sink for innerHTML, everything else a no-op. Returns each element's HTML.
+NODE_DASHBOARD = r"""
+const vm = require("vm");
+const {script, proposals} = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const els = {};
+const any = new Proxy(function () {}, {get: (t, k) => k === "then" ? undefined : any, apply: () => any});
+const el = id => els[id] || (els[id] = new Proxy({innerHTML: ""}, {get: (t, k) => k in t ? t[k] : any}));
+const document = new Proxy({getElementById: el}, {get: (t, k) => k in t ? t[k] : any});
+const ctx = vm.createContext({document, window: any, navigator: {}, location: any, fetch: () => new Promise(() => {}),
+                              console, Date, JSON, Promise, String, Object, Array, Math, Number, setTimeout: any});
+vm.runInContext(script, ctx);
+ctx.__proposals = proposals;
+vm.runInContext("renderApprovals(__proposals); renderChangeLog(__proposals);", ctx);
+console.log(JSON.stringify(Object.fromEntries(Object.entries(els).map(([k, v]) => [k, v.innerHTML]))));
+"""
+
+
+def render_dashboard(html: str, proposals: list) -> dict:
+    script = html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+    r = subprocess.run(["node", "-e", NODE_DASHBOARD], input=json.dumps({"script": script, "proposals": proposals}),
+                       capture_output=True, text=True, check=True)
+    return json.loads(r.stdout)
 
 
 async def _poll(creds: Credentials, http: httpx.AsyncClient, cursor: int) -> dict:
