@@ -19,9 +19,10 @@ work tree of yours is touched.
 Merge detection (`detect_merges`) watches applied branches: in the default
 branch (merged, also by squash: the file there matches the branch), or
 deleted unmerged (abandoned). A merge starts the 2-week measure timer. A
-published proposal's pull request is merged on GitHub, into whatever branch
-it was based on, so gh is asked about it instead; if gh cannot answer, the
-pass reports nothing for it.
+published proposal's fate is its pull request's on GitHub, whatever branch it
+was based on, so gh is asked instead and the local branch is ignored: merged,
+closed unmerged (abandoned), or still open; if gh cannot answer, the pass
+reports nothing for it.
 """
 import json
 import sqlite3
@@ -142,13 +143,11 @@ def git_row(store: SqliteStore, proposal_id: str) -> sqlite3.Row | None:
 
 
 def _merged(repo: Repo, row: sqlite3.Row, pr_url: str | None) -> bool | None:
-    """True if merged; False if the branch is gone unmerged; None if still open."""
+    """True if merged; False if the branch (or its pull request) is gone
+    unmerged; None if still open."""
     if pr_url:
-        if publisher.pr_merged(repo, pr_url):
-            return True
-        refs = []
-    else:
-        refs = ["refs/heads/main"] if row["git_dir"] else repo.default_refs()
+        return {"MERGED": True, "CLOSED": False}.get(publisher.pr_state(repo, pr_url))
+    refs = ["refs/heads/main"] if row["git_dir"] else repo.default_refs()
     for ref in refs:
         if repo.ok("merge-base", "--is-ancestor", row["commit_sha"], ref):
             return True
@@ -158,7 +157,8 @@ def _merged(repo: Repo, row: sqlite3.Row, pr_url: str | None) -> bool | None:
 
 
 def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, str]]:
-    """Move applied proposals whose branch merged (or was deleted unmerged).
+    """Move applied proposals whose branch merged (or was deleted unmerged,
+    or whose pull request was closed unmerged).
     A merge sets the measure timer in the same transaction. Safe to call
     any time: each move has a fixed request id."""
     moved = []
@@ -189,7 +189,8 @@ def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, s
                            now=now)
             else:
                 proposals.transition_in(conn, proposal_id, "applied", "abandoned", f"abandoned:{proposal_id}",
-                                        "applier", f"{row['branch']} was deleted unmerged")
+                                        "applier", f"pull request {pr_url} was closed unmerged" if pr_url
+                                        else f"{row['branch']} was deleted unmerged")
         moved.append((proposal_id, "merged" if merged else "abandoned"))
     return moved
 

@@ -554,6 +554,7 @@ async def check_publisher() -> None:
     p = await applied("demo:CLAUDE.md", CLAUDE_MD, CLAUDE_MD + "\nRun tests: make test\n")
     home = await applied("home:.claude/CLAUDE.md", HOME_MD, HOME_MD + "- Name the test command.\n")
     new_file = await applied("demo:AGENTS.md", None, "# Agents\n")
+    closed = await applied("demo:lib/AGENTS.md", None, "# Lib agents\n")
     undecided = await proposals.create("demo:docs/CLAUDE.md", {"diff": "", "rationale": "r", "evidence": []},
                                        request_id="pub:undecided", actor="test")
     log = fake_gh(_TMP / "publish")
@@ -641,9 +642,19 @@ async def check_publisher() -> None:
     git(demo, "branch", "-D", f"wisen/gardener/{new_file.id}")
     assert applier.detect_merges(store, proposals) == [(new_file.id, "abandoned")]
     assert (await proposals.get(p.id)).state == "applied"
+    # A published proposal follows its pull request, not the local branch:
+    # still open with the branch deleted; closed unmerged with it kept.
+    git(demo, "branch", "-D", branch)
+    publisher.publish(store, closed.id)
+    prs_path = _TMP / "publish" / "prs.json"
+    prs = json.loads(prs_path.read_text())
+    prs[1]["state"] = "CLOSED"
+    prs_path.write_text(json.dumps(prs))
+    assert git(demo, "rev-parse", "--verify", f"wisen/gardener/{closed.id}")
+    assert applier.detect_merges(store, proposals) == [(closed.id, "abandoned")]
+    assert (await proposals.get(p.id)).state == "applied"
     # The pull request merges on GitHub into `develop`, its base: no local
     # ref shows it, gh does. While gh cannot answer, nothing moves.
-    prs_path = _TMP / "publish" / "prs.json"
     prs = json.loads(prs_path.read_text())
     prs[0]["state"] = "MERGED"
     prs_path.write_text(json.dumps(prs))

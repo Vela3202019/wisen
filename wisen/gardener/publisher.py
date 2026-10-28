@@ -113,13 +113,13 @@ def open_pr(repo: Repo, branch: str) -> str | None:
     return prs[0]["url"] if prs else None
 
 
-def pr_merged(repo: Repo, url: str) -> bool:
-    """Whether GitHub says the pull request at `url` is merged."""
+def pr_state(repo: Repo, url: str) -> str:
+    """GitHub's state for the pull request at `url`: OPEN, CLOSED or MERGED."""
     r = _gh(repo, "pr", "view", url, "--json", "state,mergedAt,baseRefName")
     if r.returncode != 0:
         raise PrFailed(f"gh pr view failed: {r.stderr.strip()[:300]}")
     try:
-        return json.loads(r.stdout)["state"] == "MERGED"
+        return json.loads(r.stdout)["state"]
     except (ValueError, KeyError, TypeError):
         raise PrFailed("gh pr view printed something other than its JSON") from None
 

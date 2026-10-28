@@ -410,8 +410,9 @@ CLI, titled like the commit and carrying the rationale, evidence and replay
 summary. A rerun finds the branch's open pull request instead of opening
 another. The link comes back in the job status and is recorded on the
 proposal (`proposals.pr_url`); the state stays `applied`. Merge detection
-asks gh whether a published proposal's pull request is merged, whatever
-branch it was based on (no answer from gh: nothing moves that pass). A failure reaches the card as an error class
+asks gh about a published proposal's pull request, whatever branch it was
+based on, and ignores the local branch: merged, closed unmerged
+(`abandoned`), or still open (no answer from gh: nothing moves that pass). A failure reaches the card as an error class
 only (`NoRemote`, `NoGhAuth`, `PushFailed`, `PrFailed`, `NotApplied`); the
 message, which may name paths, stays in the laptop's log. `home` targets
 have no remote, so the dashboard shows no button for them and the server
@@ -601,7 +602,7 @@ stateDiagram-v2
     approved --> applied: laptop commits the branch
     approved --> failed: file changed, path refused, git error
     applied --> merged: branch reached the default branch
-    applied --> abandoned: branch deleted unmerged
+    applied --> abandoned: branch deleted (or its PR closed) unmerged
     merged --> measuring: N weeks after merge
     measuring --> kept: helped or no change
     measuring --> revert_proposed: worse
