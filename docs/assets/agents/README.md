@@ -1,6 +1,6 @@
 # Coding-agent logos
 
-Marks shown in the "Works with" row of the top-level README. All six come from
+Marks shown in the agent logo row of the top-level README. All six come from
 [Simple Icons](https://simpleicons.org) (v16.36.0, CC0 1.0), reduced to a single
 `<path>` and filled with the brand colour where the brand mark is not black
 (Claude, Gemini) or a neutral grey (`#8B949E`) that stays visible on both GitHub

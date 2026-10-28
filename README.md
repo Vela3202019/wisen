@@ -12,7 +12,6 @@ and instruction files that keep improving as your agents work.
 
 [Quickstart](#quickstart) · [How it works](#how-it-works) · [Configuration](#configuration) · [Privacy](#what-leaves-your-machine) · [Self-hosting](#your-own-server-optional) · [Contributing](#contributing)
 
-Works with
 <a href="https://claude.com/claude-code" title="Claude Code"><img src="docs/assets/agents/claude-code.svg" width="28" height="28" alt="Claude Code"></a>
 <a href="https://openai.com/codex/" title="Codex"><img src="docs/assets/agents/codex.svg" width="28" height="28" alt="Codex"></a>
 <a href="https://cursor.com" title="Cursor"><img src="docs/assets/agents/cursor.svg" width="28" height="28" alt="Cursor"></a>
