@@ -67,6 +67,7 @@ class _MaskToken(logging.Filter):
 
 class TelegramApi:
     def __init__(self, token: str, http: httpx.AsyncClient | None = None):
+        self._token = token
         self._base = f"{API}/bot{token}"
         self._http = http or httpx.AsyncClient(timeout=httpx.Timeout(15.0, read=POLL_TIMEOUT + 15))
         logging.getLogger("httpx").addFilter(_MaskToken(token))
@@ -87,6 +88,9 @@ class TelegramApi:
         if buttons:
             params["reply_markup"] = {"inline_keyboard": buttons}
         await self.call("sendMessage", **params)
+
+    def redact(self, text: str) -> str:
+        return text.replace(self._token, "<secret>")
 
 
 def proposal_message(proposal_id: str, target: str, rationale: str, public_url: str) -> tuple[str, list]:
@@ -128,8 +132,9 @@ class TelegramBot:
                 offset = update["update_id"] + 1
                 try:
                     await self.handle(update)
-                except TelegramError as e:
-                    print(f"[telegram] update {update['update_id']}: {e}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[telegram] update {update['update_id']}: {type(e).__name__}: {self.api.redact(str(e))}",
+                          file=sys.stderr)
 
     async def handle(self, update: dict) -> None:
         if "callback_query" in update:

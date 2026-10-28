@@ -474,7 +474,7 @@ class Mailbox:
             if row and packet.packet_type == "proposal":
                 raise Conflict(f"proposal {key} was already sent with different content; a proposal never changes")
             if row and packet.packet_type == "answer":
-                raise Conflict(f"job {key} was already answered; an answer is sent once")
+                return False
             if packet.packet_type == "answer" and not conn.execute(
                 "SELECT 1 FROM jobs WHERE user_id = ? AND id = ? AND runner = 'device' AND kind IN ('ask', 'search')",
                 (user_id, key),
