@@ -84,14 +84,6 @@ class Repo:
                or self.run("config", "core.sshCommand", check=False).stdout.strip() or "ssh")
         return {"GIT_SSH_COMMAND": f"{ssh} -o BatchMode=yes"}
 
-    def fetch(self, remote: str) -> bool:
-        """Fetch `remote` (no pull, no checkout), never prompting and giving up
-        after 30 seconds. False if it failed or timed out."""
-        try:
-            return self.ok("fetch", "--quiet", remote, timeout=30, env=self.no_prompt())
-        except subprocess.TimeoutExpired:
-            return False
-
     def default_refs(self) -> list[str]:
         """Where the default branch can be seen: the remote's copy and the local one."""
         name, remote = self.default_branch(), self.remote()

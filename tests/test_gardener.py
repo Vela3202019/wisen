@@ -281,9 +281,15 @@ elif args[:2] == ["pr", "create"]:
         sys.exit(1)
     url = f"https://github.com/example/demo/pull/{{len(prs) + 1}}"
     base = opt("--base") if "--base" in args else os.environ.get("GH_DEFAULT_BRANCH", "main")
-    prs.append({{"head": opt("--head"), "base": base, "title": opt("--title"), "url": url}})
+    prs.append({{"head": opt("--head"), "base": base, "title": opt("--title"), "url": url, "state": "OPEN"}})
     json.dump(prs, open(prs_path, "w"))
     print(url)
+elif args[:2] == ["pr", "view"]:
+    if os.environ.get("GH_VIEW_FAIL"):
+        print("could not resolve to a PullRequest", file=sys.stderr)
+        sys.exit(1)
+    (pr,) = [p for p in prs if p["url"] == args[2]]
+    print(json.dumps({{"state": pr["state"], "mergedAt": None, "baseRefName": pr["base"]}}))
 else:
     sys.exit(2)
 '''
@@ -585,7 +591,7 @@ async def check_publisher() -> None:
     hook.unlink()
     publisher.TIMEOUT = 60
     # The owner's own ssh command (here the repo's core.sshCommand) is kept,
-    # in batch mode, for the push and the fetch.
+    # in batch mode, for the push.
     owner_ssh = os.environ.pop("GIT_SSH_COMMAND", None)
     fake_ssh = _TMP / "publish" / "bin" / "ssh-work"
     fake_ssh.write_text(f'#!/bin/sh\necho "$@" >> {_TMP / "publish" / "ssh.log"}\nexit 1\n')
@@ -593,10 +599,9 @@ async def check_publisher() -> None:
     git(demo, "config", "core.sshCommand", str(fake_ssh))
     git(demo, "remote", "set-url", "origin", "ssh://git@example.invalid/demo.git")
     refused(publisher.PushFailed, p.id)
-    assert not Repo(demo).fetch("origin")
     calls = (_TMP / "publish" / "ssh.log").read_text().splitlines()
-    assert all(c.startswith("-o BatchMode=yes ") for c in calls), calls
-    assert any("git-receive-pack" in c for c in calls) and any("git-upload-pack" in c for c in calls), calls
+    assert calls and all(c.startswith("-o BatchMode=yes ") for c in calls), calls
+    assert any("git-receive-pack" in c for c in calls), calls
     git(demo, "remote", "set-url", "origin", str(origin))
     git(demo, "config", "--unset", "core.sshCommand")
     if owner_ssh is not None:
@@ -632,22 +637,25 @@ async def check_publisher() -> None:
     git(demo, "update-ref", f"refs/heads/wisen/gardener/{new_file.id}", "main")
     refused(publisher.NotApplied, new_file.id)
     assert git(origin, "for-each-ref", "--format=%(refname)") == f"refs/heads/{branch}"
-    # No remote, or a fetch that fails: the pass goes on with local refs.
-    git(demo, "remote", "remove", "origin")
-    assert applier.detect_merges(store, proposals) == []
-    git(demo, "remote", "add", "origin", str(_TMP / "publish" / "missing.git"))
+    # An unpublished branch is still watched through local refs.
     git(demo, "branch", "-D", f"wisen/gardener/{new_file.id}")
     assert applier.detect_merges(store, proposals) == [(new_file.id, "abandoned")]
     assert (await proposals.get(p.id)).state == "applied"
-    git(demo, "remote", "set-url", "origin", str(origin))
-    # The pull request merges on GitHub: only the remote's main has the branch.
-    local_main = git(demo, "rev-parse", "main")
-    git(origin, "update-ref", "refs/heads/main", git(demo, "rev-parse", branch))
-    assert (p.id, "merged") in applier.detect_merges(store, proposals)
+    # The pull request merges on GitHub into `develop`, its base: no local
+    # ref shows it, gh does. While gh cannot answer, nothing moves.
+    prs_path = _TMP / "publish" / "prs.json"
+    prs = json.loads(prs_path.read_text())
+    prs[0]["state"] = "MERGED"
+    prs_path.write_text(json.dumps(prs))
+    os.environ["GH_VIEW_FAIL"] = "1"
+    assert applier.detect_merges(store, proposals) == []
+    del os.environ["GH_VIEW_FAIL"]
+    assert (await proposals.get(p.id)).state == "applied"
+    assert applier.detect_merges(store, proposals) == [(p.id, "merged")]
     assert (await proposals.get(p.id)).state == "merged"
-    assert git(demo, "rev-parse", "main") == local_main   # fetched, not pulled
+    assert gh_calls(log, "pr", "view")[-1]["args"][2] == url
     print("✓ gardener: Push & create PR pushes only the applied branch, opens one pull request, and reuses it;"
-          " its merge on GitHub is seen after a fetch")
+          " gh says when it merges, whatever its base")
 
 
 # ── the verification loop's numbers ───────────────────────────────────────────
@@ -946,8 +954,11 @@ async def check_with_server() -> None:
         assert card["state"] == "applied" and card["publish"]["state"] == "succeeded", card
         assert card["pr_url"] == "https://github.com/example/demo/pull/1", card
         assert git(origin, "for-each-ref", "--format=%(refname)") == f"refs/heads/wisen/gardener/{demo}"
-        # The owner merges; the laptop sees it; the server sets the measure timer.
+        # The owner merges the pull request; the laptop hears it from gh; the
+        # server sets the measure timer.
         git(DEV / "demo", "merge", "-q", "--ff-only", f"wisen/gardener/{demo}")
+        prs_path = _TMP / "paired" / "prs.json"
+        prs_path.write_text(json.dumps([{**pr, "state": "MERGED"} for pr in json.loads(prs_path.read_text())]))
         measure_transcripts()
         await worker.run(creds, store, http=http, once=True)
         assert (await mailbox.proposals("vela").get(demo)).state == "merged"

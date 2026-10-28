@@ -19,8 +19,9 @@ work tree of yours is touched.
 Merge detection (`detect_merges`) watches applied branches: in the default
 branch (merged, also by squash: the file there matches the branch), or
 deleted unmerged (abandoned). A merge starts the 2-week measure timer. A
-published proposal's pull request is merged on GitHub, so its remote is
-fetched first (a fetch only: nothing is pulled, checked out or pushed).
+published proposal's pull request is merged on GitHub, into whatever branch
+it was based on, so gh is asked about it instead; if gh cannot answer, the
+pass reports nothing for it.
 """
 import json
 import sqlite3
@@ -28,6 +29,7 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from wisen.gardener import publisher
 from wisen.gardener.git import GitError, Repo, diff_paths
 from wisen.gardener.targets import Refused, Target, resolve
 from wisen.jobs import insert_job, ts
@@ -139,9 +141,14 @@ def git_row(store: SqliteStore, proposal_id: str) -> sqlite3.Row | None:
                             (store.user_id, proposal_id)).fetchone()
 
 
-def _merged(repo: Repo, row: sqlite3.Row) -> bool | None:
+def _merged(repo: Repo, row: sqlite3.Row, pr_url: str | None) -> bool | None:
     """True if merged; False if the branch is gone unmerged; None if still open."""
-    refs = ["refs/heads/main"] if row["git_dir"] else repo.default_refs()
+    if pr_url:
+        if publisher.pr_merged(repo, pr_url):
+            return True
+        refs = []
+    else:
+        refs = ["refs/heads/main"] if row["git_dir"] else repo.default_refs()
     for ref in refs:
         if repo.ok("merge-base", "--is-ancestor", row["commit_sha"], ref):
             return True
@@ -158,20 +165,14 @@ def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, s
     with closing(store._connect()) as conn:
         applied = conn.execute(
             "SELECT id, pr_url FROM proposals WHERE user_id = ? AND state = 'applied'", (store.user_id,)).fetchall()
-    fetched = set()
     for proposal_id, pr_url in applied:
         row = git_row(store, proposal_id)
         if row is None:
             continue
         repo = Repo(Path(row["work_tree"]), Path(row["git_dir"]) if row["git_dir"] else None)
         try:
-            if pr_url and repo not in fetched:
-                fetched.add(repo)
-                remote = repo.remote()
-                if remote and not repo.fetch(remote):
-                    print(f"[gardener] cannot fetch {remote} in {repo.work_tree}; checking local refs")
-            merged = _merged(repo, row)
-        except GitError as e:
+            merged = _merged(repo, row, pr_url)
+        except (GitError, publisher.PublishError) as e:
             print(f"[gardener] cannot check {row['branch']}: {e}")
             continue
         if merged is None:
