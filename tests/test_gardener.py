@@ -452,7 +452,8 @@ async def check_worse_drafts_revert(store, engine, clock) -> None:
 
 def check_problems_solved() -> None:
     repo = make_repo(DEV / "shop")
-    start = T0 - timedelta(days=2)
+    # Midnight, so the hour offsets below stay on `start`'s date whatever the wall-clock time.
+    start = (T0 - timedelta(days=2)).replace(hour=0, minute=0, second=0)
     transcript(repo, "feat-1", start, "feat-x", ["add the cart", "no, keep it simple", "ok"], 9_000)
     transcript(repo, "feat-2", start + timedelta(hours=3), "feat-x", ["now tests"], 3_000)
     transcript(repo, "main-1", start + timedelta(hours=6), "main", ["bump version"], 2_000)

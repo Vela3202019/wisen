@@ -17,6 +17,7 @@ python3 -m tests.test_egress         # cloud export leaks nothing off the allow-
 python3 -m tests.test_store          # SQLite store on a temp file
 python3 -m tests.test_jobs           # job engine + proposal state machine
 python3 -m tests.test_cloud          # server stage A, in-process, fake push + model
+python3 -m tests.test_gardener       # Gardener loop on temp repos with a fake model
 ```
 
 CI runs exactly `ruff check .` plus those tests, so if they pass locally
@@ -28,6 +29,7 @@ use wisen:
 ```bash
 python3 -m tests.test_ingest         # your real session history (nothing written)
 python3 -m tests.test_sources        # per-connector, real local data
+python3 -m tests.test_search         # chat search tools over your real history
 python3 -m tests.test_synthesis      # end-to-end: calls the LLM, writes SQLite
 ```
 
