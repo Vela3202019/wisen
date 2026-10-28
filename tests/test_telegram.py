@@ -13,7 +13,8 @@ FunctionModel. Covers:
     says so
   - /search while the laptop sleeps is answered after it wakes; a plain
     question is answered from reflections only
-  - the long-poll loop confirms each update and survives a failed call
+  - the long-poll loop confirms each update and survives a failed call or
+    an update that raises
   - the bot token never reaches a log line, an error, or the database
 
 No network or model needed. Run: python3 -m tests.test_telegram
@@ -321,15 +322,21 @@ async def check_history_chat():
                 await worker.run(creds, store, http=http, once=True)
                 await server.run_jobs()
                 assert server.fake.sent()[-1]["text"].endswith("(re: how was my week?)")
-                # An answer is sent once.
+                # A re-run job's second answer is accepted; the first one stays the only message.
+                messages = len(server.fake.sent())
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url=BASE) as raw:
                     from wisen.cloud.client import CloudClient, Refused
                     from wisen.packets import answer_packet
                     async with CloudClient(creds, raw) as client:
+                        stored = await client.send_packet(answer_packet(job.id, "a second answer", user=USER,
+                                                                        device_id=creds.device_id))
+                        assert stored["stored"] is False, stored
+                        await server.run_jobs()
+                        assert len(server.fake.sent()) == messages, server.fake.sent()[messages:]
                         try:
-                            await client.send_packet(answer_packet(job.id, "a second answer", user=USER,
+                            await client.send_packet(answer_packet(uuid.uuid4().hex, "an answer", user=USER,
                                                                    device_id=creds.device_id))
-                            raise AssertionError("a second answer must be refused")
+                            raise AssertionError("an answer to no question must be refused")
                         except Refused as e:
                             assert "409" in str(e)
     assert tools_seen == [
@@ -353,13 +360,16 @@ async def check_poll_loop_and_token():
             code = (await browser.post("/api/pairing-codes", json={})).json()["code"]
         server.fake.updates = [
             server.update(message={"message_id": 1, "chat": {"id": CHAT, "type": "private"}, "text": f"/link {code}"}),
+            # A malformed update that raises: it is skipped and the loop goes on.
+            server.update(callback_query={"from": {"id": CHAT}, "data": "approve:x",
+                                          "message": {"chat": {"id": CHAT, "type": "private"}}}),
             server.update(message={"message_id": 2, "chat": {"id": CHAT, "type": "private"}, "text": "/help"}),
         ]
         task = asyncio.create_task(server.bot.run_forever())
         await asyncio.wait_for(server.fake.polled.wait(), 5)
         task.cancel()
         polls = [p for m, p in server.fake.requests if m == "getUpdates"]
-        assert [p["offset"] for p in polls] == [None, 3], polls  # each update confirmed by the next call
+        assert [p["offset"] for p in polls] == [None, 4], polls  # each update confirmed by the next call
         assert server.mailbox.telegram_user(CHAT) == USER
         assert [m["text"].split("\n")[0] for m in server.fake.sent()] == [f"Linked to {USER}.", HELP.split("\n")[0]]
         # A failed send: the error and the stored job name the method, never the token.

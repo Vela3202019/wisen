@@ -430,6 +430,8 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
     token = os.environ.get("WISEN_TELEGRAM_BOT_TOKEN")
     if not token:
         print("wisen cloud: no WISEN_TELEGRAM_BOT_TOKEN; the Telegram bot is off")
+    elif not public_url:
+        print("wisen cloud: warning: no WISEN_CLOUD_PUBLIC_URL; Telegram messages will carry no dashboard link")
     db = db or Path(os.environ.get("WISEN_CLOUD_DB", "~/.wisen/cloud/wisen.db")).expanduser()
     mailbox = Mailbox(db, sender=sender, telegram=TelegramApi(token) if token else None, public_url=public_url)
     return create_app(mailbox, vapid_public_key=public if sender else None,
