@@ -205,6 +205,12 @@ MIGRATIONS = [
         PRIMARY KEY (user_id, date)
     );
     """,
+    # 4: the pull request the laptop opened for an applied proposal's branch
+    # (wisen/gardener/publisher.py); the server records the same link from
+    # the publish job's status, so the dashboard can show it.
+    """
+    ALTER TABLE proposals ADD COLUMN pr_url TEXT;
+    """,
 ]
 
 

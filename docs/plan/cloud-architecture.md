@@ -369,7 +369,12 @@ sequenceDiagram
     L->>L: re-check: approval record exists, path is allowed,<br/>file unchanged since the diff was made
     L->>L: create branch wisen/gardener/{proposal id}, commit
     L->>S: ProposalUpdatePacket: applied, branch name
-    Note over H,L: the human merges the branch when they choose
+    S->>H: the card shows the branch's diff and "Push & create PR"
+    H->>S: POST /api/proposals/{id}/publish (202, "publishing")
+    S->>L: device job: publish (laptop polls)
+    L->>L: re-check: approval record, branch is the applied one;<br/>git push the one branch; gh pr create (or find the open PR)
+    L->>S: JobStatusPacket with the pull request's link
+    Note over H,L: the human merges the pull request (or the branch) when they choose
     L->>S: ProposalUpdatePacket: merged (detected locally)
     Note over S: measure timer set for 2 weeks after merge
     S->>L: device job: measure proposal
@@ -392,6 +397,24 @@ How pydantic-ai fits:
   flow does not protect against an untrusted client. So the server
   authenticates whoever approves, and the laptop re-checks the stored decision
   and the path allow-list before it writes anything.
+
+Publishing (steps 10 to 13) is the owner's second tap. The server cannot
+push to GitHub and holds no token for it, so the tap only queues a `publish`
+device job (request id `publish:<id>`, one per proposal; a second tap while
+it runs changes nothing, a tap after a failure runs it again). The laptop
+(`wisen/gardener/publisher.py`) re-checks from its own records that the
+approval exists and the branch still sits at the commit the applier made,
+pushes that one branch to the repo's remote with an explicit refspec (never
+the default branch, never force), and opens the pull request with the `gh`
+CLI, titled like the commit and carrying the rationale, evidence and replay
+summary. A rerun finds the branch's open pull request instead of opening
+another. The link comes back in the job status and is recorded on the
+proposal (`proposals.pr_url`); the state stays `applied`, and merge
+detection goes on as before. A failure reaches the card as an error class
+only (`NoRemote`, `NoGhAuth`, `PushFailed`, `PrFailed`, `NotApplied`); the
+message, which may name paths, stays in the laptop's log. `home` targets
+have no remote, so the dashboard shows no button for them and the server
+refuses the call: their branch stays local for the owner to merge.
 
 > 中文说明：pydantic-ai 的「延迟工具」负责「暂停」：Gardener 想改文件时，本次运行直接结束并保存对话；人可能几小时后在手机上批准，然后用保存的对话 + 审批结果开一个新运行接着走。但「谁有权批准」和「改哪些路径」不能交给模型或这个协议，必须由服务器鉴权、由笔记本上的 applier 再检查一次。
 
@@ -665,7 +688,7 @@ Both use WAL mode. Schema changes are numbered SQL migrations, tracked in a
 | `conversations` | Mongo `chat_sessions` | The pydantic-ai `Conversation` as JSON, so a resumed chat keeps its tool calls and results. |
 | `voice_sessions` | Mongo `voice_sessions` | Same fields as today. |
 | `jobs`, `job_steps` | `_jobs` dict | The job engine. |
-| `proposals`, `proposal_events` | — | The proposal state machine and its audit log. |
+| `proposals`, `proposal_events` | — | The proposal state machine and its audit log. `proposals.pr_url` is the pull request opened for an applied branch (the laptop records it when it opens it; the server, from the publish job's status). |
 | `egress_ledger` | — | Every packet sent. |
 | `gardener_runs` | — | A paused Gardener run: its `Conversation` (with the pending calls), the day it ran for, and its final answer once resumed. |
 | `proposal_git` | — | Where an applied proposal lives: repo, branch, base and branch commits, the resulting file blob, when it merged. |

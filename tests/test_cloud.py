@@ -10,6 +10,9 @@ Covers the step-4 checks that do not need the box:
   - proposals decided before pairing upload with their full history once paired
   - a day's reflection syncs laptop -> server and triggers one push
   - approvals: a proposal syncs up, the first decision wins, the laptop learns it
+  - publishing: "Push & create PR" queues one device job per applied branch,
+    refuses home targets and unapplied proposals, records the laptop's link
+    on the proposal, and shows a failure by class until the next tap
   - a server restart mid-lease recovers the device job; a stale lease is fenced
   - the daily schedule is a stored timer that asks a device to synthesize
   - backup, then restore, serves the same data
@@ -28,6 +31,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, redirect_stderr
 from datetime import UTC, datetime, timedelta
@@ -355,6 +359,13 @@ async def check_approvals():
             moves = ["gardener:1", "tap-0001", f"failed:{proposal.id}"]
             assert (await local.get(proposal.id)).state == "failed"
             assert [e.request_id for e in await local.history(proposal.id)] == moves
+            # The next pass uploads the failure; the change log then shows
+            # the decision and what became of it.
+            await worker.run(creds, store, http=http, once=True)
+            (card,) = (await browser.get("/api/proposals")).json()
+            assert card["state"] == "failed" and card["decision"]["decision"] == "approved", card
+            assert card["decision"]["actor"] == f"web:{USER}" and card["decision"]["note"] is None, card
+            assert card["outcome"]["state"] == "failed" and "no project" in card["outcome"]["note"], card
             # The feed is replayed from the start after a lost cursor: still one decision.
             await worker.apply_decisions(store, (await _poll(creds, http, 0))["decisions"])
             assert [e.request_id for e in await local.history(proposal.id)] == moves
@@ -394,6 +405,81 @@ async def check_batch_after_briefing():
             batch = [m for _, m in server.sender.sent if m["title"] == "Proposals waiting"]
             assert batch == [{"title": "Proposals waiting", "body": "from 2026-10-17", "url": "/#day-2026-10-17"}], batch
     print("✓ cloud: a batch that arrives after its reflection reaches the inbox under one push")
+
+
+# ── publishing: push & create PR ──────────────────────────────────────────────
+
+PR = "https://github.com/example/wisen/pull/14"
+
+
+async def check_publish():
+    """The tap queues one device job for the laptop, however often it is
+    tapped; the laptop's job status brings the pull request's link back onto
+    the proposal (its state stays applied); a failure shows by class, and the
+    next tap runs the job again. Home targets and proposals without an
+    applied branch are refused."""
+    server = _server("publish")
+    store = get_store()
+    local = Proposals(store)
+
+    async def make(target: str, applied: bool = True):
+        p = await local.create(target, {"diff": DIFF, "rationale": "r", "evidence": ["q"]},
+                               request_id=f"publish-test:{target}", actor="gardener")
+        if applied:
+            await local.decide(p.id, "approved", request_id=f"cli:{uuid.uuid4().hex}", actor="cli")
+            await local.transition(p.id, "approved", "applied", request_id=f"applied:{p.id}", actor="applier")
+        return p
+
+    repo, other = await make("shop:CLAUDE.md"), await make("shop:AGENTS.md")
+    home, undecided = await make("home:.claude/CLAUDE.md"), await make("shop:docs/CLAUDE.md", applied=False)
+    url = lambda p: f"/api/proposals/{p.id}/publish"
+    async with server.http() as http:
+        assert (await http.post(url(repo), json={})).status_code == 401
+    async with server.browser() as browser:
+        creds = await server.device(browser)
+        async with server.http() as http:
+            await worker.run(creds, store, http=http, once=True)
+            inbox = lambda: browser.get("/api/proposals")
+            card = {p["id"]: p for p in (await inbox()).json()}[repo.id]
+            assert card["state"] == "applied" and card["pr_url"] is None and card["publish"] is None, card
+            assert (await browser.post(url(home), json={})).status_code == 409        # no remote: a local branch
+            assert (await browser.post(url(undecided), json={})).status_code == 409   # no branch yet
+            assert (await browser.post(f"/api/proposals/{'0' * 32}/publish", json={})).status_code == 404
+            for _ in range(2):  # a double tap
+                r = await browser.post(url(repo), json={})
+                assert r.status_code == 202 and r.json() == {"status": "publishing"}, r.text
+            queued = server.mailbox.device_jobs(USER, ("queued", "leased"))
+            assert [(j.kind, j.args) for j in queued] == [("publish", {"proposal_id": repo.id})], queued
+            card = {p["id"]: p for p in (await inbox()).json()}[repo.id]
+            assert card["publish"] == {"state": "queued", "error": None}, card
+            # The laptop takes the job; its status carries the link.
+            async with CloudClient(creds, http) as client:
+                job = (await client.poll(0, wait=0))["job"]
+                assert job["kind"] == "publish" and job["args"] == {"proposal_id": repo.id}, job
+                await client.finish(job["id"], job_status_packet({
+                    "job_id": job["id"], "kind": "publish", "state": "succeeded", "started_at": T0.isoformat(),
+                    "finished_at": T0.isoformat(), "pr_url": PR}, user=USER, device_id=creds.device_id))
+            card = {p["id"]: p for p in (await inbox()).json()}[repo.id]
+            assert card["state"] == "applied" and card["pr_url"] == PR, card
+            assert card["publish"]["state"] == "succeeded", card
+            # A tap once the link is known runs nothing again.
+            assert (await browser.post(url(repo), json={})).status_code == 202
+            assert server.mailbox.device_jobs(USER, ("queued", "leased")) == []
+            # A failure on the laptop shows by class only; the next tap retries.
+            assert (await browser.post(url(other), json={})).status_code == 202
+            async with CloudClient(creds, http) as client:
+                job = (await client.poll(0, wait=0))["job"]
+                assert job["args"] == {"proposal_id": other.id}, job
+                await client.finish(job["id"], job_status_packet({
+                    "job_id": job["id"], "kind": "publish", "state": "failed", "started_at": T0.isoformat(),
+                    "finished_at": T0.isoformat(), "error_class": "NoRemote"}, user=USER, device_id=creds.device_id))
+            card = {p["id"]: p for p in (await inbox()).json()}[other.id]
+            assert card["publish"] == {"state": "failed", "error": "DeviceJobFailed: NoRemote"}, card
+            assert card["pr_url"] is None and card["state"] == "applied", card
+            assert (await browser.post(url(other), json={})).status_code == 202
+            (retry,) = server.mailbox.device_jobs(USER, ("queued",))
+            assert retry.args == {"proposal_id": other.id} and retry.attempts == 0 and retry.error is None, retry
+    print("✓ cloud: Push & create PR queues one device job, records the laptop's link, and shows a failure by class")
 
 
 async def _poll(creds: Credentials, http: httpx.AsyncClient, cursor: int) -> dict:
@@ -806,6 +892,7 @@ async def main():
     await check_revoke()
     await check_result_sync_and_push()
     await check_approvals()
+    await check_publish()
     await check_restart_mid_lease()
     await check_schedule()
     await check_backup_restore()

@@ -13,7 +13,10 @@
                 first decision is kept), signalled to any job waiting on it,
                 and turned into Gardener jobs (apply, resume)
   4. jobs       run here, heartbeating the server's lease, then reported back
-                as a job_status packet
+                as a job_status packet: the daily synthesis, a measure, and
+                the owner's "Push & create PR" for an applied proposal
+                (wisen/gardener/publisher.py), whose status carries the
+                pull request's link
 
 It also runs the laptop's own job engine (the Gardener's jobs and timers) and
 checks applied Gardener branches for merges. Unpaired, `run_local` does only
@@ -246,7 +249,16 @@ async def _measure(client: CloudClient, store: SqliteStore, args: dict) -> None:
     await sync_up(client, store)
 
 
-HANDLERS = {"synthesize": _synthesize, "measure": _measure}
+async def _publish(client: CloudClient, store: SqliteStore, args: dict) -> dict:
+    """The owner's "Push & create PR": push the applied branch and open its
+    pull request here, where the repo and the gh login are. The link goes
+    back in the job status."""
+    from wisen.gardener.publisher import publish
+
+    return {"pr_url": await asyncio.to_thread(publish, store, args["proposal_id"])}
+
+
+HANDLERS = {"synthesize": _synthesize, "measure": _measure, "publish": _publish}
 
 
 async def _heartbeat(client: CloudClient, job_id: str) -> None:

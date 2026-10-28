@@ -14,6 +14,8 @@ The step-5 checks (docs/plan/cloud-architecture.md §12):
   - past proposals, with their content, note, merge date and verdict, are a
     tool the run reads; the same change to the same file is refused
   - a measure job fires after merge and records its result
+  - "Push & create PR" pushes only the applied branch to the repo's remote and
+    opens one pull request with gh (a fake here), reused on a rerun
 and the decisions behind them (§5.5): files outside a repo go through wisen's
 home repo; proposals expire after 7 days; a day's proposals arrive as one
 batch with the morning briefing. Plus the verification loop's numbers (§5.4)
@@ -26,6 +28,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -71,7 +74,7 @@ from wisen.cloud.mailbox import Mailbox
 from wisen.cloud.server import create_app
 from wisen.evals import runner, verification
 from wisen.evals.cases import Case, ContextTurn, save_case
-from wisen.gardener import loop
+from wisen.gardener import loop, publisher
 from wisen.gardener.agent import Deps, build_agent
 from wisen.gardener.git import Repo, one_file_diff
 from wisen.gardener.targets import Refused, allowed, editable_files, resolve
@@ -253,6 +256,57 @@ async def garden(store, engine, day: str) -> dict:
     done = await engine.run_until_done(job.id)
     assert done.state == "succeeded", done.error
     return done.result
+
+
+# The gh CLI, faked: every call is logged (args, cwd, stdin) in $GH_LOG; the
+# pull requests it "opened" live in $GH_PRS, so `pr list --head` finds them.
+FAKE_GH = f'''#!{sys.executable}
+import json, os, sys
+args = sys.argv[1:]
+body = sys.stdin.read() if "--body-file" in args else ""
+with open(os.environ["GH_LOG"], "a") as f:
+    f.write(json.dumps({{"args": args, "cwd": os.getcwd(), "stdin": body}}) + "\\n")
+prs_path = os.environ["GH_PRS"]
+prs = json.load(open(prs_path)) if os.path.exists(prs_path) else []
+opt = lambda name: args[args.index(name) + 1]
+if args[:2] == ["auth", "status"]:
+    sys.exit(int(os.environ.get("GH_AUTH_EXIT", "0")))
+elif args[:2] == ["pr", "list"]:
+    print(json.dumps([{{"url": p["url"]}} for p in prs if p["head"] == opt("--head")]))
+elif args[:2] == ["pr", "create"]:
+    if os.environ.get("GH_CREATE_FAIL"):
+        print("pull request create failed: boom", file=sys.stderr)
+        sys.exit(1)
+    url = f"https://github.com/example/demo/pull/{{len(prs) + 1}}"
+    prs.append({{"head": opt("--head"), "base": opt("--base"), "title": opt("--title"), "url": url}})
+    json.dump(prs, open(prs_path, "w"))
+    print(url)
+else:
+    sys.exit(2)
+'''
+
+
+def fake_gh(where: Path) -> Path:
+    """Put a fake `gh` first on PATH; returns its call log."""
+    (where / "bin").mkdir(parents=True, exist_ok=True)
+    script = where / "bin" / "gh"
+    script.write_text(FAKE_GH)
+    script.chmod(0o755)
+    os.environ["PATH"] = f"{where / 'bin'}{os.pathsep}{os.environ['PATH']}"
+    os.environ.update({"GH_LOG": str(where / "gh.log"), "GH_PRS": str(where / "prs.json")})
+    return where / "gh.log"
+
+
+def gh_calls(log: Path, *first: str) -> list[dict]:
+    calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    return [c for c in calls if c["args"][:len(first)] == list(first)]
+
+
+def bare_remote(repo: Path, where: Path) -> Path:
+    origin = where / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    git(repo, "remote", "add", "origin", str(origin))
+    return origin
 
 
 def by_target(proposals: list) -> dict:
@@ -459,6 +513,85 @@ async def check_worse_drafts_revert(store, engine, clock) -> None:
     (revert,) = [r for r in await proposals.list(states=("proposed",)) if r.payload.get("reverts") == p.id]
     assert "-- Run `make test`." in revert.payload["diff"] and "+50%" in revert.payload["rationale"]
     print("✓ gardener: a worse measurement moves to revert_proposed and drafts the revert as a new proposal")
+
+
+# ── push & create PR ──────────────────────────────────────────────────────────
+
+async def check_publisher() -> None:
+    """The laptop side of "Push & create PR": the applied branch, and only
+    it, reaches the repo's remote (never force), one pull request opens with
+    the rationale and evidence in its description, and a rerun finds that
+    pull request instead of opening another. Refused by class: a home target
+    or a repo without a remote, a gh that is not logged in, a push the
+    remote rejects, a branch that moved, a proposal with no branch."""
+    world("publish")
+    store, engine, clock, _ = _setup("publish")
+    proposals = Proposals(store, clock)
+    demo = DEV / "demo"
+
+    async def applied(target: str, old: str | None, new: str):
+        t = resolve(target)
+        p = await proposals.create(target, {
+            "diff": one_file_diff(t.repo, t.path, old, new), "rationale": "Agents guess the test command.",
+            "evidence": ["how do I run the tests?"], "eval_summary": "Replay: no cases yet.",
+            "base_blob": t.repo.out("hash-object", "--stdin", input=old) if old is not None else None,
+        }, request_id=f"pub:{target}", actor="test")
+        await proposals.decide(p.id, "approved", request_id=f"tap:{target}", actor="web:vela")
+        await loop.on_decided(store, engine, p.id)
+        await drain(engine)
+        assert (await proposals.get(p.id)).state == "applied", await proposals.history(p.id)
+        return p
+
+    p = await applied("demo:CLAUDE.md", CLAUDE_MD, CLAUDE_MD + "\nRun tests: make test\n")
+    home = await applied("home:.claude/CLAUDE.md", HOME_MD, HOME_MD + "- Name the test command.\n")
+    new_file = await applied("demo:AGENTS.md", None, "# Agents\n")
+    undecided = await proposals.create("demo:docs/CLAUDE.md", {"diff": "", "rationale": "r", "evidence": []},
+                                       request_id="pub:undecided", actor="test")
+    log = fake_gh(_TMP / "publish")
+
+    def refused(exc: type, proposal_id: str) -> None:
+        try:
+            publisher.publish(store, proposal_id)
+        except exc:
+            return
+        raise AssertionError(f"expected {exc.__name__} for {proposal_id}")
+
+    refused(publisher.NoRemote, p.id)       # no remote yet
+    refused(publisher.NoRemote, home.id)    # never: a personal file's branch stays local
+    refused(publisher.NotApplied, undecided.id)
+    origin = bare_remote(demo, _TMP / "publish")
+    os.environ["GH_AUTH_EXIT"] = "1"
+    refused(publisher.NoGhAuth, p.id)
+    del os.environ["GH_AUTH_EXIT"]
+    os.environ["GH_CREATE_FAIL"] = "1"
+    refused(publisher.PrFailed, p.id)
+    del os.environ["GH_CREATE_FAIL"]
+    assert (await proposals.get(p.id)).pr_url is None   # the failed create recorded nothing
+    branch = f"wisen/gardener/{p.id}"
+    url = publisher.publish(store, p.id)
+    assert url == "https://github.com/example/demo/pull/1", url
+    assert (await proposals.get(p.id)).pr_url == url and (await proposals.get(p.id)).state == "applied"
+    # Only the branch reached the remote, at the applier's commit.
+    assert git(origin, "for-each-ref", "--format=%(refname)") == f"refs/heads/{branch}"
+    assert git(origin, "rev-parse", branch) == git(demo, "rev-parse", branch)
+    create = gh_calls(log, "pr", "create")[-1]
+    a = create["args"]
+    assert a[a.index("--head") + 1] == branch and a[a.index("--base") + 1] == "main", a
+    assert a[a.index("--title") + 1] == "wisen gardener: update demo:CLAUDE.md", a
+    assert "Agents guess the test command." in create["stdin"] and '"how do I run the tests?"' in create["stdin"]
+    assert "Replay: no cases yet." in create["stdin"] and p.id in create["stdin"], create["stdin"]
+    assert Path(create["cwd"]).resolve() == demo.resolve()
+    # A rerun (a second tap, a retried job) finds the open pull request.
+    assert publisher.publish(store, p.id) == url
+    assert len(gh_calls(log, "pr", "create")) == 2   # the one that failed, and the one that opened it
+    # A push the remote refuses, and a branch that moved since it was applied.
+    git(demo, "remote", "set-url", "origin", str(_TMP / "publish" / "missing.git"))
+    refused(publisher.PushFailed, new_file.id)
+    git(demo, "remote", "set-url", "origin", str(origin))
+    git(demo, "update-ref", f"refs/heads/wisen/gardener/{new_file.id}", "main")
+    refused(publisher.NotApplied, new_file.id)
+    assert git(origin, "for-each-ref", "--format=%(refname)") == f"refs/heads/{branch}"
+    print("✓ gardener: Push & create PR pushes only the applied branch, opens one pull request, and reuses it")
 
 
 # ── the verification loop's numbers ───────────────────────────────────────────
@@ -747,6 +880,16 @@ async def check_with_server() -> None:
         await worker.run(creds, store, http=http, once=True)
         assert gardener_refs(DEV / "demo")[-1:] == [f"refs/heads/wisen/gardener/{demo}"]
         assert (await mailbox.proposals("vela").get(demo)).state == "applied"
+        # The owner taps Push & create PR: the laptop pushes the branch, opens
+        # the pull request (gh, faked) and the link lands on the card.
+        origin = bare_remote(DEV / "demo", _TMP / "paired")
+        fake_gh(_TMP / "paired")
+        assert (await http.post(f"/api/proposals/{demo}/publish", json={})).status_code == 202
+        await worker.run(creds, store, http=http, once=True)
+        (card,) = [p for p in (await http.get("/api/proposals")).json() if p["id"] == demo]
+        assert card["state"] == "applied" and card["publish"]["state"] == "succeeded", card
+        assert card["pr_url"] == "https://github.com/example/demo/pull/1", card
+        assert git(origin, "for-each-ref", "--format=%(refname)") == f"refs/heads/wisen/gardener/{demo}"
         # The owner merges; the laptop sees it; the server sets the measure timer.
         git(DEV / "demo", "merge", "-q", "--ff-only", f"wisen/gardener/{demo}")
         measure_transcripts()
@@ -790,6 +933,7 @@ async def main():
     await check_measure_after_merge(store, engine, clock)
     await check_home_repo(store, engine, clock, script)   # merged two weeks later, measured next
     await check_worse_drafts_revert(store, engine, clock)
+    await check_publisher()
     world("metrics")
     check_problems_solved()
     check_symlink_targets()

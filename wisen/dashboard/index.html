@@ -111,7 +111,11 @@
   .panel, .proposal { background:var(--card); border:1px solid var(--border); border-radius:12px;
                       padding:12px 16px; margin-bottom:16px; }
   .panel h2, #approvals h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em;
-                             color:var(--dim); margin:0 0 8px; }
+                             color:var(--dim); margin:0 0 8px; display:flex; justify-content:space-between;
+                             align-items:center; gap:8px; }
+  #approvals h2 button { background:none; border:0; color:var(--dim); font-size:14px; cursor:pointer;
+                         padding:0; text-transform:none; letter-spacing:0; }
+  #approvals .asof { color:var(--dim); font-size:11px; margin:-4px 0 10px; }
   .panel .row { display:flex; justify-content:space-between; align-items:center; gap:8px;
                 font-size:14px; margin:6px 0; }
   .panel .meta, .proposal .meta { color:var(--dim); font-size:12px; }
@@ -128,7 +132,22 @@
   .proposal .approve { background:#238636 !important; border-color:#238636 !important; color:#fff !important; }
   .proposal .reject { color:var(--misaligned) !important; }
   .proposal .state { font-size:12px; padding:2px 10px; border-radius:10px; background:var(--border); }
+  .proposal .state.applied, .proposal .state.approved { background:#1f4d2a; color:var(--aligned); }
+  .proposal code { font-size:12px; }
+  .proposal a { color:var(--aligned); word-break:break-all; }
+  .proposal .error { color:var(--misaligned); font-size:13px; margin:6px 0; }
+  .proposal .publish { background:#1f6feb !important; border-color:#1f6feb !important; color:#fff !important; }
   .card.focus { border-color:var(--mild); }
+  .tabs { display:flex; gap:4px; margin:-6px 0 14px; border-bottom:1px solid var(--border); }
+  .tabs button { background:none; border:0; border-bottom:2px solid transparent; margin-bottom:-1px;
+                 color:var(--dim); font-size:14px; padding:6px 12px; cursor:pointer; }
+  .tabs button.active { color:var(--text); border-bottom-color:var(--aligned); }
+  #tab-log h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim);
+                margin:0 0 8px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  #tab-log h2 button { background:none; border:0; color:var(--dim); font-size:14px; cursor:pointer;
+                       padding:0; text-transform:none; letter-spacing:0; }
+  .proposal .state.rejected, .proposal .state.failed, .proposal .state.revert_proposed { color:var(--misaligned); }
+  .proposal .state.merged, .proposal .state.kept, .proposal .state.published { background:#1f4d2a; color:var(--aligned); }
 </style>
 </head>
 <body>
@@ -141,19 +160,26 @@
       <button onclick="logout()">Log out</button>
     </div>
   </div>
-  <div class="panel" id="devices" style="display:none"></div>
-  <div id="approvals"></div>
-  <div class="usage" id="usage" style="display:none"></div>
-  <div class="chart" id="chart" style="display:none"></div>
-  <div class="chart" id="hill" style="display:none"></div>
-  <div class="hero" id="hero" style="display:none"></div>
-  <div class="loop" id="loop" style="display:none"></div>
-  <div class="trigger">
-    <input type="date" id="date">
-    <button onclick="trigger()">Reflect</button>
+  <div class="tabs">
+    <button class="active" data-tab="main" onclick="showTab('main')">Today</button>
+    <button data-tab="log" onclick="showTab('log')">Change log</button>
   </div>
-  <div class="queued" id="queued"></div>
-  <div id="logs"><p class="empty">Loading…</p></div>
+  <div class="panel" id="devices" style="display:none"></div>
+  <div id="tab-main">
+    <div id="approvals"></div>
+    <div class="usage" id="usage" style="display:none"></div>
+    <div class="chart" id="chart" style="display:none"></div>
+    <div class="chart" id="hill" style="display:none"></div>
+    <div class="hero" id="hero" style="display:none"></div>
+    <div class="loop" id="loop" style="display:none"></div>
+    <div class="trigger">
+      <input type="date" id="date">
+      <button onclick="trigger()">Reflect</button>
+    </div>
+    <div class="queued" id="queued"></div>
+    <div id="logs"><p class="empty">Loading…</p></div>
+  </div>
+  <div id="tab-log" style="display:none"><p class="empty">Loading…</p></div>
 </div>
 <script>
 const COLORS = { "aligned":"var(--aligned)", "mild-friction":"var(--mild)",
@@ -391,6 +417,7 @@ async function load() {
     api("/api/timeline").catch(() => null),
   ]);
   renderApprovals(proposals);
+  renderChangeLog(proposals);
   renderHill(timeline);
   renderUsage(usage);
   renderHero(logs);
@@ -414,21 +441,81 @@ function diffHtml(diff) {
   }).join("\n");
 }
 
+// Why a publish job failed, by the error class the laptop reports (it sends
+// no message: a git error could name a path).
+const PUBLISH_ERRORS = {
+  NotApplied: "the branch on the laptop is not the one the applier made",
+  NoRemote: "the repo has no git remote",
+  NoGhAuth: "the gh CLI is missing or not logged in on the laptop",
+  PushFailed: "the push was refused",
+  PrFailed: "gh could not open the pull request",
+  LeaseExpired: "the laptop went quiet before it finished",
+  UnknownJobKind: "the laptop runs an older wisen without publishing",
+};
+
+function publishError(error) {
+  const cls = String(error || "").replace(/^DeviceJobFailed: /, "").split(":")[0];
+  return PUBLISH_ERRORS[cls] || cls || "unknown error";
+}
+
+// Only a proposal still open and not past its deadline waits for a decision;
+// everything else (rejected, expired, applied, ...) is shown as what it is.
+function isWaiting(p) {
+  return p.state === "proposed" && (!p.expires_at || new Date(p.expires_at) > new Date());
+}
+
+function inFlight(p) {
+  return p.state === "approved" || (p.state === "applied" && ["queued", "leased", "waiting"].includes(p.publish?.state));
+}
+
+// The main page holds what still needs the owner: a decision, or Push &
+// create PR for an applied branch. Everything resolved (rejected, expired,
+// failed, published, merged, a personal file's local branch, ...) is the
+// change log's.
+function onMainPage(p) {
+  return isWaiting(p) || p.state === "approved"
+      || (p.state === "applied" && !p.pr_url && !p.target.startsWith("home:"));
+}
+
+function showTab(name) {
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.getElementById("tab-main").style.display = name === "main" ? "" : "none";
+  document.getElementById("tab-log").style.display = name === "log" ? "" : "none";
+}
+
+const REFRESH = `<button onclick="load()" title="Refresh">↻ refresh</button>`;
+const updatedAt = () => `updated ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit", second:"2-digit"})}`;
+
+// The approved card: once the laptop has made the branch, the diff it holds
+// and "Push & create PR"; then the pull request's link. A personal file
+// (home:…) has no remote, so its branch stays local for the owner to merge.
+function publishControls(p) {
+  const branch = `wisen/gardener/${p.id}`;
+  if (p.pr_url) return `<p class="meta">Pull request <a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.pr_url)}</a> · merge it when you choose</p>`;
+  if (p.target.startsWith("home:")) return `<p class="meta">Branch <code>${esc(branch)}</code> on the laptop. A personal file has no remote: merge it there when you choose.</p>`;
+  const job = p.publish || {};
+  if (["queued", "leased", "waiting"].includes(job.state)) return `<p class="meta">Publishing… the laptop pushes <code>${esc(branch)}</code> and opens the pull request.</p>`;
+  const failed = job.state === "failed" ? `<p class="error">Publishing failed: ${esc(publishError(job.error))}.</p>` : "";
+  return `${failed}<div class="buttons">
+      <button class="publish" onclick="publish(this)">${job.state === "failed" ? "Retry: push & create PR" : "Push & create PR"}</button>
+    </div>
+    <p class="meta">Branch <code>${esc(branch)}</code> on the laptop.</p>`;
+}
+
+let pollTimer = null;
+
 function renderApprovals(proposals) {
   const el = document.getElementById("approvals");
-  const waiting = proposals.filter(p => p.state === "proposed");
-  const recent = proposals.filter(p => p.state !== "proposed").slice(0, 5);
-  if (!waiting.length && !recent.length) { el.innerHTML = ""; return; }
-  const card = (p, open) => {
+  const waiting = proposals.filter(isWaiting);
+  const approved = proposals.filter(p => !isWaiting(p) && onMainPage(p));
+  const card = p => {
     const evidence = (p.payload.evidence || []).map(q => `<li><i>“${esc(q)}”</i></li>`).join("");
-    const expires = p.expires_at ? ` · expires ${new Date(p.expires_at).toLocaleString()}` : "";
+    const expired = p.state === "proposed" && !isWaiting(p);
+    const expires = p.expires_at && p.state === "proposed"
+      ? ` · ${expired ? "expired" : "expires"} ${new Date(p.expires_at).toLocaleString()}` : "";
     const batch = p.payload.batch ? ` · from ${esc(p.payload.batch)}'s reflection` : "";
-    return `<div class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}">
-      <div class="row" style="display:flex;justify-content:space-between;gap:8px">
-        <span class="target">${esc(p.target)}</span><span class="state">${esc(p.state)}</span>
-      </div>
-      <div class="meta">${new Date(p.created_at).toLocaleString()}${batch}${expires}</div>
-      ${open ? `<p>${esc(p.payload.rationale)}</p>
+    let body = "";
+    if (isWaiting(p)) body = `<p>${esc(p.payload.rationale)}</p>
         ${evidence ? `<ul>${evidence}</ul>` : ""}
         ${p.payload.eval_summary ? `<p class="meta">${esc(p.payload.eval_summary)}</p>` : ""}
         <pre>${diffHtml(p.payload.diff)}</pre>
@@ -436,11 +523,67 @@ function renderApprovals(proposals) {
         <div class="buttons">
           <button class="approve" onclick="decide(this, 'approved')">Approve</button>
           <button class="reject" onclick="decide(this, 'rejected')">Reject</button>
-        </div>` : ""}
+        </div>`;
+    else if (p.state === "approved") body = `<p class="meta">Approved. The laptop makes the branch next time it checks in; the diff shows here once it has.</p>`;
+    else if (p.state === "applied") body = `<pre>${diffHtml(p.payload.diff)}</pre>${publishControls(p)}`;
+    return `<div class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}">
+      <div class="row" style="display:flex;justify-content:space-between;gap:8px">
+        <span class="target">${esc(p.target)}</span><span class="state ${esc(p.state)}">${expired ? "expired" : esc(p.state)}</span>
+      </div>
+      <div class="meta">${new Date(p.created_at).toLocaleString()}${batch}${expires}</div>
+      ${body}
     </div>`;
   };
-  el.innerHTML = (waiting.length ? `<h2>Waiting for you · ${waiting.length}</h2>` + waiting.map(p => card(p, true)).join("") : "")
-    + (recent.length ? `<h2>Recently decided</h2>` + recent.map(p => card(p, false)).join("") : "");
+  el.innerHTML = `<h2>${waiting.length ? `Waiting for you · ${waiting.length}` : "Nothing waiting for you"} ${REFRESH}</h2>
+    <div class="asof">${updatedAt()}</div>`
+    + waiting.map(card).join("")
+    + (approved.length ? `<h2>Approved · ${approved.length}</h2>` + approved.map(card).join("") : "");
+  // While the laptop has work to do for a card, check back on its own.
+  clearTimeout(pollTimer);
+  if (proposals.some(inFlight)) pollTimer = setTimeout(load, 10000);
+}
+
+// The change log: every resolved proposal, newest first, with its decision
+// and note, what became of it, and its branch or pull request.
+function renderChangeLog(proposals) {
+  const el = document.getElementById("tab-log");
+  const done = proposals.filter(p => !onMainPage(p));
+  const entry = p => {
+    const d = p.decision, o = p.outcome;
+    const state = p.pr_url && p.state === "applied" ? "published" : p.state === "proposed" ? "expired" : p.state;
+    const when = new Date((o && o.at) || (d && d.at) || p.updated_at).toLocaleString();
+    const batch = p.payload.batch ? ` · from ${esc(p.payload.batch)}'s reflection` : "";
+    const lines = [];
+    if (d) lines.push(`${esc(d.decision)} by ${esc(d.actor)} on ${new Date(d.at).toLocaleString()}${d.note ? ` · “${esc(d.note)}”` : ""}`);
+    else if (p.state === "proposed" || p.state === "expired") lines.push("no decision before it expired");
+    if (o && o.note) lines.push(`${esc(o.state)}: ${esc(o.note)}`);
+    const branch = `wisen/gardener/${p.id}`;
+    let link = "";
+    if (p.pr_url) link = `Pull request <a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.pr_url)}</a>`;
+    else if (["applied", "merged", "measuring", "kept", "revert_proposed"].includes(p.state))
+      link = `Branch <code>${esc(branch)}</code>${p.state === "applied" ? " on the laptop: merge it there when you choose" : ""}`;
+    return `<div class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}">
+      <div class="row" style="display:flex;justify-content:space-between;gap:8px">
+        <span class="target">${esc(p.target)}</span><span class="state ${esc(state)}">${esc(state)}</span>
+      </div>
+      <div class="meta">${when}${batch}</div>
+      ${lines.map(l => `<p class="meta">${l}</p>`).join("")}
+      ${link ? `<p class="meta">${link}</p>` : ""}
+    </div>`;
+  };
+  el.innerHTML = `<h2>Change log · ${done.length} ${REFRESH}</h2><div class="asof">${updatedAt()}</div>`
+    + (done.length ? done.map(entry).join("") : `<p class="empty">Nothing decided yet.</p>`);
+}
+
+async function publish(button) {
+  const box = button.closest(".proposal");
+  box.querySelectorAll("button").forEach(b => b.disabled = true);
+  try {
+    await api(`/api/proposals/${encodeURIComponent(box.dataset.id)}/publish`, {});
+  } catch (e) {
+    alert("Publish failed: " + e.message);
+  }
+  load();
 }
 
 // Ids and names reach handlers through data-* attributes, never inside inline
@@ -533,11 +676,18 @@ async function enablePush() {
 function focusHash() {
   const target = location.hash && document.getElementById(location.hash.slice(1));
   if (!target) return;
+  showTab(target.closest("#tab-log") ? "log" : "main");
   target.classList.add("focus");
   if (target.classList.contains("card")) target.classList.add("open");
   target.scrollIntoView({ block: "start" });
 }
-window.addEventListener("hashchange", focusHash);
+// The installed app keeps its page between uses, so its data goes stale:
+// reload it when a notification brings the app to a card (a hash change,
+// or a page restored from the back-forward cache) and whenever the app
+// comes back to the foreground.
+window.addEventListener("hashchange", () => load().catch(() => focusHash()));
+window.addEventListener("pageshow", e => { if (e.persisted) load(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") load(); });
 
 const MOOD_EMOJI = { "deep-focus":"🎯", "exploratory":"🧭", "frustrated":"😤", "iterating":"🔁",
                      "uncertain":"🤔", "confident":"😎", "stuck":"🧱", "flowing":"🌊" };

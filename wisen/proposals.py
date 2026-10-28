@@ -62,6 +62,7 @@ class Proposal:
     expires_at: str | None
     created_at: str
     updated_at: str
+    pr_url: str | None = None  # the pull request opened for its branch, once published
 
 
 @dataclass
@@ -93,6 +94,7 @@ def _proposal(row: sqlite3.Row) -> Proposal:
     return Proposal(
         id=row["id"], target=row["target"], state=row["state"], payload=json.loads(row["payload"]),
         expires_at=row["expires_at"], created_at=row["created_at"], updated_at=row["updated_at"],
+        pr_url=row["pr_url"],
     )
 
 
@@ -340,6 +342,14 @@ class Proposals:
         IllegalTransition and change nothing."""
         return await asyncio.to_thread(
             self._transition, proposal_id, from_state, to_state, request_id, actor, note
+        )
+
+    def record_pr_in(self, conn: sqlite3.Connection, proposal_id: str, url: str) -> None:
+        """The pull request opened for the proposal's branch. Not a move: the
+        state stays `applied` until the branch reaches the default branch."""
+        conn.execute(
+            "UPDATE proposals SET pr_url = ?, updated_at = ? WHERE user_id = ? AND id = ?",
+            (url, ts(self.clock()), self._uid, proposal_id),
         )
 
     def _expire(self, proposal_id: str) -> bool:

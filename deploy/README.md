@@ -68,9 +68,20 @@ To upgrade: `sudo /opt/wisen/bin/pip install -U "wisen[cloud] @ git+…"` and
    `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.wisen.worker.plist`.
 
 The worker uploads each day's reflection and each open proposal, long-polls
-for work (the daily synthesis, a **Reflect** request from the dashboard) and
-for your decisions. Once the server schedules the daily run, the old launchd
-one-shot (`scripts/run_synthesis.py`) is no longer needed on that laptop.
+for work (the daily synthesis, a **Reflect** request from the dashboard, a
+**Push & create PR** tap) and for your decisions. Once the server schedules
+the daily run, the old launchd one-shot (`scripts/run_synthesis.py`) is no
+longer needed on that laptop.
+
+**Push & create PR** runs on the laptop, so it needs the `gh` CLI installed
+and logged in there (`gh auth login`), and the repo a proposal changes must
+have a git remote. The worker pushes only the proposal's branch
+(`wisen/gardener/<id>`, never with force) and opens the pull request against
+the repo's default branch; the server never holds a GitHub token. If the
+tap fails, the card says why in one line (no remote, gh not logged in, the
+push or the pull request refused) and tapping again retries. Personal files
+(`home:` targets) have no remote: their branch stays on the laptop for you
+to merge.
 
 **Revoke** a device in the dashboard: its next request gets 401 and any job
 it held goes back to the queue. The worker then exits and launchd leaves it

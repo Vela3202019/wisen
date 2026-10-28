@@ -178,6 +178,8 @@ async def _gardener(args) -> None:
             if p.state == "applied" and (row := git_row(store, p.id)):
                 where = f"git --git-dir {row['git_dir']}" if row["git_dir"] else f"git -C {row['work_tree']}"
                 print(f"    branch {row['branch']}; merge it when you choose: {where} merge {row['branch']}")
+                if p.pr_url:
+                    print(f"    pull request {p.pr_url}")
             if p.state == "proposed":
                 print(f"    {p.payload.get('rationale', '')}")
                 print(f"    {p.payload.get('eval_summary') or ''}")

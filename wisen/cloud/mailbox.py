@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from wisen.cloud import auth
 from wisen.cloud.push import Gone, PushSender
 from wisen.gardener.applier import MEASURE_AFTER
+from wisen.gardener.targets import HOME
 from wisen.jobs import Job, JobContext, JobEngine, insert_job, ts
 from wisen.proposals import (
     Decision,
@@ -49,7 +50,7 @@ POLL_RECHECK = 2.0  # seconds; a long poll rechecks at least this often (timers 
 # What a device may upload into the mailbox. Observation packets are stage B;
 # job status arrives only as the end of a device job.
 ACCEPTED = ("result", "usage", "proposal", "proposal_update", "metrics")
-DEVICE_KINDS = ("synthesize", "measure")
+DEVICE_KINDS = ("synthesize", "measure", "publish")
 USER_ID = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
 DAILY_AT = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -111,6 +112,10 @@ MIGRATIONS = [
 
 class Conflict(ValueError):
     """The request clashes with what is stored (a reused id, a changed proposal)."""
+
+
+class NotPublishable(ValueError):
+    """The proposal has no applied branch to publish, or its file has no remote."""
 
 
 def _utcnow() -> datetime:
@@ -471,12 +476,63 @@ class Mailbox:
     async def inbox(self, user_id: str, limit: int = 50) -> list[Proposal]:
         return await self.proposals(user_id).list(limit=limit)
 
+    def inbox_details(self, user_id: str) -> dict[str, dict]:
+        """Per proposal, for the dashboard's change log: the decision (with
+        its note and who made it) and the latest outcome after it (failed
+        with its reason, merged, kept, …)."""
+        details: dict[str, dict] = {}
+        with closing(self._db._connect()) as conn:
+            rows = conn.execute("SELECT proposal_id, to_state, note, at, actor FROM proposal_events "
+                                "WHERE user_id = ? ORDER BY id", (user_id,))
+            for r in rows:
+                d = details.setdefault(r["proposal_id"], {"decision": None, "outcome": None})
+                if r["to_state"] in ("approved", "rejected"):
+                    d["decision"] = {"decision": r["to_state"], "note": r["note"], "at": r["at"], "actor": r["actor"]}
+                elif r["to_state"] != "proposed":
+                    d["outcome"] = {"state": r["to_state"], "note": r["note"], "at": r["at"]}
+        return details
+
+    async def publish(self, user_id: str, proposal_id: str) -> Job:
+        """The owner's "Push & create PR": one device job per proposal
+        (request id publish:<id>) for the laptop, which alone can push. A
+        second tap while it is queued or running changes nothing; a tap after
+        a failure runs it again; once a pull request is recorded, nothing
+        runs again. The laptop re-checks the branch before pushing."""
+        p = await self.proposals(user_id).get(proposal_id)
+        if p is None:
+            raise LookupError(f"no proposal {proposal_id}")
+        if p.target.partition(":")[0] == HOME:
+            raise NotPublishable(f"{p.target} is a file outside any repo: its branch has no remote; "
+                                 "merge it on the laptop")
+        if p.state != "applied":
+            raise NotPublishable(f"proposal {proposal_id} is {p.state}; only an applied branch can be published")
+        # One attempt: the failures are the owner's to fix (no remote, no gh
+        # login), and the card shows them at once; tapping again retries.
+        return await self.enqueue_device_job(user_id, "publish", {"proposal_id": proposal_id},
+                                             request_id=f"publish:{proposal_id}", rerun=p.pr_url is None,
+                                             max_attempts=1)
+
+    def publish_jobs(self, user_id: str) -> dict[str, dict]:
+        """How each proposal's publish job stands, by proposal id: the
+        dashboard shows "publishing", the link, or why it failed (an error
+        class; the laptop sends no message)."""
+        with closing(self._db._connect()) as conn:
+            return {json.loads(r["args"])["proposal_id"]: {"state": r["state"], "error": r["error"]}
+                    for r in conn.execute("SELECT args, state, error FROM jobs WHERE user_id = ? AND kind = 'publish'",
+                                          (user_id,))}
+
+    def _record_pr(self, user_id: str, proposal_id: str, url: str) -> None:
+        with self.store(user_id).transaction() as conn:
+            self.proposals(user_id).record_pr_in(conn, proposal_id, url)
+
     # ── device jobs ───────────────────────────────────────────────────────────
 
-    async def enqueue_device_job(self, user_id: str, kind: str, args: dict, *, request_id: str, rerun: bool) -> Job:
+    async def enqueue_device_job(self, user_id: str, kind: str, args: dict, *, request_id: str, rerun: bool,
+                                 max_attempts: int = 3) -> Job:
         if kind not in DEVICE_KINDS:
             raise ValueError(f"unknown device job kind {kind!r}")
-        job = await self.engine(user_id).enqueue(kind, args, request_id=request_id, rerun=rerun, runner="device")
+        job = await self.engine(user_id).enqueue(kind, args, request_id=request_id, rerun=rerun, runner="device",
+                                                 max_attempts=max_attempts)
         self._notify(user_id)
         return job
 
@@ -520,9 +576,14 @@ class Mailbox:
         job = await engine.get(job_id)
         if job is None or job.runner != "device" or job.kind != status.kind:
             raise Conflict("no such device job")
-        if status.state == "succeeded":
-            return await engine.finish_as(job_id, _owner(device_id), status.model_dump(mode="json"))
-        return await engine.fail_as(job_id, _owner(device_id), f"DeviceJobFailed: {status.error_class or 'unknown'}")
+        if status.state != "succeeded":
+            return await engine.fail_as(job_id, _owner(device_id), f"DeviceJobFailed: {status.error_class or 'unknown'}")
+        done = await engine.finish_as(job_id, _owner(device_id), status.model_dump(mode="json"))
+        if done and job.kind == "publish" and status.pr_url:
+            # The link lives on the proposal; its state stays applied until
+            # the laptop sees the branch merged.
+            await asyncio.to_thread(self._record_pr, user_id, job.args["proposal_id"], status.pr_url)
+        return done
 
     # ── the daily schedule ────────────────────────────────────────────────────
 
