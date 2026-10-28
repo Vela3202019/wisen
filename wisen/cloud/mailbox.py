@@ -11,6 +11,20 @@ daily schedule. Device jobs ('device' runner) are leased to the user's paired
 laptops over HTTPS (`poll`), under the same lease rules, so a laptop that
 sleeps mid-job just lets its lease expire and the job waits for it.
 
+Stage B (`stage="b"`, WISEN_CLOUD_STAGE=b; docs/plan/cloud-architecture.md
+§3.2): laptops also upload what the REM side needs, and the server runs it
+(wisen/cloud/rem.py): their Observer's notes per day (observation packets,
+from every laptop) and the current text of the files the Gardener may edit
+(config snapshot packets, secret-redacted). The daily schedule then asks the
+laptops for fresh notes (an 'observe' device job) and synthesizes the day here
+once one answers, or after OBSERVE_GRACE from what is already uploaded, so the
+morning reflection is made while every laptop sleeps. Applying an approved
+change stays a laptop's job.
+
+Received packets are mirrored into the tables the laptop's agents read
+(reflections, daily_metrics, proposal_measures), so the Synthesizer, the
+Gardener and chat run here on the same code.
+
 Every write is one transaction (lesson 1 in wisen/jobs.py); every row carries
 a user id and no query reads across users.
 """
@@ -31,8 +45,9 @@ from pydantic import BaseModel
 from wisen.cloud import auth
 from wisen.cloud.push import Gone, PushSender
 from wisen.gardener.applier import MEASURE_AFTER
-from wisen.gardener.targets import HOME
+from wisen.gardener.targets import HOME, SnapshotFiles
 from wisen.jobs import Job, JobContext, JobEngine, insert_job, ts
+from wisen.packets import ResultPacket, result_packet
 from wisen.proposals import (
     Decision,
     IllegalTransition,
@@ -47,10 +62,18 @@ SESSION_TTL = timedelta(days=30)
 PAIRING_TTL = timedelta(minutes=10)
 SEEN_EVERY = timedelta(minutes=1)  # how often a device's last_seen_at is rewritten
 POLL_RECHECK = 2.0  # seconds; a long poll rechecks at least this often (timers come due without a signal)
-# What a device may upload into the mailbox. Observation packets are stage B;
-# job status arrives only as the end of a device job.
+# What a device may upload into the mailbox; stage B adds what the server's
+# REM side reads. Job status arrives only as the end of a device job.
 ACCEPTED = ("result", "usage", "proposal", "proposal_update", "metrics")
-DEVICE_KINDS = ("synthesize", "measure", "publish")
+STAGE_B = ("observation", "config_snapshot")
+DEVICE_KINDS = ("synthesize", "measure", "publish", "observe")
+STAGES = ("a", "b")
+# Stage B: how long the day's synthesis waits for a laptop to send fresh
+# notes before it runs on what is already uploaded (a sleeping laptop never
+# answers).
+OBSERVE_GRACE = timedelta(minutes=30)
+SERVER = "server"   # the device id on what the server makes itself (its reflections)
+ENVELOPE = ("packet_type", "schema_version", "user_id", "device_id", "packet_id", "created_at")
 USER_ID = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
 DAILY_AT = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -107,6 +130,23 @@ MIGRATIONS = [
         PRIMARY KEY (user_id, packet_type, key)
     );
     """,
+    # 2: stage B reads results, metrics and measurements through the tables
+    # the laptop's agents use (wisen/store.py); copy in what stage A received.
+    """
+    INSERT OR IGNORE INTO reflections (user_id, date, doc)
+        SELECT user_id, key, json_set(json_remove(body, '$.packet_type', '$.schema_version', '$.user_id',
+                                                  '$.device_id', '$.packet_id', '$.created_at'),
+                                      '$.synthesized_at', received_at)
+        FROM packets WHERE packet_type = 'result';
+    INSERT OR IGNORE INTO daily_metrics (user_id, date, doc)
+        SELECT user_id, key, json_remove(body, '$.packet_type', '$.schema_version', '$.user_id', '$.device_id',
+                                         '$.packet_id', '$.created_at')
+        FROM packets WHERE packet_type = 'metrics';
+    INSERT OR IGNORE INTO proposal_measures (proposal_id, user_id, verdict, reason, result, at)
+        SELECT json_extract(body, '$.proposal_id'), user_id, json_extract(body, '$.measure.verdict'),
+               coalesce(json_extract(body, '$.note'), ''), json_extract(body, '$.measure'), json_extract(body, '$.at')
+        FROM packets WHERE packet_type = 'proposal_update' AND json_extract(body, '$.measure') IS NOT NULL;
+    """,
 ]
 
 
@@ -133,10 +173,15 @@ def fire_time(day: date, timezone: str, daily_at: str) -> datetime:
 
 
 class Mailbox:
-    def __init__(self, path: Path, *, sender: PushSender | None, clock: Callable[[], datetime] = _utcnow):
+    def __init__(self, path: Path, *, sender: PushSender | None, clock: Callable[[], datetime] = _utcnow,
+                 stage: str = "a"):
+        if stage not in STAGES:
+            raise ValueError(f"unknown stage {stage!r}; use one of {', '.join(STAGES)}")
         self.path = path
         self.sender = sender
         self.clock = clock
+        self.stage = stage
+        self.accepted = ACCEPTED + (STAGE_B if stage == "b" else ())
         # Owns no user; used for the tables that are looked up before a user
         # is known (sessions, tokens, pairing codes) and for migrations.
         self._db = SqliteStore(path, "")
@@ -157,13 +202,24 @@ class Mailbox:
         if user_id not in self._engines:
             self._engines[user_id] = JobEngine(self.store(user_id), {
                 "push": self._push_job,
-                "expire-proposal": expire_proposal_job,
+                "expire-proposal": self._expire_job,
                 "schedule-daily": self._schedule_job,
+                "synthesize": self._rem("synthesize_job"),
+                "gardener-resume": self._rem("resume_job"),
             }, clock=self.clock)
         return self._engines[user_id]
 
     def proposals(self, user_id: str) -> Proposals:
         return Proposals(self.store(user_id), self.clock)
+
+    def _rem(self, name: str):
+        """A stage-B job handler (wisen/cloud/rem.py), imported on first use
+        so a stage-A server never loads model code."""
+        async def handler(ctx: JobContext, args: dict) -> Any:
+            from wisen.cloud import rem
+
+            return await getattr(rem, name)(self, ctx, args)
+        return handler
 
     def _changes(self, user_id: str) -> asyncio.Event:
         """Set (and replaced) whenever something a device polls for changes."""
@@ -338,8 +394,14 @@ class Mailbox:
         the caller wakes the user's engine on the event loop."""
         if packet.user_id != user_id or packet.device_id != device_id:
             raise Conflict("packet user_id and device_id must match the device token")
+        return self._store_packet(user_id, device_id, packet)
+
+    def _store_packet(self, user_id: str, device_id: str, packet: BaseModel) -> bool:
         key = {"result": lambda: packet.date, "usage": lambda: "latest", "proposal": lambda: packet.proposal_id,
-               "proposal_update": lambda: packet.request_id, "metrics": lambda: packet.date}[packet.packet_type]()
+               "proposal_update": lambda: packet.request_id, "metrics": lambda: packet.date,
+               # one per laptop: several laptops' notes on a day merge into one reflection
+               "observation": lambda: f"{packet.date}:{device_id}",
+               "config_snapshot": lambda: f"{device_id}:{packet.target}"}[packet.packet_type]()
         now = self.clock()
         with self.store(user_id).transaction() as conn:
             row = conn.execute(
@@ -358,8 +420,10 @@ class Mailbox:
                 (user_id, packet.packet_type, key, packet.packet_id, device_id, packet.model_dump_json(), ts(now)),
             )
             if packet.packet_type == "result":
+                self._mirror(conn, "reflections", user_id, packet.date, {
+                    **packet.model_dump(mode="json", exclude=set(ENVELOPE)), "synthesized_at": ts(now)})
                 # The morning briefing carries the day's Gardener batch, which
-                # the laptop uploads first.
+                # the laptop (or, in stage B, this server) makes first.
                 waiting = self._batch_waiting(conn, user_id, packet.date)
                 body = f"{packet.date} · {packet.alignment_label}" + (
                     f" · {waiting} proposal{'s' if waiting != 1 else ''} waiting" if waiting else "")
@@ -377,7 +441,27 @@ class Mailbox:
                                      body=f"from {packet.batch}", url=f"/#day-{packet.batch}")
             elif packet.packet_type == "proposal_update":
                 self._record_update(conn, user_id, device_id, packet, now)
+            elif packet.packet_type == "metrics":
+                self._mirror(conn, "daily_metrics", user_id, packet.date,
+                             packet.model_dump(mode="json", exclude=set(ENVELOPE)))
+            elif packet.packet_type == "observation":
+                self._late_observation(conn, user_id, packet.date, now)
         return True
+
+    def _mirror(self, conn: sqlite3.Connection, table: str, user_id: str, date: str, doc: dict) -> None:
+        conn.execute(f"INSERT INTO {table} (user_id, date, doc) VALUES (?, ?, ?) "
+                     f"ON CONFLICT (user_id, date) DO UPDATE SET doc = excluded.doc", (user_id, date, json.dumps(doc)))
+
+    def _late_observation(self, conn: sqlite3.Connection, user_id: str, day: str, now: datetime) -> None:
+        """Notes on a day the server already synthesized (a laptop that slept
+        through the morning run sends them when it wakes): run the day again.
+        The run skips itself if its reflection is already newer than every
+        note. Notes on a day not scheduled yet wait for its run."""
+        row = conn.execute("SELECT * FROM jobs WHERE user_id = ? AND request_id = ? AND state IN ('succeeded', 'failed')",
+                           (user_id, f"server-synthesis:{day}")).fetchone()
+        if row is not None:
+            insert_job(conn, user_id, row["kind"], json.loads(row["args"]), request_id=row["request_id"],
+                       run_after=now, max_attempts=row["max_attempts"], now=now, rerun=True)
 
     def _batch_waiting(self, conn: sqlite3.Connection, user_id: str, batch: str) -> int:
         return conn.execute(
@@ -393,6 +477,13 @@ class Mailbox:
                                                   packet.request_id, _owner(device_id), packet.note)
         except (IllegalTransition, ValueError) as e:
             raise Conflict(str(e)) from None
+        if packet.measure is not None:
+            # What the server's Gardener reads back (past_proposals).
+            conn.execute(
+                "INSERT INTO proposal_measures (proposal_id, user_id, verdict, reason, result, at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (proposal_id) DO NOTHING",
+                (packet.proposal_id, user_id, packet.measure.verdict, packet.note or "",
+                 packet.measure.model_dump_json(), packet.at))
         if packet.to_state == "merged":
             at = datetime.fromisoformat(packet.at)
             insert_job(conn, user_id, "measure", {"proposal_id": packet.proposal_id},
@@ -443,6 +534,60 @@ class Mailbox:
                 (user_id, packet_type, limit),
             )]
 
+    # ── stage B: what the server's REM side reads ─────────────────────────────
+
+    def observations(self, user_id: str, day: str) -> list[tuple[str, dict, str]]:
+        """Each laptop's latest notes on `day`, as (device name, observation,
+        received_at), oldest laptop first."""
+        with closing(self._db._connect()) as conn:
+            return [(r["name"] or r["device_id"], json.loads(r["body"]), r["received_at"]) for r in conn.execute(
+                "SELECT p.device_id, p.body, p.received_at, d.name FROM packets p "
+                "LEFT JOIN devices d ON d.id = p.device_id "
+                "WHERE p.user_id = ? AND p.packet_type = 'observation' AND p.key LIKE ? "
+                "ORDER BY d.created_at, p.device_id",
+                (user_id, f"{day}:%"),
+            )]
+
+    def snapshot(self, user_id: str) -> SnapshotFiles:
+        """The files the Gardener may edit, from every laptop's config
+        snapshots: per target, the newest upload of a file that still exists."""
+        files: dict[str, dict] = {}
+        with closing(self._db._connect()) as conn:
+            for r in conn.execute(
+                "SELECT device_id, body FROM packets WHERE user_id = ? AND packet_type = 'config_snapshot' "
+                "ORDER BY received_at DESC, device_id", (user_id,),
+            ):
+                body = json.loads(r["body"])
+                if body["text"] is not None and body["target"] not in files:
+                    files[body["target"]] = {"text": body["text"], "base_blob": body["base_blob"],
+                                             "device_id": r["device_id"]}
+        return SnapshotFiles(files)
+
+    def skip_reason(self, user_id: str, day: str, force: bool = False) -> str | None:
+        """Why the server does not synthesize `day` now (§5.5, read from
+        packets instead of local history): no laptop sent notes on it, or its
+        reflection is newer than every note. `force` (the owner's Trigger)
+        overrides the second only: there is nothing to reflect on without notes."""
+        notes = self.observations(user_id, day)
+        if not notes:
+            return "no observations uploaded"
+        if force:
+            return None
+        with closing(self._db._connect()) as conn:
+            row = conn.execute("SELECT json_extract(doc, '$.synthesized_at') AS at FROM reflections "
+                               "WHERE user_id = ? AND date = ?", (user_id, day)).fetchone()
+        made = row["at"] if row else None
+        if made and made >= max(at for _, _, at in notes):
+            return f"already synthesized at {made}, no observation since"
+        return None
+
+    def publish_result(self, user_id: str, day: str) -> bool:
+        """The server's own reflection of `day` (stage B), as a result packet:
+        the dashboard and the push read it like one a laptop sent."""
+        doc = self.store(user_id)._get_reflection(day)
+        packet = ResultPacket.model_validate(result_packet(doc, user=user_id))
+        return self._store_packet(user_id, SERVER, packet)
+
     def timeline(self, user_id: str) -> dict:
         """The hill (cloud-architecture §5.4): each day's metrics, oldest
         first, and a marker per merged Gardener change with its verdict."""
@@ -470,8 +615,52 @@ class Mailbox:
         result = await self.proposals(user_id).decide(
             proposal_id, decision, request_id=request_id, actor=actor, note=note
         )
+        await asyncio.to_thread(self._after_decision, user_id, proposal_id)
         self._notify(user_id)
         return result
+
+    def _after_decision(self, user_id: str, proposal_id: str) -> None:
+        """A proposal the server's Gardener made: once none of its run is left
+        undecided, resume the run here with the decisions (§5.2). Proposals a
+        laptop made resume on that laptop."""
+        store = self.store(user_id)
+        with store.transaction() as conn:
+            row = conn.execute("SELECT json_extract(payload, '$.run_id') AS run_id FROM proposals "
+                               "WHERE user_id = ? AND id = ?", (user_id, proposal_id)).fetchone()
+            run_id = row["run_id"] if row else None
+            if run_id is None or conn.execute(
+                "SELECT 1 FROM proposals WHERE user_id = ? AND state = 'proposed' "
+                "AND json_extract(payload, '$.run_id') = ?", (user_id, run_id)).fetchone():
+                return
+            now = self.clock()
+            insert_job(conn, user_id, "gardener-resume", {"run_id": run_id}, request_id=f"gardener-resume:{run_id}",
+                       run_after=now, max_attempts=3, now=now)
+        self.engine(user_id).wake()
+
+    async def _expire_job(self, ctx: JobContext, args: dict) -> dict:
+        result = await expire_proposal_job(ctx, args)
+        if result["expired"]:
+            await asyncio.to_thread(self._after_decision, ctx.engine.store.user_id, args["proposal_id"])
+        return result
+
+    def drafted_here(self, user_id: str, proposal_ids: list[str]) -> dict[str, dict]:
+        """Of `proposal_ids`, those the server's Gardener drafted, with what
+        the laptop that applies one needs to record it (it has no copy)."""
+        if not proposal_ids:
+            return {}
+        with closing(self._db._connect()) as conn:
+            rows = conn.execute(
+                f"SELECT id, target, payload FROM proposals WHERE user_id = ? AND id IN "
+                f"({', '.join('?' * len(proposal_ids))}) AND json_extract(payload, '$.run_id') IS NOT NULL",
+                (user_id, *proposal_ids)).fetchall()
+        return {r["id"]: {"target": r["target"], **{k: v for k, v in json.loads(r["payload"]).items() if k in (
+            "diff", "rationale", "evidence", "batch", "base_blob", "device_id")}} for r in rows}
+
+    def previous_reflection(self, user_id: str, day: str) -> dict | None:
+        """The latest reflection before `day`: the baseline a laptop's
+        Observer compares the day against."""
+        docs = self.store(user_id)._list_reflections(1, day)
+        return docs[0] if docs else None
 
     async def inbox(self, user_id: str, limit: int = 50) -> list[Proposal]:
         return await self.proposals(user_id).list(limit=limit)
@@ -536,6 +725,46 @@ class Mailbox:
         self._notify(user_id)
         return job
 
+    async def trigger(self, user_id: str, day: str) -> None:
+        """The owner asked for `day` from the dashboard: run it even if
+        nothing is new. Stage A asks a laptop to synthesize it; stage B asks a
+        laptop for fresh notes and synthesizes here once it answers (or after
+        OBSERVE_GRACE without it)."""
+        if self.stage == "a":
+            await self.enqueue_device_job(user_id, "synthesize", {"date": day, "force": True},
+                                          request_id=f"trigger-synthesis:{day}", rerun=True)
+            return
+        await asyncio.to_thread(self._queue_day, user_id, day, "trigger-", True)
+        self._notify(user_id)
+        self.engine(user_id).wake()
+
+    def _queue_day(self, user_id: str, day: str, prefix: str, force: bool) -> None:
+        with self.store(user_id).transaction() as conn:
+            self._queue_day_in(conn, user_id, day, prefix, force)
+
+    def _queue_day_in(self, conn: sqlite3.Connection, user_id: str, day: str, prefix: str, force: bool) -> None:
+        """Stage B: the server's synthesis of `day`, due after the grace, and
+        the device job asking a laptop for fresh notes, which brings it forward."""
+        now = self.clock()
+        synthesis = f"{prefix}server-synthesis:{day}"
+        extra = {"force": True} if force else {}
+        job = insert_job(conn, user_id, "synthesize", {"date": day, **extra}, request_id=synthesis,
+                         run_after=now + OBSERVE_GRACE, max_attempts=3, now=now, rerun=force)
+        if force:   # a rerun is due at once; it still waits for the notes
+            conn.execute("UPDATE jobs SET run_after = ? WHERE id = ? AND state = 'queued'",
+                         (ts(now + OBSERVE_GRACE), job["id"]))
+        insert_job(conn, user_id, "observe", {"date": day, "synthesis": synthesis, **extra},
+                   request_id=f"{prefix}observe:{day}", run_after=now, max_attempts=3, now=now, rerun=force,
+                   runner="device")
+
+    def queued_dates(self, user_id: str) -> list[str]:
+        """Days with a synthesis on its way: asked of a laptop, or (stage B)
+        waiting to run here."""
+        with closing(self._db._connect()) as conn:
+            return sorted({json.loads(r["args"])["date"] for r in conn.execute(
+                "SELECT args FROM jobs WHERE user_id = ? AND kind IN ('synthesize', 'observe') "
+                "AND state IN ('queued', 'leased', 'waiting')", (user_id,))})
+
     def device_jobs(self, user_id: str, states: tuple[str, ...]) -> list[Job]:
         with closing(self._db._connect()) as conn:
             return [Job.from_row(r) for r in conn.execute(
@@ -583,7 +812,25 @@ class Mailbox:
             # The link lives on the proposal; its state stays applied until
             # the laptop sees the branch merged.
             await asyncio.to_thread(self._record_pr, user_id, job.args["proposal_id"], status.pr_url)
+        if done and job.kind == "observe":
+            await asyncio.to_thread(self._observed, user_id, job.args["synthesis"])
+            engine.wake()
         return done
+
+    def _observed(self, user_id: str, synthesis: str) -> None:
+        """A laptop sent its fresh notes: the synthesis waiting for them runs
+        now; one that already ran (the laptop answered late) runs again."""
+        now = self.clock()
+        with self.store(user_id).transaction() as conn:
+            row = conn.execute("SELECT * FROM jobs WHERE user_id = ? AND request_id = ?",
+                               (user_id, synthesis)).fetchone()
+            if row is None:
+                return
+            if row["state"] == "queued":
+                conn.execute("UPDATE jobs SET run_after = ?, updated_at = ? WHERE id = ?", (ts(now), ts(now), row["id"]))
+            elif row["state"] in ("succeeded", "failed"):
+                insert_job(conn, user_id, row["kind"], json.loads(row["args"]), request_id=synthesis, run_after=now,
+                           max_attempts=row["max_attempts"], now=now, rerun=True)
 
     # ── the daily schedule ────────────────────────────────────────────────────
 
@@ -601,7 +848,9 @@ class Mailbox:
         user = self._user(user_id)
         now = self.clock()
         with self.store(user_id).transaction() as conn:
-            if synthesize is not None:
+            if synthesize is not None and self.stage == "b":
+                self._queue_day_in(conn, user_id, synthesize, "", False)
+            elif synthesize is not None:
                 # Same request id as the laptop's own daily run: a day is one
                 # job however it was scheduled. (A dashboard trigger is its own
                 # job, forced; on the laptop both run the day's one local job.)
@@ -612,8 +861,8 @@ class Mailbox:
                        run_after=fire_time(day, user["timezone"], user["daily_at"]), max_attempts=3, now=now)
 
     async def _schedule_job(self, ctx: JobContext, args: dict) -> dict:
-        """The daily timer: ask a device to synthesize yesterday, and set the
-        timer for tomorrow, in one transaction. Wakes may repeat (lesson 5):
+        """The daily timer: have yesterday synthesized (by a device in stage A,
+        here in stage B), and set the timer for tomorrow, in one transaction. Wakes may repeat (lesson 5):
         both writes are keyed by request id, so a second run changes nothing."""
         user_id = ctx.engine.store.user_id
         day = date.fromisoformat(args["date"])

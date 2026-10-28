@@ -85,7 +85,9 @@ A real reflection, abridged:
   egress gate (see [What leaves your machine](#what-leaves-your-machine)).
 - **Your own server, optional.** A small mailbox server gives you the
   dashboard on your phone as an installable web app, push notifications and
-  an approval inbox. It holds no model key and never sees a transcript (see
+  an approval inbox. It never sees a transcript. In stage B it also writes
+  the morning reflection and the Gardener's proposals while your laptop
+  sleeps, from the notes and files your laptop sent (see
   [Your own server](#your-own-server-optional)).
 - **Any model, or your subscription.** Chat and synthesis use any pydantic-ai
   model string. Synthesis can run on a Claude Pro/Max subscription through
@@ -302,6 +304,35 @@ wisen cloud pair https://<host>     # code from the dashboard: Devices -> Add de
 wisen worker                        # keep it running with launchd (deploy/launchd/)
 ```
 
+### Stage B: the server reflects while your laptop sleeps
+
+In stage A the morning reflection waits for an awake laptop. Stage B moves the
+Synthesizer and the Gardener to the server, so the reflection is ready when
+you wake up, even with the lid closed. Turn it on at both ends, **server
+first** (an older server refuses the new packets):
+
+- **Server:** `WISEN_CLOUD_STAGE=b`. Synthesis then runs on `claude -p` on
+  your Claude subscription (log the CLI in for the service's user), and the
+  Gardener and chat on `WISEN_MODEL` with that provider's API key in the
+  server's environment file; `WISEN_SYNTH_MODEL=api` puts synthesis on the
+  API model too. See
+  [deploy/README.md](deploy/README.md#stage-b-the-server-reflects).
+- **Each laptop:** `[cloud] stage = "b"` in `~/.wisen/config.toml` (or
+  `WISEN_CLOUD_STAGE=b`) and restart `wisen worker`. This is the laptop's
+  own opt-in to send more (what exactly is under
+  [What leaves your machine](#what-leaves-your-machine)).
+
+The worker then runs the Observer on yesterday and today as sessions come in
+(each day at most every 2 hours: each run is one model call on the laptop)
+and sends its notes, plus the current text of the files the Gardener may
+edit. At the daily time the server asks the laptops for fresh notes, waits up
+to 30 minutes for an answer, and then reflects on what it has. With several
+laptops, their notes on a day become **one** reflection. Notes that arrive
+later (a laptop that slept through the morning) make that day's reflection
+again. Applying an approved proposal stays on the laptop whose file it
+changes. `POST /api/chat` on the server answers questions from its
+reflections (the dashboard does not call it yet).
+
 Network calls from your machine go to the model providers you configure, the
 GitHub API (the git commits connector reads your pushes), Anthropic's usage
 endpoint (the optional usage collector), and your own wisen server if you
@@ -331,6 +362,9 @@ holds reflections (plus chat and voice session records).
   to the chat model.
 - **Voice** (`[voice]` extra): your speech goes to Google's Gemini realtime
   model.
+- **Stage B server** ([below](#your-own-server-optional)): the server's
+  Synthesizer, Gardener and chat send the packets your laptop uploaded
+  (tier 3) to the server's model provider, never anything else.
 
 Pick the provider with `model` and `synth_model`. That provider's data terms
 apply to these excerpts. If `synth_model` is `claude-cli:…`, synthesis runs
@@ -358,6 +392,17 @@ characters, briefings at 4,000).
   same schema and rejects anything else. `wisen export` and
   `scripts/export_reflections.py` write the same result packets to a folder
   instead, for a sync job of your own.
+- In **stage B** a laptop that opted in (`[cloud] stage = "b"`) sends two
+  more packet types, and stops sending result packets (the server makes the
+  reflections). An **observation** packet holds the Observer's notes on one
+  day: mood and drift summaries, topics, friction, the day's key moments
+  with short quotes (500 characters each, 4,000 for a summary). A
+  **config snapshot** packet holds the current text of one file the Gardener
+  may edit (a `CLAUDE.md`, an `AGENTS.md` or a skill file, nothing else),
+  secret-redacted, with its git blob id; a file over 20,000 characters is
+  left out rather than cut, and a deleted file is sent once as gone. Raw
+  transcripts, tool output, other files and the SQLite file still never
+  leave.
 - `scripts/collect_usage.py` adds a usage packet with subscription usage
   percentages and reset times. To get the Claude percentages, it reads your
   Claude OAuth token from the Keychain and calls Anthropic's usage endpoint.
@@ -378,9 +423,11 @@ wisen is a personal project under active development; expect the schema and
 CLI to move. What exists today and what is planned is written down in
 `docs/plan/`:
 
-- [cloud-architecture.md](docs/plan/cloud-architecture.md): the server in
-  stage A (local brain, server mailbox) is built and is what `wisen cloud
-  serve` runs. Stage B (synthesis split between laptop and server) is a plan.
+- [cloud-architecture.md](docs/plan/cloud-architecture.md): the server is
+  built in both stages: stage A (local brain, server mailbox) by default, and
+  stage B (the Observer on the laptop, the Synthesizer and the Gardener on
+  the server) with `WISEN_CLOUD_STAGE=b`. Reflection chat on the server is
+  an API (`POST /api/chat`); the dashboard does not call it yet.
 - [eval-loop.md](docs/plan/eval-loop.md): the case miner, counterfactual
   replay and the gate that measures whether a Gardener change helped.
 

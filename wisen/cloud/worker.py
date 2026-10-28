@@ -22,6 +22,15 @@ It also runs the laptop's own job engine (the Gardener's jobs and timers) and
 checks applied Gardener branches for merges. Unpaired, `run_local` does only
 that: local-only mode.
 
+Stage B (`[cloud].stage = "b"`, WISEN_CLOUD_STAGE; docs/plan/cloud-architecture.md
+§3.2) is this laptop's opt-in to send more: the server synthesizes and runs
+the Gardener, so the laptop keeps it supplied (`dream_up`) with its Observer's
+notes on today and yesterday (observation packets, refreshed at most every
+OBSERVE_EVERY while sessions come in) and the current text of the files the
+Gardener may edit (config snapshot packets, secret-redacted), and answers its
+'observe' jobs. It no longer uploads reflections (the server makes them), and
+it applies the approved proposals the server drafted from its files.
+
 What it last uploaded and how far it has read the decision feed are stored in
 the local SQLite file, so a restart picks up where it stopped.
 """
@@ -30,8 +39,9 @@ import json
 import sys
 import time
 from contextlib import closing, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from wisen import config
 from wisen.cloud.client import (
     POLL_WAIT,
     CloudClient,
@@ -43,8 +53,11 @@ from wisen.cloud.client import (
 from wisen.egress import EgressRejected
 from wisen.jobs import LEASE, JobEngine, get_engine, ts
 from wisen.packets import (
+    MAX_SNAPSHOT,
+    config_snapshot_packet,
     job_status_packet,
     metrics_packet,
+    observation_packet,
     proposal_packet,
     proposal_update_packet,
     result_packet,
@@ -54,6 +67,8 @@ from wisen.store import SqliteStore
 
 SYNC_EVERY = 300.0  # seconds between sync-up passes while idle
 BACKOFF_CAP = 60.0
+OBSERVE_EVERY = timedelta(hours=2)   # stage B: the most often a day is observed again (one model call each)
+SNAPSHOT_EVERY = timedelta(hours=1)  # stage B: how often the editable files are read for a snapshot
 
 
 class SynthesisFailed(Exception):
@@ -66,6 +81,14 @@ class UnknownJobKind(Exception):
 
 class MeasureFailed(Exception):
     pass
+
+
+class StageBOff(Exception):
+    """The server asked for this laptop's notes, but it has not opted into stage B."""
+
+
+def stage_b() -> bool:
+    return config.get("cloud", "stage", "WISEN_CLOUD_STAGE", "a").lower() == "b"
 
 
 # The moves the laptop is the authority for (cloud-architecture §6.1).
@@ -182,21 +205,152 @@ async def sync_up(client: CloudClient, store: SqliteStore) -> int:
     for doc in await asyncio.to_thread(_metrics, store):
         sent += await _upload(client, store, f"sent:metrics:{doc['date']}", lambda doc=doc: metrics_packet(
             doc, **who))
+    if stage_b():
+        return sent   # the server makes the reflections
     for doc in await store.list_reflections():
         if date := doc.get("date"):
             sent += await _upload(client, store, f"sent:result:{date}", lambda doc=doc: result_packet(doc, **who))
     return sent
 
 
+# ── 1b. stage B: what the server reflects on ──────────────────────────────────
+
+def local_snapshot() -> list[tuple[str, str | None, str]]:
+    """Every file the Gardener may edit, as (target, blob, text). A file whose
+    redacted text is over the snapshot cap is left out: the server never
+    drafts against a cut-short file."""
+    from wisen.gardener.git import GitError
+    from wisen.gardener.targets import (
+        Refused,
+        base_blob,
+        editable_files,
+        project_repos,
+        resolve,
+    )
+    from wisen.redact import redact
+
+    repos, files, over = project_repos(), [], []
+    for name in editable_files(repos):
+        try:
+            t = resolve(name, repos)
+            text = t.current()
+            if text is None:
+                continue
+            if len(redact(text)) > MAX_SNAPSHOT:
+                over.append(name)
+                continue
+            files.append((name, base_blob(t, text), text))
+        except (Refused, GitError, UnicodeDecodeError, OSError):
+            continue   # not readable as text (a binary skill asset, say)
+    if over:
+        print(f"[worker] {len(over)} files over {MAX_SNAPSHOT:,} characters left out of the snapshot", file=sys.stderr)
+    return files
+
+
+def _sent_snapshots(store: SqliteStore) -> list[str]:
+    with closing(store._connect()) as conn:
+        return [r["key"].removeprefix("sent:config:") for r in conn.execute(
+            "SELECT key FROM cloud_state WHERE user_id = ? AND key LIKE 'sent:config:%'", (store.user_id,))]
+
+
+async def snapshot_up(client: CloudClient, store: SqliteStore) -> int:
+    """Upload each editable file that changed since its last upload, and say
+    once of each that is gone."""
+    who, sent = {"user": client.creds.user_id, "device_id": client.creds.device_id}, 0
+    files = await asyncio.to_thread(local_snapshot)
+    for target, blob, text in files:
+        sent += await _upload(client, store, f"sent:config:{target}",
+                              lambda t=target, b=blob, x=text: config_snapshot_packet(t, b, x, **who))
+    current = {target for target, _, _ in files}
+    for target in await asyncio.to_thread(_sent_snapshots, store):
+        if target not in current:
+            sent += await _upload(client, store, f"sent:config:{target}",
+                                  lambda t=target: config_snapshot_packet(t, None, None, **who))
+    return sent
+
+
+async def observe_day(client: CloudClient, store: SqliteStore, day: str, force: bool = False) -> str | None:
+    """Run the Observer on `day` and upload its notes, unless no session that
+    day is newer than the notes already sent (then return why not). The raw
+    sessions stay here; only the notes leave, through the egress gate."""
+    from wisen.gardener.loop import record_metrics
+    from wisen.ingestion.pipeline import ingest_all, ingest_sessions
+    from wisen.llm import get_model
+    from wisen.synthesis import agent
+
+    sessions = [s for s in (await ingest_sessions(day)).sessions if s.date == day]
+    if not sessions:
+        return "no new sessions"
+    newest = max(s.ended_at.astimezone(UTC) for s in sessions)
+    done = await asyncio.to_thread(_get, store, f"observed:{day}")
+    if not force and done and datetime.fromisoformat(done) >= newest:
+        return "already observed, no session since"
+    # When it was last tried, sent or not: `dream_up` waits OBSERVE_EVERY
+    # before trying a day again, so a server that refuses or cannot be reached
+    # does not cost a model call every pass.
+    await asyncio.to_thread(_set, store, f"observed_at:{day}", ts(datetime.now(UTC)))
+    yesterday, _ = await agent.load_history(day)
+    observation = await agent.observe(await ingest_all(day), day, yesterday, get_model())
+    # The verification numbers read transcripts, so they are counted here too.
+    await asyncio.to_thread(record_metrics, store, day)
+    await client.send_packet(observation_packet(observation, day, user=client.creds.user_id,
+                                                device_id=client.creds.device_id))
+    await asyncio.to_thread(_set, store, f"observed:{day}", newest.isoformat())
+    return None
+
+
+async def dream_up(client: CloudClient, store: SqliteStore) -> None:
+    """Keep the server supplied so it can reflect while this laptop sleeps:
+    the editable files, and notes on yesterday and today, each day tried at
+    most every OBSERVE_EVERY, since each try is a model call."""
+    now = datetime.now(UTC)
+    last = await asyncio.to_thread(_get, store, "snapshot_at")
+    if last is None or now - datetime.fromisoformat(last) >= SNAPSHOT_EVERY:
+        await snapshot_up(client, store)
+        await asyncio.to_thread(_set, store, "snapshot_at", ts(now))
+    for day in ((now - timedelta(days=1)).date().isoformat(), now.date().isoformat()):
+        tried = await asyncio.to_thread(_get, store, f"observed_at:{day}")
+        if tried and now - datetime.fromisoformat(tried) < OBSERVE_EVERY:
+            continue
+        try:
+            await observe_day(client, store, day)
+        except (Revoked, Unavailable):
+            raise
+        except Exception as e:  # noqa: BLE001 - a model or network failure is retried on the next pass
+            print(f"[worker] observing {day} failed: {type(e).__name__}: {e}", file=sys.stderr)
+
+
 # ── 3. decisions ──────────────────────────────────────────────────────────────
 
-async def apply_decisions(store: SqliteStore, decisions: list[dict]) -> None:
+def _record_drafted(store: SqliteStore, proposal_id: str, proposal: dict) -> None:
+    """Keep a copy of a proposal the server's Gardener drafted from this
+    laptop's files, so the applier can make its branch. It is marked sent, so
+    it is never uploaded back."""
+    with store.transaction() as conn:
+        if conn.execute("SELECT 1 FROM proposals WHERE user_id = ? AND id = ?", (store.user_id, proposal_id)).fetchone():
+            return
+        payload = {k: proposal[k] for k in ("diff", "rationale", "evidence", "batch", "base_blob") if k in proposal}
+        Proposals(store).create_in(conn, proposal["target"], {**payload, "origin": "server"}, f"server:{proposal_id}",
+                                   "server", None, proposal_id, expiry_timer=False)
+        conn.execute("INSERT INTO cloud_state (user_id, key, value, at) VALUES (?, ?, ?, ?) "
+                     "ON CONFLICT (user_id, key) DO NOTHING",
+                     (store.user_id, f"sent:proposal:{proposal_id}", "drafted on the server", ts(datetime.now(UTC))))
+
+
+async def apply_decisions(store: SqliteStore, decisions: list[dict], device_id: str | None = None) -> None:
     """Record the server's decisions locally. Each carries the server's request
-    id, so a decision seen twice (a replayed feed) changes nothing."""
+    id, so a decision seen twice (a replayed feed) changes nothing. A proposal
+    the server drafted comes with its content: the laptop whose files it
+    changes records it when it is approved, and every other decision on it
+    (another laptop's, or not approved) is the server's alone."""
     from wisen.gardener.loop import on_decided
 
     proposals = Proposals(store)
     for d in decisions:
+        if drafted := d.get("proposal"):
+            if d["state"] != "approved" or drafted.get("device_id") != device_id:
+                continue
+            await asyncio.to_thread(_record_drafted, store, d["proposal_id"], drafted)
         try:
             if d["state"] in DECISIONS:
                 await proposals.decide(d["proposal_id"], d["state"], request_id=d["request_id"],
@@ -258,7 +412,22 @@ async def _publish(client: CloudClient, store: SqliteStore, args: dict) -> dict:
     return {"pr_url": await asyncio.to_thread(publish, store, args["proposal_id"])}
 
 
-HANDLERS = {"synthesize": _synthesize, "measure": _measure, "publish": _publish}
+async def _observe(client: CloudClient, store: SqliteStore, args: dict) -> dict | None:
+    """Stage B: the server wants fresh notes on a day before it synthesizes
+    it. Its latest reflection before that day is the Observer's baseline, and
+    is kept here too, so later notes compare against it."""
+    if not stage_b():
+        raise StageBOff('set [cloud].stage = "b" (WISEN_CLOUD_STAGE=b) to send the Observer\'s notes')
+    if previous := (args.get("context") or {}).get("previous"):
+        await store.upsert_reflection(previous)
+    reason = await observe_day(client, store, args["date"], force=args.get("force", False))
+    if reason:
+        print(f"[worker] observe {args['date']} skipped: {reason}")
+    await sync_up(client, store)
+    return {"skipped": reason} if reason else None
+
+
+HANDLERS = {"synthesize": _synthesize, "measure": _measure, "publish": _publish, "observe": _observe}
 
 
 async def _heartbeat(client: CloudClient, job_id: str) -> None:
@@ -281,7 +450,8 @@ async def run_device_job(client: CloudClient, store: SqliteStore, job: dict) -> 
         handler = HANDLERS.get(job["kind"])
         if handler is None:
             raise UnknownJobKind(job["kind"])
-        outcome = await handler(client, store, job["args"])   # extra job status fields, if any
+        args = {**job["args"], **({"context": job["context"]} if job.get("context") else {})}
+        outcome = await handler(client, store, args)   # extra job status fields, if any
     except Revoked:
         raise
     except Exception as e:  # noqa: BLE001 - every failure is reported; the server retries
@@ -356,10 +526,12 @@ async def _poll_loop(creds: Credentials, store: SqliteStore, engine: JobEngine, 
                 if once or time.monotonic() - last_sync >= SYNC_EVERY:
                     await tend(store, engine)
                     await sync_up(client, store)
+                    if stage_b():
+                        await dream_up(client, store)
                     last_sync = time.monotonic()
                 reply = await client.poll(cursor, wait=0 if once else POLL_WAIT)
                 if reply["decisions"]:
-                    await apply_decisions(store, reply["decisions"])
+                    await apply_decisions(store, reply["decisions"], creds.device_id)
                     cursor = reply["cursor"]
                     await asyncio.to_thread(_set, store, "decisions_cursor", str(cursor))
                 if once:

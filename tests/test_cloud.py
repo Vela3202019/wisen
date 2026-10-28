@@ -813,7 +813,7 @@ async def check_no_model_key():
     )
     assert child.returncode == 0, child.stdout + child.stderr
     deploy = Path(__file__).resolve().parent.parent / "deploy"
-    for sample in ("wisen.env.example", "wisen.service"):
+    for sample in ("wisen.env.example", "wisen.service", "wisen-user.service"):
         for line in (deploy / sample).read_text().splitlines():
             setting = line.split("=", 1)[0].strip().removeprefix("Environment=")
             assert line.lstrip().startswith("#") or setting not in MODEL_ENV, f"{sample}: {line}"

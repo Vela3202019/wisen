@@ -45,3 +45,11 @@ git_scan_dirs = "~/Developer"
 # Your git email: only your commits count as problems solved (WISEN_OWNER_EMAIL).
 # Default: each repo's `git config user.email`.
 # owner_email = "you@example.com"
+
+[cloud]
+# Stage B with a paired server (WISEN_CLOUD_STAGE): "b" sends the Observer's
+# notes on each day and the current text of the files the Gardener may edit
+# (secret-redacted) to your server, which then writes the reflection and the
+# proposals while this laptop sleeps. Turn the server to stage B first.
+# Default "a": the laptop synthesizes and sends only the results.
+# stage = "b"

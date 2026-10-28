@@ -1,0 +1,28 @@
+# wisen server as a user-level unit, run as your own user (as on the owner's
+# box): ~/.config/systemd/user/wisen.service, then
+#   systemctl --user daemon-reload && systemctl --user enable --now wisen
+#   loginctl enable-linger $USER     # keep it running while you are logged out
+# Secrets, if any, live in ~/.config/wisen/wisen.env (mode 0600); see
+# wisen.env.example. Stage B's `claude -p` uses your own ~/.claude login.
+
+[Unit]
+Description=wisen server (mailbox, approval inbox, Web Push)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=WISEN_CLOUD_PUBLIC_URL=https://wisen.example.org
+Environment=WISEN_CLOUD_DB=%h/wisen-cloud/wisen.db
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.config/wisen/wisen.env
+WorkingDirectory=%h/wisen-cloud
+ExecStart=%h/wisen-cloud/venv/bin/wisen cloud serve --host 127.0.0.1 --port 8722
+Restart=on-failure
+RestartSec=5
+# Room for one `claude -p` (about 236 MiB measured) next to the server.
+MemoryHigh=600M
+MemoryMax=800M
+UMask=0077
+
+[Install]
+WantedBy=default.target

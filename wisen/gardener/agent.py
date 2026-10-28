@@ -28,9 +28,9 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel
 from pydantic_ai import Agent, DeferredToolRequests, ModelRetry, RunContext
 
-from wisen.gardener.git import GitError, one_file_diff
-from wisen.gardener.targets import Refused, editable_files, resolve
-from wisen.redact import redact
+from wisen.gardener.git import GitError
+from wisen.gardener.targets import LocalFiles, Refused, SnapshotFiles
+from wisen.redact import EMAIL, SECRET, redact
 
 MAX_DIFF = 20_000   # the proposal packet's cap on a diff (wisen/packets.py)
 MAX_READ = 20_000
@@ -96,11 +96,13 @@ class Draft(BaseModel):
     evidence: list[str]
     current: str | None
     proposed: str
+    device_id: str | None = None   # drafted from this laptop's snapshot (server Gardener): it applies it
 
 
 @dataclass
 class Deps:
     repos: dict | None = None            # alias -> repo root; None: scan as the config connector does
+    snapshot: SnapshotFiles | None = None   # the server's Gardener: uploaded files instead of repos
     open_targets: set[str] = field(default_factory=set)
     reflection_dates: set[str] = field(default_factory=set)   # the days the prompt showed; evidence names them
     history: list[dict] = field(default_factory=list)         # past proposals (wisen/gardener/loop.py past_outcomes)
@@ -108,6 +110,9 @@ class Deps:
     resuming: bool = False                # a run resumed with decisions: the calls are already checked
     drafts: dict[str, Draft] = field(default_factory=dict)
     branches: dict[str, str] = field(default_factory=dict)   # tool call id -> branch, when resuming
+
+    def files(self) -> LocalFiles | SnapshotFiles:
+        return self.snapshot if self.snapshot is not None else LocalFiles(self.repos)
 
 
 def change_lines(diff: str) -> str:
@@ -144,11 +149,15 @@ def _draft(deps: Deps, tool_call_id: str, target: str, old_text: str, new_text: 
                          "more dates, or do not propose this yet")
     quotes = [f"{e.date}: {e.quote}" for e in evidence]
     try:
-        t = resolve(target, deps.repos)
+        t = deps.files().open(target)
     except Refused as e:
         raise ModelRetry(str(e)) from None
     if t.name in deps.open_targets:
         raise ModelRetry(f"{t.name} already has a proposal waiting or being applied; leave it for now")
+    if deps.snapshot is not None and (SECRET in new_text or EMAIL in new_text):
+        # The server reads files secret-redacted; copying a placeholder
+        # would write it over the real value.
+        raise ModelRetry(f"new_text holds {SECRET} or {EMAIL}, a placeholder for text you cannot see; leave it out")
     current = t.current()
     if old_text:
         if current is None:
@@ -163,7 +172,7 @@ def _draft(deps: Deps, tool_call_id: str, target: str, old_text: str, new_text: 
     if proposed == current:
         raise ModelRetry("the change changes nothing")
     try:
-        diff = one_file_diff(t.repo, t.path, current, proposed)
+        diff = t.diff(current, proposed)
     except GitError as e:
         raise ModelRetry(f"could not build the diff: {e}") from None
     if redact(diff) != diff:
@@ -173,16 +182,9 @@ def _draft(deps: Deps, tool_call_id: str, target: str, old_text: str, new_text: 
                          f"({p['state']}); see past_proposals, and do not propose it again")
     if len(diff) > MAX_DIFF:
         raise ModelRetry(f"the change is too large (over {MAX_DIFF} characters as a diff); make it smaller")
-    if t.is_home:
-        # Drafted against the file on disk; the applier records that file on
-        # main before it branches, so its blob is the base.
-        base_blob = t.repo.out("hash-object", "--stdin", input=current) if current is not None else None
-    else:
-        base = t.base()
-        base_blob = t.repo.blob(base, t.path) if base else None
     deps.open_targets.add(t.name)
-    return Draft(tool_call_id=tool_call_id, target=t.name, diff=diff, base_blob=base_blob,
-                 rationale=rationale, evidence=quotes, current=current, proposed=proposed)
+    return Draft(tool_call_id=tool_call_id, target=t.name, diff=diff, base_blob=t.base_blob(current),
+                 rationale=rationale, evidence=quotes, current=current, proposed=proposed, device_id=t.device_id)
 
 
 def build_agent(model) -> Agent:
@@ -193,7 +195,7 @@ def build_agent(model) -> Agent:
     def list_files(ctx: RunContext[Deps]) -> list[str]:
         """Every file you may change, as <project>:<path>. "home" is the developer's
         home directory (their global CLAUDE.md and personal skills)."""
-        return [f for f in editable_files(ctx.deps.repos) if f not in ctx.deps.open_targets]
+        return [f for f in ctx.deps.files().list() if f not in ctx.deps.open_targets]
 
     @agent.tool
     def past_proposals(ctx: RunContext[Deps]) -> str:
@@ -206,7 +208,7 @@ def build_agent(model) -> Agent:
     def read_file(ctx: RunContext[Deps], target: str) -> str:
         """The current text of a file you may change, given as <project>:<path>."""
         try:
-            text = resolve(target, ctx.deps.repos).current()
+            text = ctx.deps.files().open(target).current()
         except Refused as e:
             raise ModelRetry(str(e)) from None
         if text is None:

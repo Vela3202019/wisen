@@ -8,6 +8,10 @@ Backed by the WISEN_MODEL-configured model (see llm.py) with four tools:
   search_agent_configs → search harness/config files (CLAUDE.md, MCP, skills…)
 
 Designed to be called via POST /chat (SSE streaming).
+
+On a stage-B server (wisen/cloud) the same agent answers from reflections
+only (`raw_history=False`): the two search tools read the laptop's raw
+history and configs, which never reach the server.
 """
 from __future__ import annotations
 
@@ -72,6 +76,13 @@ retrieve silently (the UI already shows progress), and write only once you have 
 what you need — the text you write is the final answer.
 """
 
+_REFLECTIONS_ONLY = """
+Here you run on the builder's server, which holds reflections only: \
+search_chat_history and search_agent_configs are not available, because raw \
+transcripts and config files stay on their laptop. Answer from the reflections; \
+when a question needs the raw sessions, say so.
+"""
+
 
 @dataclass
 class ChatDeps:
@@ -80,7 +91,7 @@ class ChatDeps:
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
 
 
-def _make_agent() -> Agent:
+def _make_agent(raw_history: bool = True) -> Agent:
     model = get_model()
     # thinking=False keeps Gemini fast; other providers may not accept it
     settings = ModelSettings(thinking=False) if model.startswith("google:") else None
@@ -88,24 +99,24 @@ def _make_agent() -> Agent:
         model=model,
         output_type=str,
         deps_type=ChatDeps,
-        system_prompt=_SYSTEM_PROMPT,
+        system_prompt=_SYSTEM_PROMPT if raw_history else _SYSTEM_PROMPT + _REFLECTIONS_ONLY,
         retries=1,
         model_settings=settings,
     )
-    for fn in (get_reflection, list_reflections, search_chat_history, search_agent_configs):
+    tools = (get_reflection, list_reflections) + ((search_chat_history, search_agent_configs) if raw_history else ())
+    for fn in tools:
         agent.tool(fn)
     return agent
 
 
 # Built lazily so importing the app doesn't require an API key.
-_agent: Agent | None = None
+_agents: dict[bool, Agent] = {}
 
 
-def _get_agent() -> Agent:
-    global _agent
-    if _agent is None:
-        _agent = _make_agent()
-    return _agent
+def _get_agent(raw_history: bool = True) -> Agent:
+    if raw_history not in _agents:
+        _agents[raw_history] = _make_agent(raw_history)
+    return _agents[raw_history]
 
 
 def _resolve_date(raw: str) -> str:
@@ -248,6 +259,9 @@ def _to_history(messages: list[dict]) -> list[ModelMessage]:
 async def stream_chat(
     messages: list[dict],
     context_date: str | None = None,
+    *,
+    store: Store | None = None,
+    raw_history: bool = True,
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Stream a chat response as typed event dicts.
@@ -256,6 +270,8 @@ async def stream_chat(
               The last message must be role="user" — that's the current turn.
     context_date: YYYY-MM-DD of the reflection to anchor context on.
                   Defaults to the most recent available log.
+    store: where reflections are read (default: the local store).
+    raw_history: False on the server: reflection tools only.
 
     Yields dicts: {"type": "token", "data": str}
                   {"type": "tool_call", "name": str, "label": str}
@@ -264,7 +280,7 @@ async def stream_chat(
     if not messages or messages[-1]["role"] != "user":
         raise ValueError("Last message must be role=user")
 
-    db = get_store()
+    db = store or get_store()
 
     if context_date:
         log_doc = await db.get_reflection(context_date)
@@ -289,7 +305,7 @@ async def stream_chat(
         # agent.iter streams text from EVERY model response and keeps going
         # through tool calls — run_stream would stop at the first text part,
         # cutting the answer off when the model narrates before a tool call.
-        agent = _get_agent()
+        agent = _get_agent(raw_history)
         emitted_text = False
         try:
             async with agent.iter(

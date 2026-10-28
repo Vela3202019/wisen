@@ -19,9 +19,14 @@ ExecStart=/opt/wisen/bin/wisen cloud serve --host 127.0.0.1 --port 8722
 Restart=on-failure
 RestartSec=5
 
-# Never starve the other apps on the box.
-MemoryHigh=250M
-MemoryMax=320M
+# Stage B: `claude -p` for synthesis; installed and logged in as the wisen
+# user, whose home is /var/lib/wisen (deploy/README.md, "Stage B").
+# Environment=PATH=/var/lib/wisen/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Never starve the other apps on the box. Room for one `claude -p` (about
+# 236 MiB measured) next to the server (about 130 MB).
+MemoryHigh=600M
+MemoryMax=800M
 
 # Sandbox: the only writable path is the data directory.
 NoNewPrivileges=true

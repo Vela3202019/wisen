@@ -5,6 +5,8 @@ models on receipt, so the schema is the privacy boundary at both ends.
 
   result       a reflection, as the dashboard and phone show it (CloudReflection)
   observation  the Observer's notes on a day, for a server-side Synthesizer
+  config_snapshot  the current text of one file the Gardener may edit, for a
+               server-side Gardener (or that the file is gone)
   usage        subscription usage percentages and reset times
   proposal     a Gardener proposal awaiting a human decision
   proposal_update  a git state the laptop decided for a proposal (applied,
@@ -88,6 +90,7 @@ Diff = _whole(20_000)      # a unified diff
 ErrorClass = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][\w.]*$", max_length=200)]
 Branch = Annotated[str, StringConstraints(pattern=r"^wisen/gardener/[0-9a-f]{32}$", max_length=60)]
 PrUrl = Annotated[_whole(300), StringConstraints(pattern=r"^https://\S+$")]   # a pull request's link
+Blob = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$", max_length=64)]  # a git blob id
 UpdateId = Annotated[str, StringConstraints(
     pattern=r"^(cli|expire|applied|failed|merged|abandoned|measuring|measured):[0-9a-f]{32}$", max_length=50)]
 
@@ -127,6 +130,36 @@ class CloudObservation(BaseModel):
 
 class ObservationPacket(CloudObservation, Envelope):
     packet_type: Literal["observation"]
+
+
+MAX_SNAPSHOT = 20_000  # characters of one file's text; the Gardener reads at most this much
+
+
+def _snapshot_text(value, info: ValidationInfo):
+    # Secret-redacted, as the owner decided for the stage-B Gardener, but
+    # never cut: a diff drafted against a cut-short file would be wrong, so a
+    # file over the cap is left out of the snapshot by its builder, and here
+    # it rejects the packet.
+    if isinstance(value, str) and (info.context or {}).get("egress"):
+        return redact(value)
+    return value
+
+
+SnapshotText = Annotated[str, BeforeValidator(_snapshot_text), StringConstraints(max_length=MAX_SNAPSHOT)]
+
+
+class ConfigSnapshot(BaseModel):
+    """One file the Gardener may edit, as the laptop sees it: its target
+    (project alias + relative path), the git blob id of its real text, and
+    that text, secret-redacted. A file that is gone is sent once with no text
+    and no blob, so the server stops offering it."""
+    target: Target
+    base_blob: Blob | None
+    text: SnapshotText | None
+
+
+class ConfigSnapshotPacket(ConfigSnapshot, Envelope):
+    packet_type: Literal["config_snapshot"]
 
 
 class ClaudeUsage(BaseModel):
@@ -261,6 +294,7 @@ class JobStatusPacket(JobStatus, Envelope):
 PACKETS: dict[str, type[BaseModel]] = {
     "result": ResultPacket,
     "observation": ObservationPacket,
+    "config_snapshot": ConfigSnapshotPacket,
     "usage": UsagePacket,
     "proposal": ProposalPacket,
     "proposal_update": ProposalUpdatePacket,
@@ -308,10 +342,18 @@ def result_packet(doc: dict, *, user: str | None = None, device_id: str | None =
     return _packet("result", validate(CloudReflection, doc, "result packet"), user, device_id)
 
 
-def observation_packet(observation: DayObservation, date: str) -> dict:
+def observation_packet(observation: DayObservation, date: str, *, user: str | None = None,
+                       device_id: str | None = None) -> dict:
     content = {"date": date, **observation.model_dump(mode="json")}
     return _packet("observation", validate(CloudObservation, content, "observation packet", extra="forbid"),
-                   None, None)
+                   user, device_id)
+
+
+def config_snapshot_packet(target: str, base_blob: str | None, text: str | None, *, user: str | None = None,
+                           device_id: str | None = None) -> dict:
+    content = {"target": target, "base_blob": base_blob, "text": text}
+    return _packet("config_snapshot", validate(ConfigSnapshot, content, "config snapshot packet", extra="forbid"),
+                   user, device_id)
 
 
 def usage_packet(usage: dict) -> dict:
