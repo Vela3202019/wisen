@@ -349,12 +349,13 @@ class JobEngine:
         with self.store.transaction() as conn:
             # One statement picks and leases the job, so two workers can never
             # claim the same one. Resuming from a wait is not a new attempt.
+            # Jobs due at the same time run in the order they were queued.
             row = conn.execute(
                 "UPDATE jobs SET state = 'leased', "
                 "attempts = attempts + CASE WHEN state = 'waiting' THEN 0 ELSE 1 END, "
                 "lease_owner = ?, lease_expires_at = ?, wait_key = NULL, updated_at = ? "
                 "WHERE id = (SELECT id FROM jobs WHERE user_id = ? AND runner = ? "
-                "AND state IN ('queued', 'waiting') AND run_after <= ? ORDER BY run_after, created_at LIMIT 1) "
+                "AND state IN ('queued', 'waiting') AND run_after <= ? ORDER BY run_after, created_at, rowid LIMIT 1) "
                 "RETURNING *",
                 (owner or self.worker_id, ts(now + LEASE), ts(now), self._uid, runner, ts(now)),
             ).fetchone()

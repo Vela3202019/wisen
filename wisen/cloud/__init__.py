@@ -8,6 +8,7 @@ key; all model work stays on the laptop. See docs/plan/cloud-architecture.md
   mailbox.py  the server's SQLite file and every rule about it
   server.py   the HTTP app: browser login, approval inbox, device API
   push.py     Web Push (VAPID) sender
+  telegram.py the Telegram bot: notifications, approve/reject buttons, history chat
   backup.py   consistent snapshots and restore
   client.py   laptop side: pairing and the device API client
   worker.py   laptop side: `wisen worker`, the outbound-only poller

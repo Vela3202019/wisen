@@ -2,10 +2,10 @@
 
 In stage A (the default) the server is a mailbox: it stores what your laptop
 sends (reflections as result packets, Gardener proposals), holds your
-decisions, keeps the daily schedule, and sends Web Push notifications. It
-makes no model calls and holds no model API key. In stage B it also runs the
-Synthesizer and the Gardener over the packets your laptops send, so the
-morning reflection is made while they sleep; see
+decisions, keeps the daily schedule, and sends Web Push and Telegram
+notifications. It makes no model calls and holds no model API key. In stage
+B it also runs the Synthesizer and the Gardener over the packets your
+laptops send, so the morning reflection is made while they sleep; see
 [Stage B](#stage-b-the-server-reflects). Either way raw transcripts never
 reach it, and the laptop only ever connects out to it, with a per-device
 token you can revoke.
@@ -34,7 +34,7 @@ sudo install -d -o wisen -g wisen -m 0700 /var/lib/wisen
 sudo python3 -m venv /opt/wisen
 sudo /opt/wisen/bin/pip install "wisen[cloud] @ git+https://github.com/Vela3202019/wisen"
 
-# Secrets: VAPID keys for Web Push (no model key)
+# Secrets: VAPID keys for Web Push, optionally a Telegram bot token (no model key)
 sudo install -d -m 0755 /etc/wisen
 sudo install -m 0600 deploy/wisen.env.example /etc/wisen/wisen.env
 /opt/wisen/bin/wisen cloud vapid-keys          # paste both lines into /etc/wisen/wisen.env
@@ -101,6 +101,50 @@ On the phone, open the dashboard and add it to the Home Screen (on iPhone,
 Web Push works only from the Home Screen app). Open the installed app and tap
 **🔔 Notify me**. A new reflection or a proposal waiting for you then arrives
 as a notification that opens it in the app.
+
+## Telegram
+
+The bot sends the same notifications to one Telegram chat, puts **Approve** /
+**Reject** buttons on each proposal, and answers questions about your history.
+The server long-polls Telegram, so nothing new is exposed on the box. A
+proposal message carries its target file, a short description (its rationale,
+cut to 300 characters) and a link to the dashboard; never the diff or the
+evidence quotes. Telegram keeps bot chats on its own servers, unencrypted, so
+the details stay in the dashboard.
+
+Set it up once:
+
+1. In Telegram, open a chat with **@BotFather**, send `/newbot`, and pick a
+   name and a username. BotFather replies with a token like
+   `123456789:AA…`. Treat it as a password.
+2. On the server, put it in the environment file:
+   `sudo editor /etc/wisen/wisen.env` and set
+   `WISEN_TELEGRAM_BOT_TOKEN=<token>`. Check that `WISEN_CLOUD_PUBLIC_URL`
+   is set too: message links point at it.
+3. `sudo systemctl restart wisen`. `curl https://<host>/health` should show
+   `"telegram": true`, and `journalctl -u wisen` should show no
+   `[telegram]` errors.
+4. Link your chat: in the dashboard open **Devices → Add device** and copy
+   the one-time code (the same code `wisen cloud pair` takes; it is valid
+   for 10 minutes and works once, for a laptop or for Telegram). In a private
+   chat with your bot, send `/link <code>`. The bot replies "Linked to
+   <user>".
+
+Then:
+
+- Tap **Approve** or **Reject** on a proposal. It is the same decision as in
+  the web app: whichever you use first wins, and the other one says it was
+  already decided.
+- Send any question ("how was my week?") and your laptop's chat agent
+  answers from your reflections. `/search <words>` also searches the raw
+  history on the laptop. Only the written answer comes back. If the laptop
+  is asleep the bot says the question is queued, and answers when the
+  laptop's worker wakes.
+- `/unlink` stops the bot messaging that chat. Messages from any chat that
+  is not linked are ignored, and group chats cannot link.
+
+To change the token (say it leaked), send `/revoke` to @BotFather, put the
+new token in the env file and restart; the linked chat stays linked.
 
 ## Backups and restore
 
@@ -212,3 +256,12 @@ server restart mid-lease recovers the job; a restored backup serves the same
 data; the server's environment has no model key; no fixture marker string
 appears in the server database. `python3 -m tests.test_cloud` runs the same
 checks locally against an in-process server.
+
+## Checks with a real bot (step 6)
+
+`python3 -m tests.test_telegram` runs these against a fake Telegram API. With
+the real bot set up as above: link the chat; approve a proposal in Telegram,
+then try it in the web app (it says already decided, and the proposal has one
+decision); a message from another Telegram account gets no reply; with the
+laptop asleep, `/search <words>` replies that it is queued and the answer
+arrives once the laptop wakes; no proposal message shows a diff or a quote.
