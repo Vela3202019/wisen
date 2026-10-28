@@ -18,7 +18,9 @@ work tree of yours is touched.
 
 Merge detection (`detect_merges`) watches applied branches: in the default
 branch (merged, also by squash: the file there matches the branch), or
-deleted unmerged (abandoned). A merge starts the 2-week measure timer.
+deleted unmerged (abandoned). A merge starts the 2-week measure timer. A
+published proposal's pull request is merged on GitHub, so its remote is
+fetched first (a fetch only: nothing is pulled, checked out or pushed).
 """
 import json
 import sqlite3
@@ -154,14 +156,16 @@ def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, s
     any time: each move has a fixed request id."""
     moved = []
     with closing(store._connect()) as conn:
-        applied = [r["id"] for r in conn.execute(
-            "SELECT id FROM proposals WHERE user_id = ? AND state = 'applied'", (store.user_id,))]
-    for proposal_id in applied:
+        applied = conn.execute(
+            "SELECT id, pr_url FROM proposals WHERE user_id = ? AND state = 'applied'", (store.user_id,)).fetchall()
+    for proposal_id, pr_url in applied:
         row = git_row(store, proposal_id)
         if row is None:
             continue
         repo = Repo(Path(row["work_tree"]), Path(row["git_dir"]) if row["git_dir"] else None)
         try:
+            if pr_url and not repo.ok("fetch", "--quiet", repo.remote()):
+                print(f"[gardener] cannot fetch for {row['branch']}; checking local refs")
             merged = _merged(repo, row)
         except GitError as e:
             print(f"[gardener] cannot check {row['branch']}: {e}")

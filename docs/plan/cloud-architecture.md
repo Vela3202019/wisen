@@ -409,8 +409,9 @@ the default branch, never force), and opens the pull request with the `gh`
 CLI, titled like the commit and carrying the rationale, evidence and replay
 summary. A rerun finds the branch's open pull request instead of opening
 another. The link comes back in the job status and is recorded on the
-proposal (`proposals.pr_url`); the state stays `applied`, and merge
-detection goes on as before. A failure reaches the card as an error class
+proposal (`proposals.pr_url`); the state stays `applied`. Merge detection
+fetches a published proposal's remote first (a fetch only: no pull,
+checkout or push), so a pull request merged on GitHub is seen. A failure reaches the card as an error class
 only (`NoRemote`, `NoGhAuth`, `PushFailed`, `PrFailed`, `NotApplied`); the
 message, which may name paths, stays in the laptop's log. `home` targets
 have no remote, so the dashboard shows no button for them and the server

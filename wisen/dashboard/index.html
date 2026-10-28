@@ -428,7 +428,6 @@ async function load() {
   const el = document.getElementById("logs");
   if (!logs.length) { el.innerHTML = '<p class="empty">No reflections yet.</p>'; return; }
   el.innerHTML = logs.map(render).join("");
-  focusHash();
 }
 
 // ── approval inbox ──────────────────────────────────────────────────────────
@@ -462,10 +461,6 @@ function publishError(error) {
 // everything else (rejected, expired, applied, ...) is shown as what it is.
 function isWaiting(p) {
   return p.state === "proposed" && (!p.expires_at || new Date(p.expires_at) > new Date());
-}
-
-function inFlight(p) {
-  return p.state === "approved" || (p.state === "applied" && ["queued", "leased", "waiting"].includes(p.publish?.state));
 }
 
 // The main page holds what still needs the owner: a decision, or Push &
@@ -502,8 +497,6 @@ function publishControls(p) {
     <p class="meta">Branch <code>${esc(branch)}</code> on the laptop.</p>`;
 }
 
-let pollTimer = null;
-
 function renderApprovals(proposals) {
   const el = document.getElementById("approvals");
   const waiting = proposals.filter(isWaiting);
@@ -538,9 +531,6 @@ function renderApprovals(proposals) {
     <div class="asof">${updatedAt()}</div>`
     + waiting.map(card).join("")
     + (approved.length ? `<h2>Approved · ${approved.length}</h2>` + approved.map(card).join("") : "");
-  // While the laptop has work to do for a card, check back on its own.
-  clearTimeout(pollTimer);
-  if (proposals.some(inFlight)) pollTimer = setTimeout(load, 10000);
 }
 
 // The change log: every resolved proposal, newest first, with its decision
@@ -685,7 +675,7 @@ function focusHash() {
 // reload it when a notification brings the app to a card (a hash change,
 // or a page restored from the back-forward cache) and whenever the app
 // comes back to the foreground.
-window.addEventListener("hashchange", () => load().catch(() => focusHash()));
+window.addEventListener("hashchange", () => load().then(focusHash, focusHash));
 window.addEventListener("pageshow", e => { if (e.persisted) load(); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") load(); });
 
@@ -739,7 +729,7 @@ async function trigger() {
 }
 
 document.getElementById("date").value = new Date().toLocaleDateString("sv");
-load();
+load().then(focusHash);
 setupPush().catch(e => console.warn("push unavailable:", e));
 </script>
 </body>

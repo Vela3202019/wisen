@@ -72,10 +72,15 @@ class Repo:
                 return name
         return self.out("symbolic-ref", "--short", "HEAD")
 
+    def remote(self) -> str | None:
+        """The remote pull requests go to: origin, else the first one."""
+        remotes = self.out("remote").split()
+        return "origin" if "origin" in remotes else (remotes[0] if remotes else None)
+
     def default_refs(self) -> list[str]:
-        """Where the default branch can be seen: origin's copy and the local one."""
+        """Where the default branch can be seen: the remote's copy and the local one."""
         name = self.default_branch()
-        return [ref for ref in (f"refs/remotes/origin/{name}", f"refs/heads/{name}") if self.resolve(ref)]
+        return [ref for ref in (f"refs/remotes/{self.remote()}/{name}", f"refs/heads/{name}") if self.resolve(ref)]
 
     @contextmanager
     def scratch_index(self) -> Iterator[dict]:

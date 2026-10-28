@@ -79,13 +79,6 @@ def check(store: SqliteStore, proposal_id: str) -> dict:
     return {"repo": repo, "branch": git["branch"], "target": row["target"], "payload": json.loads(row["payload"])}
 
 
-def _remote(repo: Repo) -> str:
-    remotes = repo.out("remote").split()
-    if not remotes:
-        raise NoRemote(f"{repo.work_tree} has no git remote")
-    return "origin" if "origin" in remotes else remotes[0]
-
-
 def _gh(work_tree: Path, *args: str, input: str | None = None) -> subprocess.CompletedProcess:
     env = {**os.environ, "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1", "GIT_TERMINAL_PROMPT": "0"}
     try:
@@ -142,7 +135,9 @@ def publish(store: SqliteStore, proposal_id: str) -> str:
     proposal."""
     info = check(store, proposal_id)
     repo, branch = info["repo"], info["branch"]
-    remote = _remote(repo)
+    remote = repo.remote()
+    if remote is None:
+        raise NoRemote(f"{repo.work_tree} has no git remote")
     _check_auth(repo.work_tree)
     url = open_pr(repo.work_tree, branch)
     if url is None:

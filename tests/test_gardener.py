@@ -74,7 +74,7 @@ from wisen.cloud.mailbox import Mailbox
 from wisen.cloud.server import create_app
 from wisen.evals import runner, verification
 from wisen.evals.cases import Case, ContextTurn, save_case
-from wisen.gardener import loop, publisher
+from wisen.gardener import applier, loop, publisher
 from wisen.gardener.agent import Deps, build_agent
 from wisen.gardener.git import Repo, one_file_diff
 from wisen.gardener.targets import Refused, allowed, editable_files, resolve
@@ -591,7 +591,14 @@ async def check_publisher() -> None:
     git(demo, "update-ref", f"refs/heads/wisen/gardener/{new_file.id}", "main")
     refused(publisher.NotApplied, new_file.id)
     assert git(origin, "for-each-ref", "--format=%(refname)") == f"refs/heads/{branch}"
-    print("✓ gardener: Push & create PR pushes only the applied branch, opens one pull request, and reuses it")
+    # The pull request merges on GitHub: only the remote's main has the branch.
+    local_main = git(demo, "rev-parse", "main")
+    git(origin, "update-ref", "refs/heads/main", git(demo, "rev-parse", branch))
+    assert (p.id, "merged") in applier.detect_merges(store, proposals)
+    assert (await proposals.get(p.id)).state == "merged"
+    assert git(demo, "rev-parse", "main") == local_main   # fetched, not pulled
+    print("✓ gardener: Push & create PR pushes only the applied branch, opens one pull request, and reuses it;"
+          " its merge on GitHub is seen after a fetch")
 
 
 # ── the verification loop's numbers ───────────────────────────────────────────
