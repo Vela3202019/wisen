@@ -344,22 +344,10 @@ safe: anything already in SQLite is skipped, never overwritten.
 
 ## Tests
 
-Script-style tests, run from the repo root. The first group runs offline on
-committed fixtures and is exactly what CI runs:
-
-```bash
-python3 -m tests.test_fixtures   # committed sample sessions for every connector
-python3 -m tests.test_claude_cli # subscription-synthesis adapter (no live call)
-python3 -m tests.test_egress     # cloud export leaks nothing off the allow-list
-python3 -m tests.test_store      # SQLite store on a temp file
-python3 -m tests.test_jobs       # job engine + proposal state machine, incl. a kill-and-restart
-python3 -m tests.test_cloud      # server stage A in-process: pairing, push, approvals, backups, privacy
-python3 -m tests.test_gardener   # Gardener loop on temp repos with a fake model: apply once, allow-list, measure
-```
-
-The rest read your real local data and are useful once you actually use
-wisen: `test_ingest`, `test_sources`, `test_search`, and `test_synthesis`
-(calls the LLM, writes SQLite).
+Script-style tests, run from the repo root. `python3 -m tests.test_fixtures`
+runs offline on committed sample sessions; the full list, what CI runs, and
+the tests that read your real local data are in
+[CONTRIBUTING.md](CONTRIBUTING.md#dev-setup).
 
 ## Contributing
 
