@@ -9,9 +9,12 @@ Browser (session cookie, after /login):
   GET  /api/usage                  latest usage packet
   GET  /api/queue                  dates waiting for a device to synthesize
   POST /api/trigger                {"date"}: ask a device to synthesize that day
-  GET  /api/proposals              the approval inbox
+  GET  /api/proposals              the approval inbox and change log (each proposal with
+                                   its decision, latest outcome and publish job's state)
   GET  /api/timeline               daily verification metrics + merged Gardener changes
   POST /api/proposals/{id}/decision  {"decision", "note", "request_id"}
+  POST /api/proposals/{id}/publish   no body; 202 {"status": "publishing"}: the laptop
+                                   pushes the applied branch and opens its pull request
   GET  /api/devices                paired devices
   POST /api/devices/{id}/revoke
   POST /api/pairing-codes          a one-time code for `wisen cloud pair`
@@ -48,7 +51,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from wisen.cloud.backup import serving
-from wisen.cloud.mailbox import ACCEPTED, Conflict, Mailbox
+from wisen.cloud.mailbox import ACCEPTED, Conflict, Mailbox, NotPublishable
 from wisen.cloud.push import WebPushSender
 from wisen.packets import PacketRejected, receive
 from wisen.proposals import IllegalTransition
@@ -244,7 +247,10 @@ def create_app(
 
     @app.get("/api/proposals")
     async def proposals(user: User):
-        return [asdict(p) for p in await mailbox.inbox(user)]
+        publishing = await asyncio.to_thread(mailbox.publish_jobs, user)
+        details = await asyncio.to_thread(mailbox.inbox_details, user)
+        return [{**asdict(p), "publish": publishing.get(p.id), **details.get(p.id, {"decision": None, "outcome": None})}
+                for p in await mailbox.inbox(user)]
 
     @app.get("/api/timeline")
     async def timeline(user: User):
@@ -260,6 +266,16 @@ def create_app(
         except ValueError as e:  # request id reused for a different command
             raise HTTPException(409, str(e)) from None
         return {**asdict(decision), "already_decided": decision.request_id != body.request_id}
+
+    @app.post("/api/proposals/{proposal_id}/publish", status_code=202)
+    async def publish(proposal_id: Id, user: User):
+        try:
+            await mailbox.publish(user, proposal_id)
+        except LookupError as e:
+            raise HTTPException(404, str(e)) from None
+        except NotPublishable as e:
+            raise HTTPException(409, str(e)) from None
+        return {"status": "publishing"}
 
     @app.get("/api/devices")
     async def devices(user: User):

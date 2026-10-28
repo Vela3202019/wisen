@@ -260,14 +260,18 @@ The loop is propose, approve, apply as a branch, measure weeks later:
 2. You approve, reject with a note (the note reaches the model on the next
    run), or let it expire after 7 days.
 3. An approval becomes a git branch (`wisen/gardener/<proposal id>`) on your
-   laptop. wisen never pushes to, or merges into, a default branch; you merge
-   when you choose.
+   laptop. With a server, the approved card then shows the branch's diff and
+   a **Push & create PR** button: the laptop pushes that one branch to the
+   repo's remote and opens a pull request with the `gh` CLI (title, rationale
+   and evidence in the description), and the card shows the link. wisen never
+   pushes to, or merges into, a default branch; merging is yours.
 4. Two weeks after a merge, the eval loop compares field metrics before and
    after. A change that made things worse gets a revert proposal.
 
 Files outside any repo, such as `~/.claude/CLAUDE.md` and personal skills,
 are tracked in a git repo wisen keeps for them (`~/.wisen/gardener/home.git`),
-so a proposal there is a branch you merge like any other. The design is in
+so a proposal there is a branch you merge like any other; it has no remote,
+so there is no pull request for it. The design is in
 [docs/plan/cloud-architecture.md](docs/plan/cloud-architecture.md) §5 and the
 measurement side in [docs/plan/eval-loop.md](docs/plan/eval-loop.md).
 

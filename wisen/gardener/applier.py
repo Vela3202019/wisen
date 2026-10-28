@@ -18,7 +18,11 @@ work tree of yours is touched.
 
 Merge detection (`detect_merges`) watches applied branches: in the default
 branch (merged, also by squash: the file there matches the branch), or
-deleted unmerged (abandoned). A merge starts the 2-week measure timer.
+deleted unmerged (abandoned). A merge starts the 2-week measure timer. A
+published proposal's fate is its pull request's on GitHub, whatever branch it
+was based on, so gh is asked instead and the local branch is ignored: merged,
+closed unmerged (abandoned), or still open; if gh cannot answer, the pass
+reports nothing for it.
 """
 import json
 import sqlite3
@@ -26,6 +30,7 @@ from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from wisen.gardener import publisher
 from wisen.gardener.git import GitError, Repo, diff_paths
 from wisen.gardener.targets import Refused, Target, resolve
 from wisen.jobs import insert_job, ts
@@ -137,8 +142,11 @@ def git_row(store: SqliteStore, proposal_id: str) -> sqlite3.Row | None:
                             (store.user_id, proposal_id)).fetchone()
 
 
-def _merged(repo: Repo, row: sqlite3.Row) -> bool | None:
-    """True if merged; False if the branch is gone unmerged; None if still open."""
+def _merged(repo: Repo, row: sqlite3.Row, pr_url: str | None) -> bool | None:
+    """True if merged; False if the branch (or its pull request) is gone
+    unmerged; None if still open."""
+    if pr_url:
+        return {"MERGED": True, "CLOSED": False}.get(publisher.pr_state(repo, pr_url))
     refs = ["refs/heads/main"] if row["git_dir"] else repo.default_refs()
     for ref in refs:
         if repo.ok("merge-base", "--is-ancestor", row["commit_sha"], ref):
@@ -149,21 +157,22 @@ def _merged(repo: Repo, row: sqlite3.Row) -> bool | None:
 
 
 def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, str]]:
-    """Move applied proposals whose branch merged (or was deleted unmerged).
+    """Move applied proposals whose branch merged (or was deleted unmerged,
+    or whose pull request was closed unmerged).
     A merge sets the measure timer in the same transaction. Safe to call
     any time: each move has a fixed request id."""
     moved = []
     with closing(store._connect()) as conn:
-        applied = [r["id"] for r in conn.execute(
-            "SELECT id FROM proposals WHERE user_id = ? AND state = 'applied'", (store.user_id,))]
-    for proposal_id in applied:
+        applied = conn.execute(
+            "SELECT id, pr_url FROM proposals WHERE user_id = ? AND state = 'applied'", (store.user_id,)).fetchall()
+    for proposal_id, pr_url in applied:
         row = git_row(store, proposal_id)
         if row is None:
             continue
         repo = Repo(Path(row["work_tree"]), Path(row["git_dir"]) if row["git_dir"] else None)
         try:
-            merged = _merged(repo, row)
-        except GitError as e:
+            merged = _merged(repo, row, pr_url)
+        except (GitError, publisher.PublishError) as e:
             print(f"[gardener] cannot check {row['branch']}: {e}")
             continue
         if merged is None:
@@ -180,7 +189,8 @@ def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, s
                            now=now)
             else:
                 proposals.transition_in(conn, proposal_id, "applied", "abandoned", f"abandoned:{proposal_id}",
-                                        "applier", f"{row['branch']} was deleted unmerged")
+                                        "applier", f"pull request {pr_url} was closed unmerged" if pr_url
+                                        else f"{row['branch']} was deleted unmerged")
         moved.append((proposal_id, "merged" if merged else "abandoned"))
     return moved
 

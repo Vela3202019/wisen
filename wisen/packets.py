@@ -10,7 +10,8 @@ models on receipt, so the schema is the privacy boundary at both ends.
   proposal_update  a git state the laptop decided for a proposal (applied,
                merged, measured, …), with its branch and measured numbers
   metrics      one day's verification-loop numbers (no text)
-  job_status   how a device job ended: state, timings, error class
+  job_status   how a device job ended: state, timings, error class (and, for
+               a publish job, the pull request it opened)
 
 Builders here only shape data. Redaction and length caps live on the field
 types (wisen/synthesis/schema.py) and run under the EGRESS validation context,
@@ -86,6 +87,7 @@ Target = _whole(300)       # project alias + relative path of a file the Gardene
 Diff = _whole(20_000)      # a unified diff
 ErrorClass = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][\w.]*$", max_length=200)]
 Branch = Annotated[str, StringConstraints(pattern=r"^wisen/gardener/[0-9a-f]{32}$", max_length=60)]
+PrUrl = Annotated[_whole(300), StringConstraints(pattern=r"^https://\S+$")]   # a pull request's link
 UpdateId = Annotated[str, StringConstraints(
     pattern=r"^(cli|expire|applied|failed|merged|abandoned|measuring|measured):[0-9a-f]{32}$", max_length=50)]
 
@@ -249,6 +251,7 @@ class JobStatus(BaseModel):
     finished_at: Label
     error_class: ErrorClass | None = None  # an exception's class name, never its message or traceback
     skipped: Text | None = None            # a synthesize job that left the day alone, and why
+    pr_url: PrUrl | None = None  # a publish job's result: the pull request it opened or found
 
 
 class JobStatusPacket(JobStatus, Envelope):

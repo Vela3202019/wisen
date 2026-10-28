@@ -35,11 +35,11 @@ class Repo:
         return ["git", "-C", str(self.work_tree), *args]
 
     def run(self, *args: str, env: dict | None = None, input: str | None = None,
-            check: bool = True) -> subprocess.CompletedProcess:
+            check: bool = True, timeout: float | None = None) -> subprocess.CompletedProcess:
         full_env = {k: v for k, v in os.environ.items() if k not in _SCRUB}
         full_env.update({"GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C", **(env or {})})
         r = subprocess.run(self._cmd(args), capture_output=True, text=True, input=input, env=full_env,
-                           check=False)
+                           check=False, timeout=timeout)
         if check and r.returncode != 0:
             raise GitError(f"git {args[0]} failed: {r.stderr.strip()[:300]}")
         return r
@@ -72,10 +72,23 @@ class Repo:
                 return name
         return self.out("symbolic-ref", "--short", "HEAD")
 
+    def remote(self) -> str | None:
+        """The remote pull requests go to: origin, else the first one."""
+        remotes = self.out("remote").split()
+        return "origin" if "origin" in remotes else (remotes[0] if remotes else None)
+
+    def no_prompt(self) -> dict:
+        """Env for talking to a remote: the owner's ssh command (theirs, else
+        the repo's core.sshCommand, else ssh) in batch mode, so it never prompts."""
+        ssh = (os.environ.get("GIT_SSH_COMMAND")
+               or self.run("config", "core.sshCommand", check=False).stdout.strip() or "ssh")
+        return {"GIT_SSH_COMMAND": f"{ssh} -o BatchMode=yes"}
+
     def default_refs(self) -> list[str]:
-        """Where the default branch can be seen: origin's copy and the local one."""
-        name = self.default_branch()
-        return [ref for ref in (f"refs/remotes/origin/{name}", f"refs/heads/{name}") if self.resolve(ref)]
+        """Where the default branch can be seen: the remote's copy and the local one."""
+        name, remote = self.default_branch(), self.remote()
+        refs = [f"refs/remotes/{remote}/{name}"] if remote else []
+        return [ref for ref in (*refs, f"refs/heads/{name}") if self.resolve(ref)]
 
     @contextmanager
     def scratch_index(self) -> Iterator[dict]:
