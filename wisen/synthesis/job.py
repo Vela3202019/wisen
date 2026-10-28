@@ -3,12 +3,30 @@ Synthesis as a durable job: one day's ingest + Observer + Synthesizer + save,
 checkpointed after each stage by the job engine (wisen/jobs.py). If the
 process dies after the Observer, the rerun starts at the Synthesizer. A saved
 day queues that day's Gardener run (wisen/gardener/loop.py).
+
+`synthesize_day` is the one entry for a day's run (the CLI, the launchd
+script and the paired server's device job all go through it), and it is where
+a day is left alone: a day with no sessions has nothing to reflect on, and a
+day already reflected on is not run again unless a session came in after the
+reflection or the run was explicitly asked for (`force`). The skip is
+returned as a `Skipped`, which each entry point prints or reports.
 """
-from wisen.ingestion.pipeline import ingest_all
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from wisen.ingestion.pipeline import ingest_all, ingest_sessions
 from wisen.jobs import Job, JobContext, get_engine
 from wisen.llm import get_model
+from wisen.store import get_store
 from wisen.synthesis import agent
 from wisen.synthesis.schema import DayObservation, Reflection
+
+
+@dataclass
+class Skipped:
+    """A day the run left alone, and why."""
+    date: str
+    reason: str
 
 
 async def run_synthesis_job(ctx: JobContext, args: dict) -> dict:
@@ -47,8 +65,29 @@ async def enqueue_day(date: str) -> Job:
     )
 
 
-async def synthesize_day(date: str) -> Job:
-    """Synthesize `date` (see `enqueue_day`) and work the queue until it is final."""
+async def skip_reason(date: str, force: bool = False) -> str | None:
+    """Why `date` is not synthesized now: no agent sessions that day in local
+    history (commits are not sessions, and wisen's own runs do not count:
+    wisen/connectors/claude_code.py), or a reflection already made after the
+    day's last session ended. An explicit request (`force`) overrides both."""
+    if force:
+        return None
+    sessions = [s for s in (await ingest_sessions(date)).sessions if s.date == date]
+    if not sessions:
+        return "no new sessions"
+    existing = await get_store().get_reflection(date)
+    made = existing.get("synthesized_at") if existing else None
+    if made and datetime.fromisoformat(made).astimezone(UTC) >= max(s.ended_at.astimezone(UTC) for s in sessions):
+        return f"already synthesized at {made}, no session since"
+    return None
+
+
+async def synthesize_day(date: str, force: bool = False) -> Job | Skipped:
+    """Synthesize `date` (see `enqueue_day`) and work the queue until it is
+    final, unless `skip_reason` says to leave the day alone."""
+    reason = await skip_reason(date, force)
+    if reason is not None:
+        return Skipped(date, reason)
     engine = get_engine()
     job = await enqueue_day(date)
     return await engine.run_until_done(job.id)

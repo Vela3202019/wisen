@@ -4,10 +4,14 @@ killed (SIGKILL) between the Observer and the Synthesizer resumes without
 calling the Observer again and saves one reflection; request ids return the
 original job; expired leases are reclaimed and fenced; an interrupted unsafe
 step is surfaced, not re-run; retries back off; waits resume on a signal or a
-timeout; proposals refuse illegal moves and keep their first decision.
+timeout; proposals refuse illegal moves and keep their first decision. A day
+with nothing new (no sessions, or a reflection already made after its last
+session) is skipped, not synthesized, unless asked for explicitly; wisen's own
+`claude -p` runs are not sessions.
 No model or network needed. Run: python3 -m tests.test_jobs
 """
 import asyncio
+import json
 import os
 import signal
 import sqlite3
@@ -20,6 +24,8 @@ from pathlib import Path
 
 from wisen import jobs as jobs_mod
 from wisen import store as store_mod
+from wisen.connectors import claude_code
+from wisen.ingestion.normalizer import NormalizedSession, SessionMetadata, Turn
 from wisen.ingestion.pipeline import IngestResult
 from wisen.jobs import LEASE, RETRY_BASE, JobEngine, LeaseLost
 from wisen.proposals import IllegalTransition, Proposals, expire_proposal_job
@@ -71,9 +77,18 @@ REFLECTION = Reflection(
 )
 
 
+def _session(date: str, ended_at: datetime, source: str = "claude-code") -> NormalizedSession:
+    turn = Turn(role="user", content="hi", timestamp=ended_at)
+    return NormalizedSession(session_id=f"{source}:{date}", source=source, project_path="/p", project_name="p",
+                             date=date, started_at=ended_at, ended_at=ended_at, turns=[turn],
+                             metadata=SessionMetadata(total_turns=1, user_turns=1, assistant_turns=0,
+                                                      session_length_minutes=0), raw_source_path="x")
+
+
 def _fake_synthesis(calls: Path, crash_on: str | None) -> None:
     """Swap the model calls for canned outputs that log each call to `calls`;
-    `crash_on` names the output type whose call kills the process."""
+    `crash_on` names the output type whose call kills the process. The day
+    has one session, so it is synthesized rather than skipped."""
     def log(name: str) -> None:
         with open(calls, "a") as f:
             f.write(name + "\n")
@@ -85,7 +100,7 @@ def _fake_synthesis(calls: Path, crash_on: str | None) -> None:
         return OBSERVATION if output_type is DayObservation else REFLECTION.model_copy()
 
     async def ingest(date):
-        return IngestResult()
+        return IngestResult(sessions=[_session(DATE, T0 - timedelta(hours=20))])
 
     save = agent.save_reflection
 
@@ -96,6 +111,7 @@ def _fake_synthesis(calls: Path, crash_on: str | None) -> None:
     agent._generate = generate
     agent.save_reflection = logged_save
     synthesis_job.ingest_all = ingest
+    synthesis_job.ingest_sessions = ingest
     synthesis_job.get_model = lambda: "test:model"
 
 
@@ -135,10 +151,15 @@ async def check_kill_and_restart(tmp: str):
     assert done.state == "succeeded" and done.result == {"date": DATE} and done.attempts == 1, done
     # The Observer ran once; the interrupted Synthesizer re-ran; one save, one reflection.
     assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save"], calls.read_text()
-    assert len(_rows(store, "SELECT 1 FROM reflections")) == 1
-    # Rerunning a day that succeeded synthesizes it afresh under the same job;
-    # the newest reflection replaces the old one.
-    again = await synthesis_job.synthesize_day(DATE)
+    (doc,) = _rows(store, "SELECT doc FROM reflections")
+    made = json.loads(doc["doc"])["synthesized_at"]
+    # Asked again (a second scheduler, say), the day is left alone: its
+    # reflection was made after its last session.
+    skipped = await synthesis_job.synthesize_day(DATE)
+    assert skipped == synthesis_job.Skipped(DATE, f"already synthesized at {made}, no session since"), skipped
+    # Asked for explicitly, it synthesizes afresh under the same job; the
+    # newest reflection replaces the old one.
+    again = await synthesis_job.synthesize_day(DATE, force=True)
     assert again.id == job["id"] and again.state == "succeeded" and again.attempts == 1, again
     assert calls.read_text().split() == ["DayObservation", "Reflection", "Reflection", "save",
                                          "DayObservation", "Reflection", "save"], calls.read_text()
@@ -153,6 +174,64 @@ async def check_kill_and_restart(tmp: str):
     assert [r["name"] for r in outputs] == ["observe", "synthesize", "save", "garden"], outputs
     assert all(r["output"] is None for r in outputs), [dict(r) for r in outputs]
     print("✓ jobs: SIGKILL between Observer and Synthesizer resumes; Observer not re-run; one save")
+
+
+def _transcript(projects: Path, project: str, date: str) -> None:
+    """One Claude Code session on `date` under projects/<project>."""
+    at = datetime.fromisoformat(f"{date}T10:00:00+00:00")
+    events = [{"sessionId": "s1", "type": role, "timestamp": (at + timedelta(minutes=i)).isoformat(),
+               "message": {"role": role, "content": "hello"}} for i, role in enumerate(("user", "assistant"))]
+    (projects / project).mkdir(parents=True)
+    (projects / project / "s1.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+
+
+async def check_skip_rules(tmp: str):
+    db, calls = Path(tmp) / "skip.db", Path(tmp) / "skip-calls.txt"
+    os.environ["WISEN_DB_PATH"] = str(db)
+    store_mod._store = None
+    store = store_mod.get_store()
+    _fake_synthesis(calls, crash_on=None)
+    sessions: list[NormalizedSession] = []
+
+    async def ingest(date):
+        return IngestResult(sessions=list(sessions))
+
+    synthesis_job.ingest_all = ingest
+    synthesis_job.ingest_sessions = ingest
+    jobs_mod._engine = JobEngine(store, {"synthesize": synthesis_job.run_synthesis_job})
+    # Nothing happened that day: no run, no job.
+    assert await synthesis_job.synthesize_day(DATE) == synthesis_job.Skipped(DATE, "no new sessions")
+    assert not _rows(store, "SELECT 1 FROM jobs") and not calls.exists()
+    # A session: the day runs.
+    sessions.append(_session(DATE, T0 - timedelta(hours=20)))
+    assert (await synthesis_job.synthesize_day(DATE)).state == "succeeded"
+    (doc,) = _rows(store, "SELECT doc FROM reflections")
+    made = json.loads(doc["doc"])["synthesized_at"]
+    assert await synthesis_job.synthesize_day(DATE) == synthesis_job.Skipped(
+        DATE, f"already synthesized at {made}, no session since")
+    # Some connectors give times without an offset; they compare with the
+    # stored reflection time, and with offset-aware session times, as UTC.
+    sessions.append(_session(DATE, (T0 - timedelta(hours=19)).replace(tzinfo=None)))
+    assert await synthesis_job.synthesize_day(DATE) == synthesis_job.Skipped(
+        DATE, f"already synthesized at {made}, no session since")
+    # A session that ended after the reflection was made is new: the day runs again.
+    sessions.append(_session(DATE, datetime.now(UTC) + timedelta(hours=1)))
+    assert (await synthesis_job.synthesize_day(DATE)).state == "succeeded"
+    assert calls.read_text().split().count("save") == 2, calls.read_text()
+    jobs_mod._engine = None
+    # wisen's own `claude -p` runs are recorded by Claude Code like any session;
+    # the connector leaves them out, so a day of only those is a day with no sessions.
+    projects = Path(tmp) / "projects"
+    _transcript(projects, claude_code._OWN_PROJECT, DATE)
+    _transcript(projects, "-Users-dev-demo", DATE)
+    real = claude_code._CLAUDE_DIR
+    claude_code._CLAUDE_DIR = projects
+    try:
+        found = [s.project_path async for s in claude_code.ingest(DATE)]
+    finally:
+        claude_code._CLAUDE_DIR = real
+    assert found == ["/Users/dev/demo"], found
+    print("✓ jobs: a day with no new sessions is skipped, not synthesized, unless forced; own runs are not sessions")
 
 
 # ── engine mechanics ──────────────────────────────────────────────────────────
@@ -504,6 +583,7 @@ async def check_proposals(tmp: str):
 async def main():
     with tempfile.TemporaryDirectory() as tmp:
         await check_kill_and_restart(tmp)
+        await check_skip_rules(tmp)
         await check_request_id(tmp)
         await check_failed_rerun(tmp)
         await check_repeated_interrupts(tmp)

@@ -42,11 +42,8 @@ class IngestResult:
         }
 
 
-async def ingest_all(date: str | None = None) -> IngestResult:
-    result = IngestResult()
-    today = date or datetime.now(UTC).date().isoformat()
-
-    session_connectors = [
+def _local_connectors(date: str | None) -> list:
+    return [
         ("claude-code",  claude_code.ingest(date)),
         ("codex",        codex.ingest(date)),
         ("opencode",     opencode.ingest(date)),
@@ -54,15 +51,31 @@ async def ingest_all(date: str | None = None) -> IngestResult:
         ("gemini-cli",   gemini_cli.ingest(date)),
         ("pi",           pi.ingest(date=date)),
         ("export",       generic_export.ingest(date=date)),
-        ("git",          git_commits.ingest(date)),
     ]
 
-    for source_name, gen in session_connectors:
+
+async def _read(result: IngestResult, connectors: list) -> None:
+    for source_name, gen in connectors:
         try:
             async for session in gen:
                 result.sessions.append(session)
         except (OSError, ValueError) as e:
             result.errors.append(f"{source_name}: {e}")
+
+
+async def ingest_sessions(date: str) -> IngestResult:
+    """The day's agent sessions from local history only: no git commits, so
+    no network."""
+    result = IngestResult()
+    await _read(result, _local_connectors(date))
+    return result
+
+
+async def ingest_all(date: str | None = None) -> IngestResult:
+    result = IngestResult()
+    today = date or datetime.now(UTC).date().isoformat()
+
+    await _read(result, [*_local_connectors(date), ("git", git_commits.ingest(date))])
 
     try:
         async for config in agent_configs.ingest(today):

@@ -253,7 +253,7 @@ async def check_revoke():
         await browser.post("/api/trigger", json={"date": "2026-10-19"})
         async with server.http() as http, CloudClient(creds, http) as client:
             job = (await client.poll(0, wait=0))["job"]
-            assert job and job["kind"] == "synthesize" and job["args"] == {"date": "2026-10-19"}, job
+            assert job and job["kind"] == "synthesize" and job["args"] == {"date": "2026-10-19", "force": True}, job
             r = await browser.post(f"/api/devices/{creds.device_id}/revoke", json={})
             assert r.status_code == 200, r.text
             for call in (client.poll(0, wait=0), client.heartbeat(job["id"]),
@@ -759,13 +759,45 @@ async def check_no_marker_reaches_server():
         assert [p["target"] for p in (await browser.get("/api/proposals")).json()] == ["wisen:AGENTS.md"]
     await server.run_jobs()
     (job,) = server.mailbox.device_jobs(USER, ("succeeded",))
-    assert job.args == {"date": FIXTURE_DATE} and job.result["state"] == "succeeded", job
+    assert job.args == {"date": FIXTURE_DATE, "force": True} and job.result["state"] == "succeeded", job
     raw = _db_bytes(server.db).decode("utf-8", errors="replace")
     assert "A calm day of API work." in raw  # the scan does see what was uploaded
     markers = [*MARKERS, *RAW, "CANARY_PAUSED_RUN", FAKE_KEY, ABS_PATH, "/Users/alice", EMAIL, "acme-corp"]
     leaked = [m for m in markers if m in raw]
     assert not leaked, f"in the server database: {leaked}"
     print("✓ cloud: after a full laptop -> server sync of the fixtures, no marker is in the server database")
+
+
+async def check_device_job_skips_empty_day():
+    """A scheduled device job for a day with no sessions makes no reflection;
+    it ends succeeded, and the server's record of it says why. The owner's
+    Trigger for the same day is an explicit request: it runs the day."""
+    server = _server("skip")
+    store = get_store()
+    prompts: list[str] = []
+    _fake_model(prompts)
+    async with server.browser() as browser:
+        creds = await server.device(browser)
+        # What the daily schedule enqueues (wisen/cloud/mailbox.py _schedule).
+        await server.mailbox.enqueue_device_job(USER, "synthesize", {"date": "2026-02-01"},
+                                                request_id="daily-synthesis:2026-02-01", rerun=False)
+        async with server.http() as http:
+            await worker.run(creds, store, http=http, once=True)
+            await worker.run(creds, store, http=http, once=True)
+        assert "2026-02-01" not in [log["date"] for log in (await browser.get("/api/logs")).json()]
+        await server.run_jobs()
+        (job,) = server.mailbox.device_jobs(USER, ("succeeded",))
+        assert job.result["state"] == "succeeded" and job.result["skipped"] == "no new sessions", job.result
+        assert not prompts, prompts
+        await browser.post("/api/trigger", json={"date": "2026-02-01"})
+        async with server.http() as http:
+            await worker.run(creds, store, http=http, once=True)
+            await worker.run(creds, store, http=http, once=True)
+        assert "2026-02-01" in [log["date"] for log in (await browser.get("/api/logs")).json()]
+    await server.run_jobs()
+    triggered = [j for j in server.mailbox.device_jobs(USER, ("succeeded",)) if j.args.get("force")]
+    assert [j.result.get("skipped") for j in triggered] == [None], [j.result for j in triggered]
+    print("✓ cloud: a scheduled job for a day with no sessions is skipped and says why; a Trigger runs it")
 
 
 async def main():
@@ -781,6 +813,7 @@ async def main():
     await check_body_limit()
     await check_no_model_key()
     await check_no_marker_reaches_server()
+    await check_device_job_skips_empty_day()
     await check_prepairing_proposals()
     await check_batch_after_briefing()
     print("\nall cloud tests passed")

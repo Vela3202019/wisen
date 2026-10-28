@@ -541,8 +541,9 @@ class Mailbox:
         now = self.clock()
         with self.store(user_id).transaction() as conn:
             if synthesize is not None:
-                # Same request id as the laptop's own daily run and the
-                # dashboard trigger: a day is one job however it was asked for.
+                # Same request id as the laptop's own daily run: a day is one
+                # job however it was scheduled. (A dashboard trigger is its own
+                # job, forced; on the laptop both run the day's one local job.)
                 insert_job(conn, user_id, "synthesize", {"date": synthesize}, request_id=f"daily-synthesis:{synthesize}",
                            run_after=now, max_attempts=3, now=now, runner="device")
             insert_job(conn, user_id, "schedule-daily", {"date": day.isoformat()},

@@ -238,8 +238,8 @@ def create_app(
 
     @app.post("/api/trigger")
     async def trigger(body: Trigger, user: User):
-        await mailbox.enqueue_device_job(user, "synthesize", {"date": body.date},
-                                         request_id=f"daily-synthesis:{body.date}", rerun=True)
+        await mailbox.enqueue_device_job(user, "synthesize", {"date": body.date, "force": True},
+                                         request_id=f"trigger-synthesis:{body.date}", rerun=True)
         return {"queued": body.date}
 
     @app.get("/api/proposals")

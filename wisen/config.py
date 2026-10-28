@@ -37,3 +37,11 @@ def root() -> Path:
     dotfiles to run wisen against that machine's history.
     """
     return Path(get("paths", "root_dir", "WISEN_ROOT_DIR", "~")).expanduser()
+
+
+def cli_cwd() -> Path:
+    """Where wisen runs its own `claude -p` calls (synthesis on a Claude
+    subscription). Claude Code records every run under its working directory,
+    so the Claude Code connector leaves this one out: wisen never reflects on
+    its own runs."""
+    return Path("~/.wisen/claude-cli").expanduser()

@@ -110,6 +110,7 @@ The full command set:
 
 ```bash
 wisen synthesize [YYYY-MM-DD]   # ingest sessions + write one day's reflection, then the Gardener batch
+                                #   (--force: run a day that has no sessions or is already reflected on)
 wisen serve                     # POST /synthesize, GET /reflections, POST /chat (SSE)
 wisen export [dir]              # dump reflections to JSON files
 wisen egress                    # what passed the egress gate today
@@ -172,6 +173,16 @@ search re-reads the original files (grep-first) at question time. Local
 storage is not the same as fully offline: the model calls send excerpts out.
 See [What leaves your machine](#what-leaves-your-machine).
 
+**A day with nothing new is skipped, not reflected on.** Wherever a day's run
+is asked for (`wisen synthesize`, the launchd script, a paired server's daily
+job), a day with no sessions is left alone, and so is a day whose reflection
+was already made after its last session ended, so two schedulers asking for
+the same day make one reflection. The skip is printed, and a paired server
+records it on the job (`skipped: no new sessions`). wisen's own `claude -p`
+synthesis runs are not sessions: it never reflects on its own reflection
+runs. `wisen synthesize <date> --force`, or the dashboard's Trigger, runs a day
+regardless.
+
 Where the code lives:
 
 | Path | What it is |
@@ -220,11 +231,32 @@ code, no settings, no MCP config. The allow-list is a path check in the
 applier, not a line in a prompt, so a proposal naming any other path is
 refused even after approval.
 
+What it proposes is bounded by its instructions and, where the code can
+see it, by a check on each draft:
+
+- **Recurring.** The problem must show in the reflections of at least two
+  different days. Each evidence quote names the day it comes from, and a draft
+  with quotes from one day is sent back; one reflection alone makes no run.
+- **General.** Guidance that holds across cases, not a procedure for one
+  situation.
+- **In the right file.** The owner's personal workflow goes in their own
+  files, never in a shared team repo; a rule about one harness's behaviour
+  goes in that harness's instruction file; a rule needed on every turn goes
+  in a `CLAUDE.md`/`AGENTS.md` at the narrowest scope that covers it, and a
+  rule for one kind of task goes in a skill.
+- **Not about wisen itself.** Friction in wisen's own pipeline is a wisen bug,
+  not an instruction for a coding agent.
+- **Not already handled.** The run reads every past proposal with its content
+  (the `past_proposals` tool): one applied is in place unless the problem
+  still recurs after its merge; one rejected comes with your note, so the idea
+  is dropped or moved where the note points; the same change to the same file
+  is refused by the code.
+
 The loop is propose, approve, apply as a branch, measure weeks later:
 
-1. A proposal carries the diff, a rationale and short evidence quotes. It
-   reaches you in the dashboard's approval inbox when paired, or through
-   `wisen gardener list` when not.
+1. A proposal carries the diff, a rationale and dated evidence quotes from
+   at least two days. It reaches you in the dashboard's approval inbox when
+   paired, or through `wisen gardener list` when not.
 2. You approve, reject with a note (the note reaches the model on the next
    run), or let it expire after 7 days.
 3. An approval becomes a git branch (`wisen/gardener/<proposal id>`) on your
