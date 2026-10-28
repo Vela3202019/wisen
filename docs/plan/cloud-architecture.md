@@ -543,7 +543,10 @@ Decided by the owner on 2026-10-22 (open questions 6, 10 and 11):
   asking for the same day make one reflection). No reflection, no Gardener
   run. The skip is returned, printed, and reported on the device job
   (`skipped: no new sessions`), never silent; `wisen synthesize <date>
-  --force` runs the day anyway. wisen's own `claude -p` synthesis runs are
+  --force`, or the dashboard's Trigger, runs the day anyway. The check reads
+  only local agent history, never git or the GitHub API. Upgrade the server
+  before (or with) the laptops: the device job status gains `skipped`, which
+  an older server's packet check refuses. wisen's own `claude -p` synthesis runs are
   never ingested as sessions (they run in `~/.wisen/claude-cli`, which the
   Claude Code connector skips), so wisen does not reflect on its own
   reflection runs.

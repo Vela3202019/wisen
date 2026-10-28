@@ -216,8 +216,9 @@ async def _synthesize(client: CloudClient, store: SqliteStore, args: dict) -> di
 
     # The day's one local job (request id daily-synthesis:<date>): a run the
     # laptop already started resumes from its last checkpoint. A day with
-    # nothing new is left alone, and the job status says so.
-    job = await synthesize_day(args["date"])
+    # nothing new is left alone, and the job status says so, unless the owner
+    # asked for the day from the dashboard (`force`).
+    job = await synthesize_day(args["date"], force=args.get("force", False))
     if isinstance(job, Skipped):
         print(f"[worker] synthesize {job.date} skipped: {job.reason}")
         await sync_up(client, store)

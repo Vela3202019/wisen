@@ -180,7 +180,8 @@ was already made after its last session ended, so two schedulers asking for
 the same day make one reflection. The skip is printed, and a paired server
 records it on the job (`skipped: no new sessions`). wisen's own `claude -p`
 synthesis runs are not sessions: it never reflects on its own reflection
-runs. `wisen synthesize <date> --force` runs a day regardless.
+runs. `wisen synthesize <date> --force`, or the dashboard's Trigger, runs a day
+regardless.
 
 Where the code lives:
 

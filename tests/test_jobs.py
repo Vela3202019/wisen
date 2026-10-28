@@ -111,6 +111,7 @@ def _fake_synthesis(calls: Path, crash_on: str | None) -> None:
     agent._generate = generate
     agent.save_reflection = logged_save
     synthesis_job.ingest_all = ingest
+    synthesis_job.ingest_sessions = ingest
     synthesis_job.get_model = lambda: "test:model"
 
 
@@ -196,9 +197,9 @@ async def check_skip_rules(tmp: str):
         return IngestResult(sessions=list(sessions))
 
     synthesis_job.ingest_all = ingest
+    synthesis_job.ingest_sessions = ingest
     jobs_mod._engine = JobEngine(store, {"synthesize": synthesis_job.run_synthesis_job})
-    # Nothing happened that day: no run, no job. Commits alone are not a day of sessions.
-    sessions.append(_session(DATE, T0 - timedelta(hours=20), source="git"))
+    # Nothing happened that day: no run, no job.
     assert await synthesis_job.synthesize_day(DATE) == synthesis_job.Skipped(DATE, "no new sessions")
     assert not _rows(store, "SELECT 1 FROM jobs") and not calls.exists()
     # A session: the day runs.
@@ -206,6 +207,11 @@ async def check_skip_rules(tmp: str):
     assert (await synthesis_job.synthesize_day(DATE)).state == "succeeded"
     (doc,) = _rows(store, "SELECT doc FROM reflections")
     made = json.loads(doc["doc"])["synthesized_at"]
+    assert await synthesis_job.synthesize_day(DATE) == synthesis_job.Skipped(
+        DATE, f"already synthesized at {made}, no session since")
+    # Some connectors give times without an offset; they compare with the
+    # stored reflection time, and with offset-aware session times, as UTC.
+    sessions.append(_session(DATE, (T0 - timedelta(hours=19)).replace(tzinfo=None)))
     assert await synthesis_job.synthesize_day(DATE) == synthesis_job.Skipped(
         DATE, f"already synthesized at {made}, no session since")
     # A session that ended after the reflection was made is new: the day runs again.

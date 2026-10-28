@@ -12,9 +12,9 @@ reflection or the run was explicitly asked for (`force`). The skip is
 returned as a `Skipped`, which each entry point prints or reports.
 """
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
-from wisen.ingestion.pipeline import ingest_all
+from wisen.ingestion.pipeline import ingest_all, ingest_sessions
 from wisen.jobs import Job, JobContext, get_engine
 from wisen.llm import get_model
 from wisen.store import get_store
@@ -66,18 +66,18 @@ async def enqueue_day(date: str) -> Job:
 
 
 async def skip_reason(date: str, force: bool = False) -> str | None:
-    """Why `date` is not synthesized now: no sessions that day (wisen's own
-    runs do not count: wisen/connectors/claude_code.py), or a reflection
-    already made after the day's last session ended. An explicit request
-    (`force`) overrides both."""
+    """Why `date` is not synthesized now: no agent sessions that day in local
+    history (commits are not sessions, and wisen's own runs do not count:
+    wisen/connectors/claude_code.py), or a reflection already made after the
+    day's last session ended. An explicit request (`force`) overrides both."""
     if force:
         return None
-    sessions = [s for s in (await ingest_all(date)).sessions if s.source != "git" and s.date == date]
+    sessions = [s for s in (await ingest_sessions(date)).sessions if s.date == date]
     if not sessions:
         return "no new sessions"
     existing = await get_store().get_reflection(date)
     made = existing.get("synthesized_at") if existing else None
-    if made and datetime.fromisoformat(made) >= max(s.ended_at for s in sessions):
+    if made and datetime.fromisoformat(made).astimezone(UTC) >= max(s.ended_at.astimezone(UTC) for s in sessions):
         return f"already synthesized at {made}, no session since"
     return None
 

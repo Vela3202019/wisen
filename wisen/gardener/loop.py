@@ -34,7 +34,7 @@ from wisen import config
 from wisen.evals import runner, verification
 from wisen.evals.cases import Case, load_cases
 from wisen.gardener import applier
-from wisen.gardener.agent import Deps, Draft, build_agent
+from wisen.gardener.agent import Deps, Draft, build_agent, change_lines
 from wisen.gardener.git import GitError, one_file_diff
 from wisen.gardener.targets import Refused, Target, resolve
 from wisen.jobs import JobContext, JobEngine, ts
@@ -82,6 +82,14 @@ def _rows(store: SqliteStore, sql: str, *params) -> list:
 def open_targets(store: SqliteStore) -> set[str]:
     return {r["target"] for r in _rows(
         store, f"SELECT target FROM proposals WHERE user_id = ? AND state IN ({', '.join('?' * len(OPEN))})", *OPEN)}
+
+
+def proposed_changes(store: SqliteStore) -> dict[tuple[str, str], dict]:
+    """Every change ever proposed, in every state, keyed by its file and the
+    lines it adds and removes; the newest proposal of a change wins."""
+    return {(r["target"], change_lines(json.loads(r["payload"]).get("diff", ""))):
+            {"created_at": r["created_at"], "state": r["state"]} for r in _rows(
+        store, "SELECT target, payload, created_at, state FROM proposals WHERE user_id = ? ORDER BY created_at")}
 
 
 def past_outcomes(store: SqliteStore, limit: int = 50) -> list[dict]:
@@ -137,7 +145,8 @@ async def build_prompt(store: SqliteStore, day: str) -> str:
 async def propose(store: SqliteStore, day: str) -> GardenerRun:
     deps = Deps(open_targets=await asyncio.to_thread(open_targets, store),
                 reflection_dates={r["date"] for r in await recent_reflections(store, day)},
-                history=await asyncio.to_thread(past_outcomes, store))
+                history=await asyncio.to_thread(past_outcomes, store),
+                proposed=await asyncio.to_thread(proposed_changes, store))
     result = await build_agent(gardener_model()).run(await build_prompt(store, day), deps=deps)
     conversation = ConversationTypeAdapter.dump_json(result.conversation).decode()
     if isinstance(result.output, DeferredToolRequests):

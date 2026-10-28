@@ -104,6 +104,7 @@ class Deps:
     open_targets: set[str] = field(default_factory=set)
     reflection_dates: set[str] = field(default_factory=set)   # the days the prompt showed; evidence names them
     history: list[dict] = field(default_factory=list)         # past proposals (wisen/gardener/loop.py past_outcomes)
+    proposed: dict[tuple[str, str], dict] = field(default_factory=dict)   # every past change (loop.py proposed_changes)
     resuming: bool = False                # a run resumed with decisions: the calls are already checked
     drafts: dict[str, Draft] = field(default_factory=dict)
     branches: dict[str, str] = field(default_factory=dict)   # tool call id -> branch, when resuming
@@ -167,10 +168,9 @@ def _draft(deps: Deps, tool_call_id: str, target: str, old_text: str, new_text: 
         raise ModelRetry(f"could not build the diff: {e}") from None
     if redact(diff) != diff:
         raise ModelRetry("the change holds a secret, an email address or an absolute path; leave it out")
-    for p in deps.history:
-        if p["target"] == t.name and change_lines(p["payload"].get("diff", "")) == change_lines(diff):
-            raise ModelRetry(f"this same change to {t.name} was already proposed on {p['created_at'][:10]} "
-                             f"({p['state']}); see past_proposals, and do not propose it again")
+    if p := deps.proposed.get((t.name, change_lines(diff))):
+        raise ModelRetry(f"this same change to {t.name} was already proposed on {p['created_at'][:10]} "
+                         f"({p['state']}); see past_proposals, and do not propose it again")
     if len(diff) > MAX_DIFF:
         raise ModelRetry(f"the change is too large (over {MAX_DIFF} characters as a diff); make it smaller")
     if t.is_home:
