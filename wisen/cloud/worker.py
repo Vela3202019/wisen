@@ -13,10 +13,11 @@
                 first decision is kept), signalled to any job waiting on it,
                 and turned into Gardener jobs (apply, resume)
   4. jobs       run here, heartbeating the server's lease, then reported back
-                as a job_status packet: the daily synthesis, a measure, and
-                the owner's "Push & create PR" for an applied proposal
+                as a job_status packet: the daily synthesis, a measure, the
+                owner's "Push & create PR" for an applied proposal
                 (wisen/gardener/publisher.py), whose status carries the
-                pull request's link
+                pull request's link, and a question asked in Telegram
+                (answered by the chat agent and sent back as an answer packet)
 
 It also runs the laptop's own job engine (the Gardener's jobs and timers) and
 checks applied Gardener branches for merges. Unpaired, `run_local` does only
@@ -43,6 +44,7 @@ from wisen.cloud.client import (
 from wisen.egress import EgressRejected
 from wisen.jobs import LEASE, JobEngine, get_engine, ts
 from wisen.packets import (
+    answer_packet,
     job_status_packet,
     metrics_packet,
     proposal_packet,
@@ -214,9 +216,10 @@ async def apply_decisions(store: SqliteStore, decisions: list[dict]) -> None:
 
 # ── 4. device jobs ────────────────────────────────────────────────────────────
 
-async def _synthesize(client: CloudClient, store: SqliteStore, args: dict) -> dict | None:
+async def _synthesize(client: CloudClient, store: SqliteStore, job: dict) -> dict | None:
     from wisen.synthesis.job import Skipped, garden_day, synthesize_day
 
+    args = job["args"]
     # The day's one local job (request id daily-synthesis:<date>): a run the
     # laptop already started resumes from its last checkpoint. A day with
     # nothing new is left alone, and the job status says so, unless the owner
@@ -236,29 +239,40 @@ async def _synthesize(client: CloudClient, store: SqliteStore, args: dict) -> di
     return None
 
 
-async def _measure(client: CloudClient, store: SqliteStore, args: dict) -> None:
+async def _measure(client: CloudClient, store: SqliteStore, job: dict) -> None:
     """The server's timer for a merged proposal. The laptop set the same
     timer when it saw the merge (request id measure:<id>), so this runs that
     one job, or finds it done."""
     engine = get_engine()
-    pid = args["proposal_id"]
-    job = await engine.enqueue("measure-proposal", {"proposal_id": pid}, request_id=f"measure:{pid}")
-    job = await engine.run_until_done(job.id)
-    if job.state != "succeeded":
-        raise MeasureFailed(job.error)
+    pid = job["args"]["proposal_id"]
+    measure = await engine.enqueue("measure-proposal", {"proposal_id": pid}, request_id=f"measure:{pid}")
+    measure = await engine.run_until_done(measure.id)
+    if measure.state != "succeeded":
+        raise MeasureFailed(measure.error)
     await sync_up(client, store)
 
 
-async def _publish(client: CloudClient, store: SqliteStore, args: dict) -> dict:
+async def _publish(client: CloudClient, store: SqliteStore, job: dict) -> dict:
     """The owner's "Push & create PR": push the applied branch and open its
     pull request here, where the repo and the gh login are. The link goes
     back in the job status."""
     from wisen.gardener.publisher import publish
 
-    return {"pr_url": await asyncio.to_thread(publish, store, args["proposal_id"])}
+    return {"pr_url": await asyncio.to_thread(publish, store, job["args"]["proposal_id"])}
 
 
-HANDLERS = {"synthesize": _synthesize, "measure": _measure, "publish": _publish}
+async def _answer(client: CloudClient, store: SqliteStore, job: dict) -> None:
+    """A question from Telegram: the chat agent answers it here, from
+    reflections, or also from the raw history for /search (kind `search`).
+    Only the written answer leaves, as an answer packet."""
+    from wisen.chat import agent as chat
+
+    text = await chat.answer(job["args"]["question"], raw_search=job["kind"] == "search")
+    await client.send_packet(answer_packet(job["id"], text, user=client.creds.user_id,
+                                           device_id=client.creds.device_id))
+
+
+HANDLERS = {"synthesize": _synthesize, "measure": _measure, "publish": _publish, "ask": _answer, "search": _answer}
 
 
 async def _heartbeat(client: CloudClient, job_id: str) -> None:
@@ -281,7 +295,7 @@ async def run_device_job(client: CloudClient, store: SqliteStore, job: dict) -> 
         handler = HANDLERS.get(job["kind"])
         if handler is None:
             raise UnknownJobKind(job["kind"])
-        outcome = await handler(client, store, job["args"])   # extra job status fields, if any
+        outcome = await handler(client, store, job)  # extra job status fields, if any
     except Revoked:
         raise
     except Exception as e:  # noqa: BLE001 - every failure is reported; the server retries

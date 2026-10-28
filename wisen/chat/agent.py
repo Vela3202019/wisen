@@ -7,7 +7,9 @@ Backed by the WISEN_MODEL-configured model (see llm.py) with four tools:
   search_chat_history  → grep raw session files across all coding agents
   search_agent_configs → search harness/config files (CLAUDE.md, MCP, skills…)
 
-Designed to be called via POST /chat (SSE streaming).
+Designed to be called via POST /chat (SSE streaming). `answer` is the
+one-shot form for a question asked in Telegram (a device job from the server):
+reflection tools only, unless the question came with /search.
 """
 from __future__ import annotations
 
@@ -80,7 +82,18 @@ class ChatDeps:
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
 
 
-def _make_agent() -> Agent:
+_TELEGRAM_PROMPT = """\
+This question came from the builder's phone, over Telegram. Answer in plain text \
+(no Markdown), in a few short paragraphs. Quote briefly; never paste whole turns \
+or search results.\
+"""
+_REFLECTIONS_ONLY = """\
+Only the reflection tools are available for this question. If the answer needs \
+the raw transcripts, say so and suggest asking again with /search.\
+"""
+
+
+def _make_agent(tools: tuple = (), *extra_prompts: str) -> Agent:
     model = get_model()
     # thinking=False keeps Gemini fast; other providers may not accept it
     settings = ModelSettings(thinking=False) if model.startswith("google:") else None
@@ -88,11 +101,11 @@ def _make_agent() -> Agent:
         model=model,
         output_type=str,
         deps_type=ChatDeps,
-        system_prompt=_SYSTEM_PROMPT,
+        system_prompt=(_SYSTEM_PROMPT, *extra_prompts),
         retries=1,
         model_settings=settings,
     )
-    for fn in (get_reflection, list_reflections, search_chat_history, search_agent_configs):
+    for fn in tools or (get_reflection, list_reflections, search_chat_history, search_agent_configs):
         agent.tool(fn)
     return agent
 
@@ -106,6 +119,31 @@ def _get_agent() -> Agent:
     if _agent is None:
         _agent = _make_agent()
     return _agent
+
+
+_answer_agents: dict[bool, Agent] = {}
+
+
+def answer_agent(raw_search: bool) -> Agent:
+    """The agent for `answer`: with raw_search it may also search transcripts
+    and configs; without, it sees reflections only."""
+    if raw_search not in _answer_agents:
+        _answer_agents[raw_search] = _make_agent(
+            (get_reflection, list_reflections, search_chat_history, search_agent_configs) if raw_search
+            else (get_reflection, list_reflections),
+            _TELEGRAM_PROMPT, *(() if raw_search else (_REFLECTIONS_ONLY,)))
+    return _answer_agents[raw_search]
+
+
+async def answer(question: str, *, raw_search: bool) -> str:
+    """Answer one question, anchored on the latest reflection like a new chat."""
+    db = get_store()
+    latest = next(iter(await db.list_reflections(limit=1)), None)
+    context = latest.get("synthesis_context", "") if latest else "No reflection available yet."
+    deps = ChatDeps(db=db, synthesis_context=context)
+    result = await answer_agent(raw_search).run(
+        f"## Your Reflection Context\n\n{context}\n\n---\n\n{question}", deps=deps)
+    return result.output
 
 
 def _resolve_date(raw: str) -> str:

@@ -12,6 +12,7 @@ models on receipt, so the schema is the privacy boundary at both ends.
   metrics      one day's verification-loop numbers (no text)
   job_status   how a device job ended: state, timings, error class (and, for
                a publish job, the pull request it opened)
+  answer       the laptop's written answer to a question asked in Telegram
 
 Builders here only shape data. Redaction and length caps live on the field
 types (wisen/synthesis/schema.py) and run under the EGRESS validation context,
@@ -258,6 +259,17 @@ class JobStatusPacket(JobStatus, Envelope):
     packet_type: Literal["job_status"]
 
 
+class Answer(BaseModel):
+    """A chat answer the laptop's model wrote for an `ask` or `search` device
+    job: prose with short quotes and dates, never raw search hits."""
+    job_id: HexId
+    answer: Long
+
+
+class AnswerPacket(Answer, Envelope):
+    packet_type: Literal["answer"]
+
+
 PACKETS: dict[str, type[BaseModel]] = {
     "result": ResultPacket,
     "observation": ObservationPacket,
@@ -266,6 +278,7 @@ PACKETS: dict[str, type[BaseModel]] = {
     "proposal_update": ProposalUpdatePacket,
     "metrics": MetricsPacket,
     "job_status": JobStatusPacket,
+    "answer": AnswerPacket,
 }
 
 
@@ -338,6 +351,11 @@ def metrics_packet(doc: dict, *, user: str | None = None, device_id: str | None 
 
 def job_status_packet(status: dict, *, user: str | None = None, device_id: str | None = None) -> dict:
     return _packet("job_status", validate(JobStatus, status, "job status packet", extra="forbid"), user, device_id)
+
+
+def answer_packet(job_id: str, answer: str, *, user: str | None = None, device_id: str | None = None) -> dict:
+    return _packet("answer", validate(Answer, {"job_id": job_id, "answer": answer}, "answer packet",
+                                      extra="forbid"), user, device_id)
 
 
 def receive(data: object, accepted: Collection[str]) -> BaseModel:

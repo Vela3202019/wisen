@@ -3,7 +3,7 @@
 # Secrets live in /etc/wisen/wisen.env (root-owned, 0600); see deploy/README.md.
 
 [Unit]
-Description=wisen server (mailbox, approval inbox, Web Push)
+Description=wisen server (mailbox, approval inbox, Web Push, Telegram)
 After=network-online.target
 Wants=network-online.target
 

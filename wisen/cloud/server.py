@@ -24,7 +24,7 @@ Browser (session cookie, after /login):
 
 Device (Authorization: Bearer <device token>; the laptop only connects out):
   POST /api/device/pair            {"code", "name"} -> a device token (no auth)
-  POST /api/device/packets         one packet (result, usage, proposal, proposal_update, metrics)
+  POST /api/device/packets         one packet (result, usage, proposal, proposal_update, metrics, answer)
   POST /api/device/poll            long poll: a device job to lease, and decisions
   POST /api/device/jobs/{id}/heartbeat
   POST /api/device/jobs/{id}/finish  a job_status packet
@@ -36,6 +36,8 @@ Environment (no model key: stage A makes no model calls):
   WISEN_VAPID_PRIVATE_KEY   from `wisen cloud vapid-keys`; both unset = no push
   WISEN_VAPID_PUBLIC_KEY
   WISEN_VAPID_SUBJECT       optional VAPID contact (mailto: or https URL)
+  WISEN_TELEGRAM_BOT_TOKEN  from @BotFather; unset = no Telegram bot. The bot
+                            long-polls Telegram, so it adds no endpoint here.
 """
 import asyncio
 import os
@@ -53,6 +55,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from wisen.cloud.backup import serving
 from wisen.cloud.mailbox import ACCEPTED, Conflict, Mailbox, NotPublishable
 from wisen.cloud.push import WebPushSender
+from wisen.cloud.telegram import TelegramApi, TelegramBot
 from wisen.packets import PacketRejected, receive
 from wisen.proposals import IllegalTransition
 
@@ -129,9 +132,11 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         with serving(mailbox.path):
-            task = asyncio.create_task(mailbox.run_forever()) if run_engines else None
+            tasks = [asyncio.create_task(mailbox.run_forever())] if run_engines else []
+            if run_engines and mailbox.telegram:
+                tasks.append(asyncio.create_task(TelegramBot(mailbox, mailbox.telegram).run_forever()))
             yield
-            if task:
+            for task in tasks:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
@@ -193,7 +198,7 @@ def create_app(
 
     @app.get("/health")
     async def health():
-        return {"ok": True, "push": vapid_public_key is not None,
+        return {"ok": True, "push": vapid_public_key is not None, "telegram": mailbox.telegram is not None,
                 "model_key": any(os.environ.get(k) for k in MODEL_KEYS)}
 
     # ── browser session ───────────────────────────────────────────────────────
@@ -323,7 +328,7 @@ def create_app(
             stored = await asyncio.to_thread(mailbox.store_packet, user_id, device_id, packet)
         except Conflict as e:
             raise HTTPException(409, str(e)) from None
-        if stored and packet.packet_type in ("result", "proposal", "proposal_update"):
+        if stored and packet.packet_type in ("result", "proposal", "proposal_update", "answer"):
             mailbox.engine(user_id).wake()
         return {"stored": stored, "packet_id": packet.packet_id}
 
@@ -422,6 +427,10 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
     if any(os.environ.get(k) for k in MODEL_KEYS):
         print(f"wisen cloud: warning: a model API key is set ({', '.join(k for k in MODEL_KEYS if os.environ.get(k))});"
               " the stage-A server makes no model calls and should not hold one")
+    token = os.environ.get("WISEN_TELEGRAM_BOT_TOKEN")
+    if not token:
+        print("wisen cloud: no WISEN_TELEGRAM_BOT_TOKEN; the Telegram bot is off")
     db = db or Path(os.environ.get("WISEN_CLOUD_DB", "~/.wisen/cloud/wisen.db")).expanduser()
-    return create_app(Mailbox(db, sender=sender), vapid_public_key=public if sender else None,
+    mailbox = Mailbox(db, sender=sender, telegram=TelegramApi(token) if token else None, public_url=public_url)
+    return create_app(mailbox, vapid_public_key=public if sender else None,
                       secure_cookies=public_url.startswith("https://"), run_engines=run_engines)

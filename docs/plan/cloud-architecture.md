@@ -785,30 +785,41 @@ Home Screen. A notification opens the proposal in the approval inbox.
 Telegram is a second channel for the same things ("also add support in
 telegram"):
 
-- **Linking.** The dashboard shows a one-time code; you send it to the bot.
-  The server stores the chat id against your `user_id`. Messages from unlinked
-  chats are ignored.
+- **Linking.** The dashboard shows a one-time code (the same **Devices → Add
+  device** code that `wisen cloud pair` takes, so linking needs no endpoint of
+  its own); you send `/link <code>` to the bot in a private chat. The server
+  stores the chat id against your `user_id`, one chat per user, and `/unlink`
+  removes it. Messages from unlinked chats are ignored, and group chats cannot
+  link (every member could tap the buttons).
 - **Notifications.** New proposals, a finished morning reflection, a measure
-  result.
+  result. A day's batch follows that day's briefing, as with Web Push, but
+  each proposal is its own message because it carries its own buttons. A
+  proposal message carries the target file, a short description (its
+  rationale, which the egress gate already redacted and capped, cut to 300
+  characters) and a link to it in the dashboard; never the diff or the
+  evidence quotes ([open question 8](#decided), decided).
 - **Approval buttons.** Approve / Reject buttons on each proposal (inline
-  keyboard). A tap becomes a decision with a `request_id`, through the same
-  `transition()` as the web app, so both channels stay consistent.
+  keyboard). A tap becomes a decision with a `request_id` (the tap's callback
+  id), through the same decision path as the web app, so both channels stay
+  consistent. Every tap is checked against the linked chat.
 - **History chat** ("can i also add a chatbot where i can search history in
   telegram?"):
   - **By default, it answers from reflections.** In stage A the question is
-    queued as a device job, and the laptop's chat agent answers with
+    queued as a device job (`ask`), and the laptop's chat agent answers with
     reflection tools only. In stage B the server answers directly.
   - **Raw-history search only on explicit request** (for example a `/search`
-    command). It is always a device job, answered by the laptop with the
-    existing grep-first search (`wisen/chat/search.py`). What comes back is an
-    `AnswerPacket` (a written answer with short quotes), never raw hits.
+    command). It is always a device job (`search`), answered by the laptop
+    with the existing grep-first search (`wisen/chat/search.py`). What comes
+    back is an `AnswerPacket` (a written answer with short quotes), never raw
+    hits.
   - If the laptop is asleep, the bot replies that the question is queued, and
     answers when the laptop wakes.
 
 The server reaches Telegram with long polling, so the bot needs no extra public
 endpoint. Telegram stores bot chats on its own servers (they are not end-to-end
-encrypted), which is why how much detail a Telegram message carries is listed
-as open question 8.
+encrypted), which is why a proposal message carries no diff or evidence. The
+bot token sits in the server's environment file and is kept out of every log
+line and stored error.
 
 ---
 
@@ -901,8 +912,6 @@ them; questions the owner has since decided are listed under
    the current file text (`ConfigSnapshotPacket`). The alternative is that the
    server Gardener writes the intent and the laptop drafts the diff, which keeps
    file text home but adds a laptop model call. *Step 7.*
-8. **How much a Telegram message carries.** Title and a link to the web app, or
-   the full proposal and diff? Telegram stores bot chats on its servers. *Step 6.*
 9. **`claude -p` on the server.** It is the owner's own box, so the owner's
    subscription rule may allow it for the owner's use, but it adds a Node CLI of
    unmeasured memory size and consumer data terms. Stage B assumes an API key
@@ -914,14 +923,22 @@ them; questions the owner has since decided are listed under
 
 ### Decided
 
-Decided by the owner on 2026-10-22, for step 5. How the build carries them
-out is in [§5.5](#55-step-5-decisions-in-practice).
+Decided by the owner on 2026-10-22, for step 5 (questions 6, 10 and 11) and
+step 6 (question 8). How the build carries out the step-5 ones is in
+[§5.5](#55-step-5-decisions-in-practice); question 8 is in
+[§9.2](#92-telegram).
 
 6. **Files outside a git repo.** `~/.claude/CLAUDE.md` and personal skills
    often are not in a repo. *Decided:* wisen keeps its own local git repo for
    them, so the one-branch-per-proposal, owner-merges flow works with no
    setup. (The other options were to require a dotfiles repo, or to skip
    these files.)
+8. **How much a Telegram message carries.** Telegram stores bot chats on its
+   servers. *Decided:* a proposal message carries the proposal's title (its
+   target file), a short description (its rationale, capped and redacted like
+   other packet free text) and a link to the dashboard; never the diff or
+   the evidence quotes, so they stay off Telegram's servers. (The other
+   option was the full proposal and diff.)
 10. **Timing.** *Decided:* a proposal expires after 7 days unanswered; its
     effect is measured 2 weeks after merge.
 11. **Proposal batching.** *Decided:* a daily batch that arrives with the
