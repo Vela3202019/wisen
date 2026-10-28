@@ -269,6 +269,8 @@ with open(os.environ["GH_LOG"], "a") as f:
 prs_path = os.environ["GH_PRS"]
 prs = json.load(open(prs_path)) if os.path.exists(prs_path) else []
 opt = lambda name: args[args.index(name) + 1]
+if args[0] == os.environ.get("GH_HANG"):
+    import time; time.sleep(30)
 if args[:2] == ["auth", "status"]:
     sys.exit(int(os.environ.get("GH_AUTH_EXIT", "0")))
 elif args[:2] == ["pr", "list"]:
@@ -566,6 +568,21 @@ async def check_publisher() -> None:
     os.environ["GH_CREATE_FAIL"] = "1"
     refused(publisher.PrFailed, p.id)
     del os.environ["GH_CREATE_FAIL"]
+    # A stalled gh or push fails the job with its class instead of hanging.
+    publisher.TIMEOUT = 1
+    os.environ["GH_HANG"] = "auth"
+    refused(publisher.NoGhAuth, p.id)
+    os.environ["GH_HANG"] = "pr"
+    refused(publisher.PrFailed, p.id)
+    del os.environ["GH_HANG"]
+    hook = Path(git(demo, "rev-parse", "--git-path", "hooks/pre-push"))
+    hook = hook if hook.is_absolute() else demo / hook
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\nsleep 30\n")
+    hook.chmod(0o755)
+    refused(publisher.PushFailed, p.id)
+    hook.unlink()
+    publisher.TIMEOUT = 60
     assert (await proposals.get(p.id)).pr_url is None   # the failed create recorded nothing
     branch = f"wisen/gardener/{p.id}"
     url = publisher.publish(store, p.id)

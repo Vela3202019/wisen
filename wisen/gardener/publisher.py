@@ -27,10 +27,13 @@ from contextlib import closing
 from pathlib import Path
 
 from wisen.gardener.applier import git_row
-from wisen.gardener.git import GitError, Repo
+from wisen.gardener.git import NO_PROMPT, GitError, Repo
 from wisen.gardener.targets import HOME
 from wisen.proposals import Proposals
 from wisen.store import SqliteStore
+
+
+TIMEOUT = 60
 
 
 class PublishError(Exception):
@@ -79,17 +82,21 @@ def check(store: SqliteStore, proposal_id: str) -> dict:
     return {"repo": repo, "branch": git["branch"], "target": row["target"], "payload": json.loads(row["payload"])}
 
 
-def _gh(work_tree: Path, *args: str, input: str | None = None) -> subprocess.CompletedProcess:
-    env = {**os.environ, "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1", "GIT_TERMINAL_PROMPT": "0"}
+def _gh(work_tree: Path, *args: str, input: str | None = None,
+        fail: type[PublishError] = PrFailed) -> subprocess.CompletedProcess:
+    env = {**os.environ, "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1", "GIT_TERMINAL_PROMPT": "0",
+           **NO_PROMPT}
     try:
         return subprocess.run(["gh", *args], cwd=work_tree, env=env, capture_output=True, text=True, input=input,
-                              check=False)
+                              check=False, timeout=TIMEOUT)
     except FileNotFoundError:
         raise NoGhAuth("the gh CLI is not installed") from None
+    except subprocess.TimeoutExpired:
+        raise fail(f"gh {' '.join(args[:2])} timed out after {TIMEOUT}s") from None
 
 
 def _check_auth(work_tree: Path) -> None:
-    r = _gh(work_tree, "auth", "status")
+    r = _gh(work_tree, "auth", "status", fail=NoGhAuth)
     if r.returncode != 0:
         raise NoGhAuth(f"gh is not logged in: {r.stderr.strip()[:300]}")
 
@@ -142,9 +149,11 @@ def publish(store: SqliteStore, proposal_id: str) -> str:
     url = open_pr(repo.work_tree, branch)
     if url is None:
         try:
-            repo.run("push", remote, f"refs/heads/{branch}:refs/heads/{branch}")
+            repo.run("push", remote, f"refs/heads/{branch}:refs/heads/{branch}", env=NO_PROMPT, timeout=TIMEOUT)
         except GitError as e:
             raise PushFailed(str(e)) from None
+        except subprocess.TimeoutExpired:
+            raise PushFailed(f"git push timed out after {TIMEOUT}s") from None
         url = create_pr(repo.work_tree, branch, repo.default_branch(), title(info["target"]),
                         body(proposal_id, branch, info["payload"]))
     with store.transaction() as conn:
