@@ -487,14 +487,20 @@ async def check_failed_run_takes_late_notes():
 
 async def check_notes_during_run():
     """Laptop G's notes arrive while the server is synthesizing laptop F's:
-    the run goes round again and the day's reflection holds both."""
+    the run goes round again before the Gardener runs and the reflection is
+    published, so the Gardener reads both and one push goes out."""
     server = Server("during")
     server_prompts.clear()
+    gardener = Gardener()
+    loop.gardener_model = gardener.model
     browser = await server.browser()
+    await browser.post("/api/push/subscriptions", json={"subscription": {
+        "endpoint": "https://push.example/phone", "keys": {"p256dh": "k", "auth": "a"}}})
     creds_f = await server.device(browser, "laptop-f")
     creds_g = await server.device(browser, "laptop-g")
-    _home("laptop-f", "# F\n", ["rename the billing module"])
-    _home("laptop-g", "# G\n", ["cache the dashboard query"])
+    await server.mailbox.store(USER).upsert_reflection(_reflection(DAY_BEFORE))
+    _home("laptop-f", "# F\n- Be brief.\n", ["rename the billing module"])
+    _home("laptop-g", "# G\n- Be brief.\n", ["cache the dashboard query"])
     async with server.http() as http:
         with laptop("laptop-f") as store:
             async with CloudClient(creds_f, http) as client:
@@ -511,7 +517,11 @@ async def check_notes_during_run():
                 with laptop("laptop-g") as store:
                     async with CloudClient(creds_g, http) as client:
                         await worker.dream_up(client, store)
-        return await generate(system_prompt, user_prompt, output_type, model)
+        out = await generate(system_prompt, user_prompt, output_type, model)
+        if output_type is not DayObservation:   # the asks it reflects on, where the Gardener reads them
+            out.recommendations[0].reason = " / ".join(
+                ask for ask in ("rename the billing module", "cache the dashboard query") if ask in user_prompt)
+        return out
 
     agent._generate = slow
     try:
@@ -521,13 +531,16 @@ async def check_notes_during_run():
     (synth,) = await asyncio.to_thread(_jobs, server, "synthesize")
     assert synth.state == "succeeded" and len(server_prompts) == 2, (synth, len(server_prompts))
     assert "rename the billing module" in server_prompts[-1] and "cache the dashboard query" in server_prompts[-1]
-    (log,) = (await browser.get("/api/logs")).json()
+    log = next(r for r in (await browser.get("/api/logs")).json() if r["date"] == DAY)
     assert "cache the dashboard query" in log["synthesis_context"], log
+    assert "cache the dashboard query" in "\n".join(gardener.seen), "the Gardener read F's notes only"
+    assert synth.result["proposals"] == 1, synth.result
+    assert [s["title"] for s in server.sender.sent].count("Reflection ready") == 1, server.sender.sent
     newest = max(at for _, _, at in server.mailbox.observations(USER, DAY))
     assert (await server.mailbox.store(USER).get_reflection(DAY))["synthesized_at"] == newest
     assert server.mailbox.skip_reason(USER, DAY) is not None
     await browser.aclose()
-    print("✓ stage B: notes sent while the server synthesizes make the run go round again")
+    print("✓ stage B: notes sent while the server synthesizes make the run go round again; one Gardener, one push")
 
 
 def check_no_placeholder_written():
