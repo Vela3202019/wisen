@@ -420,8 +420,9 @@ class Mailbox:
                 (user_id, packet.packet_type, key, packet.packet_id, device_id, packet.model_dump_json(), ts(now)),
             )
             if packet.packet_type == "result":
-                self._mirror(conn, "reflections", user_id, packet.date, {
-                    **packet.model_dump(mode="json", exclude=set(ENVELOPE)), "synthesized_at": ts(now)})
+                if device_id != SERVER:   # the server's own reflection is already saved, as it made it
+                    self._mirror(conn, "reflections", user_id, packet.date, {
+                        **packet.model_dump(mode="json", exclude=set(ENVELOPE)), "synthesized_at": ts(now)})
                 # The morning briefing carries the day's Gardener batch, which
                 # the laptop (or, in stage B, this server) makes first.
                 waiting = self._batch_waiting(conn, user_id, packet.date)

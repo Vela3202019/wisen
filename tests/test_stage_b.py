@@ -17,7 +17,8 @@ every model is a fake.
   - a laptop that wakes late with notes makes the day run again; nothing
     new, no second reflection
   - stage A on either side keeps stage-B packets and jobs out
-  - a failed run that runs again takes in notes sent since
+  - a failed run that runs again takes in notes sent since; notes sent while
+    the server synthesizes make the run go round again
   - the server's Gardener never drafts a redaction placeholder into a file
   - reflection chat on the server reads reflections only, on DeepSeek
 
@@ -484,6 +485,51 @@ async def check_failed_run_takes_late_notes():
     print("✓ stage B: a failed run that runs again takes in the notes sent since")
 
 
+async def check_notes_during_run():
+    """Laptop G's notes arrive while the server is synthesizing laptop F's:
+    the run goes round again and the day's reflection holds both."""
+    server = Server("during")
+    server_prompts.clear()
+    browser = await server.browser()
+    creds_f = await server.device(browser, "laptop-f")
+    creds_g = await server.device(browser, "laptop-g")
+    _home("laptop-f", "# F\n", ["rename the billing module"])
+    _home("laptop-g", "# G\n", ["cache the dashboard query"])
+    async with server.http() as http:
+        with laptop("laptop-f") as store:
+            async with CloudClient(creds_f, http) as client:
+                await worker.dream_up(client, store)
+    await server.mailbox.ensure_schedule(USER)
+    server.clock.now = datetime.combine(TODAY, time(7, 0), UTC)
+    await server.run_jobs()
+    server.clock.now += timedelta(minutes=31)
+
+    async def slow(system_prompt, user_prompt, output_type, model):
+        if output_type is not DayObservation and len(server_prompts) == 0:
+            server.clock.now += timedelta(minutes=1)
+            async with server.http() as http:
+                with laptop("laptop-g") as store:
+                    async with CloudClient(creds_g, http) as client:
+                        await worker.dream_up(client, store)
+        return await generate(system_prompt, user_prompt, output_type, model)
+
+    agent._generate = slow
+    try:
+        await server.run_jobs()
+    finally:
+        agent._generate = generate
+    (synth,) = await asyncio.to_thread(_jobs, server, "synthesize")
+    assert synth.state == "succeeded" and len(server_prompts) == 2, (synth, len(server_prompts))
+    assert "rename the billing module" in server_prompts[-1] and "cache the dashboard query" in server_prompts[-1]
+    (log,) = (await browser.get("/api/logs")).json()
+    assert "cache the dashboard query" in log["synthesis_context"], log
+    newest = max(at for _, _, at in server.mailbox.observations(USER, DAY))
+    assert (await server.mailbox.store(USER).get_reflection(DAY))["synthesized_at"] == newest
+    assert server.mailbox.skip_reason(USER, DAY) is not None
+    await browser.aclose()
+    print("✓ stage B: notes sent while the server synthesizes make the run go round again")
+
+
 def check_no_placeholder_written():
     """The server's Gardener sees files redacted: a draft that would write a
     placeholder over the real value is refused."""
@@ -667,6 +713,7 @@ async def main():
     await check_reflection_while_asleep()
     await check_late_notes()
     await check_failed_run_takes_late_notes()
+    await check_notes_during_run()
     check_no_placeholder_written()
     await check_stage_a_keeps_out()
     await check_chat()

@@ -75,19 +75,33 @@ async def synthesize_job(mailbox, ctx: JobContext, args: dict) -> dict:
 
     # Merged afresh on every run, so a retry or a rerun takes in notes sent
     # since the last one; the steps that use them are named by those notes.
-    notes = await asyncio.to_thread(mailbox.observations, user, day)
+    # Notes sent while this run works make it go round again.
+    merged, garden = None, {}
+    while (key := _key(notes := await asyncio.to_thread(mailbox.observations, user, day))) != merged:
+        merged = key
+        garden = await _reflect_on(mailbox, ctx, day, notes, key)
+    return {"date": day, **garden}
+
+
+def _key(notes: list[tuple[str, dict, str]]) -> str:
+    return hashlib.sha256(json.dumps([(device, at) for device, _, at in notes]).encode()).hexdigest()[:16]
+
+
+async def _reflect_on(mailbox, ctx: JobContext, day: str, notes: list[tuple[str, dict, str]], key: str) -> dict:
+    store = ctx.engine.store
+    user = store.user_id
     observation = merge_observations([(device, note) for device, note, _ in notes])
-    merged = hashlib.sha256(json.dumps([(device, at) for device, _, at in notes]).encode()).hexdigest()[:16]
     yesterday, past = await _history(store, day)
-    reflection = await ctx.step(f"synthesize:{merged}", lambda: _reflect(observation, yesterday, past, day),
+    reflection = await ctx.step(f"synthesize:{key}", lambda: _reflect(observation, yesterday, past, day),
                                 replay_safe=True, output=Reflection)
     # Saved before the Gardener runs, which reads it; published after it, so
-    # the one push names the day's batch. Both are upserts by date.
-    await ctx.step(f"save:{merged}", lambda: store.upsert_reflection(
-        {**reflection.model_dump(), "synthesized_at": ts(ctx.engine.clock())}), replay_safe=True)
-    garden = await ctx.step("garden", lambda: garden_day(mailbox, user, day), replay_safe=True, output=dict)
-    await ctx.step("publish", lambda: asyncio.to_thread(mailbox.publish_result, user, day), replay_safe=True)
-    return {"date": day, **garden}
+    # the one push names the day's batch. Both are upserts by date. Stamped
+    # with the newest note it reflects on, which `skip_reason` compares with.
+    await ctx.step(f"save:{key}", lambda: store.upsert_reflection(
+        {**reflection.model_dump(), "synthesized_at": max(at for _, _, at in notes)}), replay_safe=True)
+    garden = await ctx.step(f"garden:{key}", lambda: garden_day(mailbox, user, day), replay_safe=True, output=dict)
+    await ctx.step(f"publish:{key}", lambda: asyncio.to_thread(mailbox.publish_result, user, day), replay_safe=True)
+    return garden
 
 
 def _ran(store: SqliteStore, day: str) -> bool:

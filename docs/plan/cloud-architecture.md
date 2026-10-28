@@ -207,7 +207,9 @@ the new packet types.
   no notes on the day, or a reflection newer than every note, is left alone.
   Notes that arrive after the run (a laptop that slept through it) run the
   day again. Every run, retry or rerun merges the notes afresh, so a run
-  that failed and runs again takes in notes sent since.
+  that failed and runs again takes in notes sent since; notes sent while a
+  run works make it go round again. The server's reflection is stamped with
+  the newest note it reflects on.
 - **The same code on both ends.** Received result, metrics and measurement
   packets are mirrored into the tables the laptop's agents read
   (`reflections`, `daily_metrics`, `proposal_measures`), so the Synthesizer,
