@@ -132,7 +132,7 @@ class TelegramBot:
                 offset = update["update_id"] + 1
                 try:
                     await self.handle(update)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - one bad update must not stop the bot
                     print(f"[telegram] update {update['update_id']}: {type(e).__name__}: {self.api.redact(str(e))}",
                           file=sys.stderr)
 
