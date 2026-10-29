@@ -1004,5 +1004,6 @@ out is in [§3.2](#32-stage-b-nrem-on-the-laptop-rem-on-the-server).
    owner's own box, the owner's own use), measure the CLI's memory there, and
    keep the API-key path as the fallback. Synthesis runs on `claude -p` by
    default and on the API model with `WISEN_SYNTH_MODEL=api`; the Gardener
-   and chat use tools, so they stay on the API model. Measured: about 236 MiB
+   uses tools, so it stays on the API model, and chat runs on DeepSeek
+   (§3.2). Measured: about 236 MiB
    per `claude -p` process (§8.1).

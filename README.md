@@ -312,10 +312,11 @@ you wake up, even with the lid closed. Turn it on at both ends, **server
 first** (an older server refuses the new packets):
 
 - **Server:** `WISEN_CLOUD_STAGE=b`. Synthesis then runs on `claude -p` on
-  your Claude subscription (log the CLI in for the service's user), and the
-  Gardener and chat on `WISEN_MODEL` with that provider's API key in the
-  server's environment file; `WISEN_SYNTH_MODEL=api` puts synthesis on the
-  API model too. See
+  your Claude subscription (log the CLI in for the service's user), the
+  Gardener on `WISEN_MODEL` with that provider's API key in the server's
+  environment file, and chat on DeepSeek (`WISEN_CHAT_MODEL`,
+  `DEEPSEEK_API_KEY`); `WISEN_SYNTH_MODEL=api` puts synthesis on the API
+  model too. See
   [deploy/README.md](deploy/README.md#stage-b-the-server-reflects).
 - **Each laptop:** `[cloud] stage = "b"` in `~/.wisen/config.toml` (or
   `WISEN_CLOUD_STAGE=b`) and restart `wisen worker`. This is the laptop's
@@ -364,7 +365,8 @@ holds reflections (plus chat and voice session records).
   model.
 - **Stage B server** ([below](#your-own-server-optional)): the server's
   Synthesizer, Gardener and chat send the packets your laptop uploaded
-  (tier 3) to the server's model provider, never anything else.
+  (tier 3) to the server's model providers (chat's to DeepSeek), never
+  anything else.
 
 Pick the provider with `model` and `synth_model`. That provider's data terms
 apply to these excerpts. If `synth_model` is `claude-cli:…`, synthesis runs
