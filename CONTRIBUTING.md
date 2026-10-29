@@ -18,6 +18,7 @@ python3 -m tests.test_store          # SQLite store on a temp file
 python3 -m tests.test_jobs           # job engine + proposal state machine
 python3 -m tests.test_cloud          # server stage A, in-process, fake push + model
 python3 -m tests.test_gardener       # Gardener loop on temp repos with a fake model
+python3 -m tests.test_telegram       # Telegram bot against a fake Bot API
 ```
 
 CI runs exactly `ruff check .` plus those tests, so if they pass locally
