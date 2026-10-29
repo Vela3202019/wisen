@@ -16,6 +16,13 @@ the branch is created only if it does not exist (or already points at that
 commit). The commit is built in a temporary index, so no checkout, index or
 work tree of yours is touched.
 
+A proposal drafted on the server (stage B) was drafted against the file as
+the server saw it, secret-redacted. Where its hunks touch a redacted line the
+diff does not apply to the real file as it is, so the applier applies it to
+the redacted text instead and keeps the real text of every line the change
+does not add (`apply_redacted`): the lines the owner approved are written
+exactly, and no placeholder replaces a real value.
+
 Merge detection (`detect_merges`) watches applied branches: in the default
 branch (merged, also by squash: the file there matches the branch), or
 deleted unmerged (abandoned). A merge starts the 2-week measure timer. A
@@ -25,6 +32,7 @@ closed unmerged (abandoned), or still open; if gh cannot answer, the pass
 reports nothing for it.
 """
 import json
+import re
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta
@@ -35,9 +43,11 @@ from wisen.gardener.git import GitError, Repo, diff_paths
 from wisen.gardener.targets import Refused, Target, resolve
 from wisen.jobs import insert_job, ts
 from wisen.proposals import Proposals
+from wisen.redact import redact
 from wisen.store import SqliteStore
 
 MEASURE_AFTER = timedelta(days=14)
+_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
 
 
 def branch_name(proposal_id: str) -> str:
@@ -91,7 +101,8 @@ def check(store: SqliteStore, proposal_id: str) -> dict:
     except (Refused, GitError) as e:
         return {"refused": str(e)}
     return {"work_tree": str(t.repo.work_tree), "git_dir": str(t.repo.git_dir) if t.repo.git_dir else None,
-            "path": t.path, "base": base, "when": when, "branch": branch_name(proposal_id)}
+            "path": t.path, "base": base, "when": when, "branch": branch_name(proposal_id),
+            "redacted": payload.get("origin") == "server"}
 
 
 def _message(proposal_id: str, target: str, rationale: str) -> str:
@@ -106,12 +117,56 @@ def commit(info: dict, proposal_id: str, target: str, rationale: str, diff: str)
     with repo.scratch_index() as env:
         repo.run("read-tree", info["base"], env=env)
         if not repo.ok("apply", "--cached", "--whitespace=nowarn", "-", env=env, input=diff):
-            raise Refused(f"the diff no longer applies to {target}")
+            blob = repo.blob(info["base"], info["path"])
+            text = apply_redacted(repo.read_blob(blob) if blob else "", diff) if info.get("redacted") else None
+            if text is None:
+                raise Refused(f"the diff no longer applies to {target}")
+            mode = repo.out("ls-tree", info["base"], "--", info["path"]).split(" ", 1)[0] or "100644"
+            new = repo.out("hash-object", "-w", "--stdin", input=text)
+            repo.run("update-index", "--add", "--cacheinfo", f"{mode},{new},{info['path']}", env=env)
         tree = repo.out("write-tree", env=env)
     sha = repo.commit_tree(tree, info["base"], _message(proposal_id, target, rationale), info["when"])
     if not repo.create_ref(f"refs/heads/{info['branch']}", sha):
         raise Refused(f"branch {info['branch']} already exists with other content")
     return {"commit": sha, "new_blob": repo.blob(sha, info["path"])}
+
+
+def apply_redacted(real: str, diff: str) -> str | None:
+    """`diff` was drafted against `redact(real)`: apply its hunks to that text
+    line by line, writing the real line wherever the change keeps one and the
+    diff's line wherever it adds one. None when the hunks do not match the
+    redacted text, when redaction did not change the file (the diff simply
+    does not apply), or when it changed the number of lines (a multi-line
+    secret), since then no line maps back."""
+    shown = redact(real)
+    old, seen = real.splitlines(keepends=True), shown.splitlines(keepends=True)
+    if shown == real or len(old) != len(seen):
+        return None
+    lines = diff.splitlines(keepends=True)
+    start = next((n for n, line in enumerate(lines) if line.startswith("@@")), len(lines))
+    out, pos, last = [], 0, None
+    for line in lines[start:]:
+        if m := _HUNK.match(line):
+            first = int(m[1]) - 1 if int(m[2] or 1) else int(m[1])
+            if first < pos:
+                return None
+            out += old[pos:first]
+            pos = first
+        elif line[:1] in (" ", "-"):
+            if pos >= len(seen) or seen[pos].rstrip("\r\n") != line[1:].rstrip("\r\n"):
+                return None
+            if line[0] == " ":
+                out.append(old[pos])
+            pos += 1
+        elif line[:1] == "+":
+            out.append(line[1:])
+        elif line.startswith("\\"):
+            if last == "+":   # the added line ends the file without a newline
+                out[-1] = out[-1].removesuffix("\n")
+        else:
+            return None
+        last = line[:1]
+    return "".join(out + old[pos:])
 
 
 def record_applied(store: SqliteStore, proposals: Proposals, proposal_id: str, info: dict, made: dict) -> None:

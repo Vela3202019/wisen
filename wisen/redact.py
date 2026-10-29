@@ -39,6 +39,10 @@ _SYSTEM_ROOTS = ("/usr/", "/opt/", "/bin/", "/sbin/", "/etc/", "/dev/", "/proc/"
 
 SECRET = "<secret>"
 EMAIL = "<email>"
+HOME = "~"
+PATH = "…/"
+# What a redacted text holds in place of a value it hides.
+PLACEHOLDERS = (SECRET, EMAIL, HOME + "/", PATH)
 
 
 def redact(text: str) -> str:
@@ -48,7 +52,7 @@ def redact(text: str) -> str:
         text = pattern.sub(lambda m: m.group(1) + SECRET, text)
     text = _URL_CREDENTIALS.sub(lambda m: m.group(1) + SECRET + "@", text)
     text = _EMAIL.sub(EMAIL, text)
-    text = _HOME.sub("~", text)
+    text = _HOME.sub(HOME, text)
     return _ABS_PATH.sub(_shorten_path, text)
 
 
@@ -56,4 +60,4 @@ def _shorten_path(m: re.Match) -> str:
     path = m.group(0)
     if path.startswith(_SYSTEM_ROOTS):
         return path
-    return "…/" + path.rstrip("/").rsplit("/", 1)[-1]
+    return PATH + path.rstrip("/").rsplit("/", 1)[-1]

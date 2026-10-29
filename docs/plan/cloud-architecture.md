@@ -183,6 +183,65 @@ Model calls in stage B:
 Approved changes are still **applied on the laptop**. The Gardener on the
 server writes the proposal; the laptop's applier makes the branch.
 
+**How it is built (step 7).** Both ends opt in: the server with
+`WISEN_CLOUD_STAGE=b`, each laptop with `[cloud] stage = "b"` (the laptop
+decides what leaves it). Upgrade the server first: an older server refuses
+the new packet types.
+
+- **Keeping the server supplied.** While awake, `wisen worker` runs the
+  Observer on yesterday and today whenever a session ended after the notes it
+  last sent (each day at most every 2 hours, since each run is a model call)
+  and uploads them as an `ObservationPacket`. It also uploads a
+  `ConfigSnapshotPacket` for each file the Gardener may edit that changed
+  (read at most hourly). It no longer uploads reflections.
+- **The morning run.** At the user's daily time the server queues an
+  `observe` device job (an awake laptop sends fresh notes; the job hands it
+  the server's previous reflection as the Observer's baseline) and its own
+  synthesis job, due 30 minutes later. A laptop's answer brings the synthesis
+  forward; with every laptop asleep it runs on the notes already uploaded.
+  The synthesis job merges every laptop's notes on the day into one
+  `DayObservation` (each text field keeps each laptop's text under its device
+  name; lists are joined), runs the Synthesizer, runs the day's Gardener over
+  the config snapshots, then publishes the reflection as a result packet, so
+  the one push names the day's batch. The §5.5 skip holds on the server:
+  no notes on the day, or a reflection newer than every note, is left alone.
+  Notes that arrive after the run (a laptop that slept through it) run the
+  day again. Every run, retry or rerun merges the notes afresh, so a run
+  that failed and runs again takes in notes sent since; notes sent while a
+  run works make it go round again. The server's reflection is stamped with
+  the newest note it reflects on.
+- **The same code on both ends.** Received result, metrics and measurement
+  packets are mirrored into the tables the laptop's agents read
+  (`reflections`, `daily_metrics`, `proposal_measures`), so the Synthesizer,
+  the Gardener (with its past-proposal checks, placement and recurrence
+  rules) and chat run unchanged; only file access differs. The server's
+  Gardener reads the snapshot's redacted text and builds the same git-format
+  diff without a repo. Replay is skipped there (it reads transcripts), and
+  the proposal says so.
+- **Applying.** A proposal drafted on the server names the laptop whose
+  snapshot it came from. The decision feed carries the proposal's content to
+  that laptop when it is approved; the laptop records it and the usual
+  applier re-checks the approval, the allow-list and the base blob. Where a
+  hunk touches a line the server saw redacted, the applier applies the diff to
+  the redacted text and keeps the real text of every line the change does not
+  add, so the approved lines are written exactly and no placeholder replaces
+  a real value. A file whose redaction changes its line count (a multi-line
+  secret) fails to apply, with the reason. The run resumes on the server once
+  its proposals are decided.
+- **Chat.** `POST /api/chat` on the server (confirmed by the owner on
+  2026-10-28): logged-in browser session, stage B only (404 in stage A),
+  JSON in, up to 50 messages of 8,000 characters, the answer streamed as
+  server-sent events like the laptop's `/chat`. The same chat agent
+  (`wisen/chat/agent.py`) answers from the server's reflections only, with no
+  raw-history tools, and nothing is stored: the caller sends the
+  conversation each turn. No dashboard UI calls it yet.
+- **Models.** Synthesis runs on `claude -p` on the owner's subscription by
+  default (`WISEN_SYNTH_MODEL`, `claude-cli:sonnet`); `WISEN_SYNTH_MODEL=api`
+  is the fallback to the API model. The Gardener uses tools, so it runs on
+  `WISEN_MODEL` and its API key (moving it to `claude -p` is a follow-up).
+  Chat runs on DeepSeek (`WISEN_CHAT_MODEL`, `DEEPSEEK_API_KEY`; owner's
+  decision): the reflections it reads, already redacted, reach DeepSeek.
+
 ### 3.3 What runs where
 
 | Component | Local-only mode | Stage A | Stage B |
@@ -258,8 +317,8 @@ packet carries this envelope:
 | `MetricsPacket` | A (step 5) | One day's verification-loop numbers ([§5.4](#54-verification-loop-climbing-the-hill)): user turns, corrections by detector, tokens, problems solved, human turns per PR | Sessions, prompts, file names |
 | `JobStatusPacket` | A | Job id, state, timings, error class | Stack traces with local paths or content |
 | `AnswerPacket` | A | A chat answer written by a model, with short quotes and dates | Raw search hits |
-| `ObservationPacket` | B | What the Synthesizer needs from one day: per-session source, project alias, durations, counts, mood/friction labels, topics, key moments with capped quotes, model usage | Full turns, tool output, code |
-| `ConfigSnapshotPacket` | B (open question 7) | Current text of the files the Gardener may edit, secret-redacted | Any other file |
+| `ObservationPacket` | B | The Observer's notes on one day from one laptop (`DayObservation`): mood and drift summaries, topics, friction seen, recommendations followed or not, model usage, key moments with capped quotes | Full turns, tool output, code |
+| `ConfigSnapshotPacket` | B | One file the Gardener may edit: its `project alias + relative path`, the git blob id of its real text, and that text, secret-redacted; a gone file is sent once with neither. A file over 20,000 characters is left out, never cut | Any other file |
 
 The egress gate on the laptop runs in this order:
 
@@ -310,7 +369,12 @@ reach the exported JSON. The same test grows with each step:
 - Step 4: after a full laptop → server sync of the fixtures, no marker string
   appears anywhere in the server's SQLite file.
 - Step 7: with a mock model that echoes its prompt, no marker appears in any
-  server-side model prompt.
+  server-side model prompt. `tests/test_stage_b.py` runs two laptops whose
+  fake Observer quotes their raw turns (secrets, paths and emails among them)
+  and whose homes hold a file the Gardener may not edit and one over the
+  snapshot cap; with both laptops asleep the server reflects, and no marker
+  is in the Synthesizer's prompt, in anything the Gardener was sent, or in
+  the server's SQLite file.
 
 ---
 
@@ -730,7 +794,8 @@ systemd: wisen.service          one process: `wisen cloud serve`, uvicorn, 1 wor
   ├─ job engine + scheduler (asyncio task in the same process)
   ├─ Web Push sender (VAPID keys)
   ├─ Telegram bot (long polling)
-  ├─ stage B only: Synthesizer, Gardener, reflection chat (pydantic-ai, API key)
+  ├─ stage B only: Synthesizer (`claude -p`, API fallback), Gardener and
+  │                reflection chat (pydantic-ai, API key)
   └─ /var/lib/wisen/wisen.db (SQLite, WAL)
 systemd: wisen-backup.timer     daily, Persistent=true → consistent SQLite snapshot, copied off the box
 ```
@@ -746,8 +811,13 @@ systemd: wisen-backup.timer     daily, Persistent=true → consistent SQLite sna
   root-owned `EnvironmentFile`. **No model key.** Device tokens and login
   sessions are random values stored only as hashes in the database, so there
   is no session secret.
-  Stage B adds the model provider key to the same file. The Claude subscription
-  path (`claude -p`) is not the server's model path (open question 9).
+  Stage B adds the model provider key to the same file, for the Gardener and
+  chat. Synthesis runs on `claude -p` on the owner's subscription (open
+  question 9, decided), logged in for the service's user; the API model is
+  the fallback by config. One `claude -p` process peaked at about 236 MiB on
+  the box (measured 2026-10-28, before its model call: the box's login had
+  expired on 2026-09-15; a full call is re-measured once it is logged in
+  again), so the units set `MemoryMax=800M` (deploy/README.md).
 - **Backups** hold packets and results only, never raw transcripts, so off-box
   backup is low-risk. That matters: Claude Code deletes local transcripts after
   30 days by default, so the server's copy becomes the long-term record. Test a
@@ -860,7 +930,7 @@ step.
 | **4. Server, stage A** | `wisen cloud serve` replacing `wisen/dashboard/server.py`; login, pairing, device tokens; the mailbox and device-job API; approval inbox; installable web app with Web Push; `device_id` in the packet envelope; `wisen worker` on the laptop; `deploy/` samples; backup timer | On the Hetzner box: pair the laptop; a day's reflection arrives and the phone gets a push; a revoked token gets 401; a server restart mid-lease recovers the job; a restored backup serves the same data; the server's environment has no model key; no fixture marker string appears in the server database |
 | **5. Gardener loop** | The Gardener agent and its `requires_approval` tool; proposals from reflections; the laptop applier (allow-list, branch `wisen/gardener/<id>`); merge detection; the measure timer wired to the eval loop ([verification loop](#54-verification-loop-climbing-the-hill); decisions in [§5.5](#55-step-5-decisions-in-practice)) | An approved proposal produces exactly one commit on one branch even if the laptop reconnects mid-apply; a proposal for a disallowed path is refused after approval; a rejection note reaches the next run; a measure job fires after merge and records its result |
 | **6. Telegram** | Bot linking, notifications, approve/reject buttons, history chat (reflections by default, `/search` on the laptop) | Approving in Telegram and then in the web app records one decision; an unlinked chat is ignored; `/search` while the laptop sleeps is answered after it wakes |
-| **7. Stage B** | `ObservationPacket` upload; Synthesizer, Gardener and reflection chat on the server over packets; model key on the server; applying still on the laptop | With the laptop asleep, the morning reflection is produced from packets already uploaded; with a mock model that echoes its prompt, no fixture marker appears in any server-side prompt or row |
+| **7. Stage B** | `ObservationPacket` and `ConfigSnapshotPacket` upload; Synthesizer, Gardener and reflection chat on the server over packets, one reflection per day from every laptop; model key (or `claude -p` for synthesis) on the server; applying still on the laptop | With the laptop asleep, the morning reflection is produced from packets already uploaded; with a mock model that echoes its prompt, no fixture marker appears in any server-side prompt or row |
 
 ---
 
@@ -892,21 +962,11 @@ them; questions the owner has since decided are listed under
    pydantic-ai's Ollama provider) would keep raw text away from every provider.
    Quality is unknown until measured with `wisen eval`. Should it be offered,
    and should it ever be the default? *Any time after step 2.*
-4. **Several machines.** Should one day's reflection merge packets from several
-   laptops on the server, or stay one reflection per machine? *Step 7.*
 5. **Vendor clouds as hands.** May an approved proposal be carried out by a
    vendor's cloud agent (Claude routines, Codex cloud), given those vendors would
    see and store the proposal? Not planned; listed so it is decided on purpose.
-7. **What the stage B Gardener may see.** To write a diff on the server it needs
-   the current file text (`ConfigSnapshotPacket`). The alternative is that the
-   server Gardener writes the intent and the laptop drafts the diff, which keeps
-   file text home but adds a laptop model call. *Step 7.*
 8. **How much a Telegram message carries.** Title and a link to the web app, or
    the full proposal and diff? Telegram stores bot chats on its servers. *Step 6.*
-9. **`claude -p` on the server.** It is the owner's own box, so the owner's
-   subscription rule may allow it for the owner's use, but it adds a Node CLI of
-   unmeasured memory size and consumer data terms. Stage B assumes an API key
-   unless this changes. *Step 7.*
 12. **When to make the Observer's per-turn cap configurable.** The owner
     accepts excerpts up to about 4,000 characters per turn, but no build step
     delivers the setting yet. Which step should, and what should the default be
@@ -927,3 +987,23 @@ out is in [§5.5](#55-step-5-decisions-in-practice).
 11. **Proposal batching.** *Decided:* a daily batch that arrives with the
     morning briefing, approved item by item. (The other option was one
     approval request per proposal.)
+
+Decided by the owner on 2026-10-22, for step 7. How the build carries them
+out is in [§3.2](#32-stage-b-nrem-on-the-laptop-rem-on-the-server).
+
+4. **Several machines.** *Decided:* the server merges one day's packets from
+   all laptops into **one** reflection. (The other option was one reflection
+   per machine.) The day's metrics row is still one per day, from the laptop
+   that sent it last; merging the numbers of several laptops is not built.
+7. **What the stage B Gardener may see.** *Decided:* the file text, as a
+   redacted `ConfigSnapshotPacket` the laptop uploads (current text of
+   allow-listed files only, secret-redacted). (The other option was that the
+   server writes only the intent and the laptop drafts the diff, at the cost
+   of a laptop model call.)
+9. **`claude -p` on the server.** *Decided:* run it on the server (the
+   owner's own box, the owner's own use), measure the CLI's memory there, and
+   keep the API-key path as the fallback. Synthesis runs on `claude -p` by
+   default and on the API model with `WISEN_SYNTH_MODEL=api`; the Gardener
+   uses tools, so it stays on the API model, and chat runs on DeepSeek
+   (§3.2). Measured: about 236 MiB
+   per `claude -p` process (§8.1).

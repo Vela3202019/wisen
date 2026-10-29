@@ -7,8 +7,8 @@ Browser (session cookie, after /login):
   GET  /                           dashboard + approval inbox (installable web app)
   GET  /api/logs                   reflections (result packets), newest first
   GET  /api/usage                  latest usage packet
-  GET  /api/queue                  dates waiting for a device to synthesize
-  POST /api/trigger                {"date"}: ask a device to synthesize that day
+  GET  /api/queue                  dates waiting to be synthesized
+  POST /api/trigger                {"date"}: synthesize that day (a device in stage A; here in stage B)
   GET  /api/proposals              the approval inbox and change log (each proposal with
                                    its decision, latest outcome and publish job's state)
   GET  /api/timeline               daily verification metrics + merged Gardener changes
@@ -21,16 +21,25 @@ Browser (session cookie, after /login):
   GET  /api/push                   the VAPID public key (null: push is off)
   POST /api/push/subscriptions     {"subscription"} from PushManager.subscribe()
   POST /api/push/unsubscribe       {"endpoint"}
+  POST /api/chat                   stage B: {"messages", "context_date"} -> an SSE answer from the
+                                   server's reflections (stateless; 404 in stage A)
 
 Device (Authorization: Bearer <device token>; the laptop only connects out):
   POST /api/device/pair            {"code", "name"} -> a device token (no auth)
-  POST /api/device/packets         one packet (result, usage, proposal, proposal_update, metrics)
-  POST /api/device/poll            long poll: a device job to lease, and decisions
+  POST /api/device/packets         one packet (result, usage, proposal, proposal_update, metrics;
+                                   stage B adds observation and config_snapshot)
+  POST /api/device/poll            long poll: a device job to lease, and decisions (with the
+                                   proposal itself when the server's Gardener drafted it)
   POST /api/device/jobs/{id}/heartbeat
   POST /api/device/jobs/{id}/finish  a job_status packet
 
-Environment (no model key: stage A makes no model calls):
+Environment (stage A holds no model key: it makes no model calls):
   WISEN_CLOUD_DB            SQLite file (default ~/.wisen/cloud/wisen.db)
+  WISEN_CLOUD_STAGE         a (default) or b: the Synthesizer and Gardener run here over
+                            packets (wisen/cloud/rem.py). Synthesis runs on `claude -p`
+                            (WISEN_SYNTH_MODEL, default claude-cli:sonnet; "api" falls back to
+                            WISEN_MODEL); the Gardener uses WISEN_MODEL and its key; chat
+                            runs on DeepSeek (WISEN_CHAT_MODEL, DEEPSEEK_API_KEY)
   WISEN_CLOUD_PUBLIC_URL    e.g. https://wisen.example.org; https makes the
                             session cookie Secure, and it is the VAPID contact
   WISEN_VAPID_PRIVATE_KEY   from `wisen cloud vapid-keys`; both unset = no push
@@ -38,6 +47,7 @@ Environment (no model key: stage A makes no model calls):
   WISEN_VAPID_SUBJECT       optional VAPID contact (mailto: or https URL)
 """
 import asyncio
+import json
 import os
 import time
 from collections import defaultdict, deque
@@ -47,11 +57,17 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from wisen import config
 from wisen.cloud.backup import serving
-from wisen.cloud.mailbox import ACCEPTED, Conflict, Mailbox, NotPublishable
+from wisen.cloud.mailbox import STAGES, Conflict, Mailbox, NotPublishable
 from wisen.cloud.push import WebPushSender
 from wisen.packets import PacketRejected, receive
 from wisen.proposals import IllegalTransition
@@ -62,8 +78,13 @@ MAX_BODY = 1_000_000  # bytes; a packet is far smaller
 MAX_WAIT = 30.0  # seconds a device poll may hang; under the proxy's timeouts
 LOGIN_WINDOW, LOGIN_TRIES = 15 * 60, 5  # per user id, per process
 # Provider keys the laptop uses. The stage-A server needs none; /health
-# reports whether one is set anyway, so a deploy can prove it has none.
+# reports whether one is set anyway, so a deploy can prove it has none. A
+# stage-B server needs the key of its WISEN_MODEL (the Gardener) and
+# DEEPSEEK_API_KEY (chat).
 MODEL_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY")
+# Stage B synthesizes on the owner's Claude subscription unless told otherwise
+# (WISEN_SYNTH_MODEL=api: the API model, WISEN_MODEL). Owner's own box, own use.
+SERVER_SYNTH_MODEL = "claude-cli:sonnet"
 
 Short = Annotated[str, StringConstraints(max_length=200)]
 Id = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
@@ -109,6 +130,16 @@ class Unsubscribe(_Body):
 class Pair(_Body):
     code: Annotated[str, StringConstraints(max_length=40)]
     name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
+
+
+class ChatMessage(_Body):
+    role: Literal["user", "assistant"]
+    content: Annotated[str, StringConstraints(max_length=8000)]
+
+
+class Chat(_Body):
+    messages: list[ChatMessage] = Field(min_length=1, max_length=50)
+    context_date: Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
 
 
 class Poll(_Body):
@@ -193,7 +224,9 @@ def create_app(
 
     @app.get("/health")
     async def health():
-        return {"ok": True, "push": vapid_public_key is not None,
+        return {"ok": True, "push": vapid_public_key is not None, "stage": mailbox.stage,
+                "synthesis": ("claude-cli" if config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
+                              .startswith("claude-cli:") else "api") if mailbox.stage == "b" else None,
                 "model_key": any(os.environ.get(k) for k in MODEL_KEYS)}
 
     # ── browser session ───────────────────────────────────────────────────────
@@ -236,13 +269,11 @@ def create_app(
 
     @app.get("/api/queue")
     async def queue(user: User):
-        jobs = await asyncio.to_thread(mailbox.device_jobs, user, ("queued", "leased"))
-        return sorted({j.args["date"] for j in jobs if j.kind == "synthesize"})
+        return await asyncio.to_thread(mailbox.queued_dates, user)
 
     @app.post("/api/trigger")
     async def trigger(body: Trigger, user: User):
-        await mailbox.enqueue_device_job(user, "synthesize", {"date": body.date, "force": True},
-                                         request_id=f"trigger-synthesis:{body.date}", rerun=True)
+        await mailbox.trigger(user, body.date)
         return {"queued": body.date}
 
     @app.get("/api/proposals")
@@ -306,6 +337,30 @@ def create_app(
         await asyncio.to_thread(mailbox.remove_push_subscription, user, body.endpoint)
         return {"ok": True}
 
+    @app.post("/api/chat")
+    async def chat(body: Chat, user: User):
+        """Stage B: ask about your days. The answer comes from this server's
+        reflections only (the raw history stays on the laptops) and is not
+        stored: the browser sends the conversation each turn."""
+        if mailbox.stage != "b":
+            raise HTTPException(404, "chat runs on a stage-B server (WISEN_CLOUD_STAGE=b)")
+        if body.messages[-1].role != "user":
+            raise HTTPException(422, "the last message must be the user's")
+        from wisen.chat.agent import stream_chat  # model code, loaded only in stage B
+
+        async def events():
+            try:
+                async for event in stream_chat([m.model_dump() for m in body.messages], body.context_date,
+                                               store=mailbox.store(user), raw_history=False):
+                    line = {"error": event.get("message", "unknown error")} if event["type"] == "error" else event
+                    yield f"data: {json.dumps(line)}\n\n"
+            except (ValueError, RuntimeError) as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
+
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     # ── device API ────────────────────────────────────────────────────────────
 
     @app.post("/api/device/pair")
@@ -318,12 +373,12 @@ def create_app(
     @app.post("/api/device/packets")
     async def packets(request: Request, dev: Device):
         user_id, device_id = dev
-        packet = _receive(await _json(request), ACCEPTED)
+        packet = _receive(await _json(request), mailbox.accepted)
         try:
             stored = await asyncio.to_thread(mailbox.store_packet, user_id, device_id, packet)
         except Conflict as e:
             raise HTTPException(409, str(e)) from None
-        if stored and packet.packet_type in ("result", "proposal", "proposal_update"):
+        if stored and packet.packet_type in ("result", "proposal", "proposal_update", "observation"):
             mailbox.engine(user_id).wake()
         return {"stored": stored, "packet_id": packet.packet_id}
 
@@ -331,10 +386,19 @@ def create_app(
     async def poll(body: Poll, dev: Device):
         user_id, device_id = dev
         job, events = await mailbox.poll(user_id, device_id, body.cursor, body.wait)
+        drafted = await asyncio.to_thread(mailbox.drafted_here, user_id, [e.proposal_id for _, e in events])
+        context = None
+        if job and job.kind == "observe":
+            # The baseline the laptop's Observer compares the day against.
+            context = {"previous": await asyncio.to_thread(mailbox.previous_reflection, user_id, job.args["date"])}
         return {
-            "job": {"id": job.id, "kind": job.kind, "args": job.args, "attempts": job.attempts} if job else None,
+            "job": {"id": job.id, "kind": job.kind, "args": job.args, "attempts": job.attempts,
+                    **({"context": context} if context else {})} if job else None,
             "decisions": [{"event_id": n, "proposal_id": e.proposal_id, "state": e.to_state, "note": e.note,
-                           "request_id": e.request_id, "actor": e.actor, "at": e.at} for n, e in events],
+                           "request_id": e.request_id, "actor": e.actor, "at": e.at,
+                           # Drafted here: the laptop has no copy; the one it is for applies an approval.
+                           **({"proposal": drafted[e.proposal_id]} if e.proposal_id in drafted else {})}
+                          for n, e in events],
             "cursor": events[-1][0] if events else body.cursor,
         }
 
@@ -419,9 +483,21 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
         sender = WebPushSender(private, subject)
     else:
         print("wisen cloud: no VAPID keys (WISEN_VAPID_PRIVATE_KEY/PUBLIC_KEY); Web Push is off")
-    if any(os.environ.get(k) for k in MODEL_KEYS):
-        print(f"wisen cloud: warning: a model API key is set ({', '.join(k for k in MODEL_KEYS if os.environ.get(k))});"
+    stage = os.environ.get("WISEN_CLOUD_STAGE", "a").strip().lower() or "a"
+    if stage not in STAGES:
+        raise SystemExit(f"WISEN_CLOUD_STAGE is {stage!r}; use a or b")
+    keys = [k for k in MODEL_KEYS if os.environ.get(k)]
+    if stage == "a" and keys:
+        print(f"wisen cloud: warning: a model API key is set ({', '.join(keys)});"
               " the stage-A server makes no model calls and should not hold one")
+    if stage == "b":
+        if not config.get("model", "synth_model", "WISEN_SYNTH_MODEL", ""):
+            os.environ["WISEN_SYNTH_MODEL"] = SERVER_SYNTH_MODEL
+        synth = config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
+        chat = config.get("model", "chat_model", "WISEN_CHAT_MODEL", "WISEN_CHAT_MODEL unset")
+        # Names only: a key's value is never printed or logged.
+        print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener on WISEN_MODEL; chat on DeepSeek "
+              f"({chat}); model keys set: {', '.join(keys) or 'none'}")
     db = db or Path(os.environ.get("WISEN_CLOUD_DB", "~/.wisen/cloud/wisen.db")).expanduser()
-    return create_app(Mailbox(db, sender=sender), vapid_public_key=public if sender else None,
+    return create_app(Mailbox(db, sender=sender, stage=stage), vapid_public_key=public if sender else None,
                       secure_cookies=public_url.startswith("https://"), run_engines=run_engines)

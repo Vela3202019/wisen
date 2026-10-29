@@ -36,7 +36,7 @@ from wisen.evals.cases import Case, load_cases
 from wisen.gardener import applier
 from wisen.gardener.agent import Deps, Draft, build_agent, change_lines
 from wisen.gardener.git import GitError, one_file_diff
-from wisen.gardener.targets import Refused, Target, resolve
+from wisen.gardener.targets import Refused, SnapshotFiles, Target, resolve
 from wisen.jobs import JobContext, JobEngine, ts
 from wisen.proposals import Proposals, expire_proposal_job
 from wisen.store import SqliteStore
@@ -142,8 +142,11 @@ async def build_prompt(store: SqliteStore, day: str) -> str:
 
 # ── garden: propose ───────────────────────────────────────────────────────────
 
-async def propose(store: SqliteStore, day: str) -> GardenerRun:
-    deps = Deps(open_targets=await asyncio.to_thread(open_targets, store),
+async def propose(store: SqliteStore, day: str, snapshot: SnapshotFiles | None = None) -> GardenerRun:
+    """One Gardener run over the week up to `day`. On the server, `snapshot`
+    holds the files the laptops uploaded; on the laptop it is None and the
+    Gardener reads its repos."""
+    deps = Deps(snapshot=snapshot, open_targets=await asyncio.to_thread(open_targets, store),
                 reflection_dates={r["date"] for r in await recent_reflections(store, day)},
                 history=await asyncio.to_thread(past_outcomes, store),
                 proposed=await asyncio.to_thread(proposed_changes, store))
@@ -206,11 +209,16 @@ def _num(value: float | None) -> str:
     return "n/a" if value is None else f"{value:,g}"
 
 
-def eval_summary(report: dict | None, cost: dict) -> str:
+NO_CASES = "Replay: no confirmed cases for this file yet, so the expected gain is unknown."
+# Replay runs coding agents over the mined transcripts, which never leave the laptop.
+NOT_REPLAYED = "Replay: not run, because this proposal was drafted on the server and replay needs the laptop."
+
+
+def eval_summary(report: dict | None, cost: dict, missing: str = NO_CASES) -> str:
     now = (f" Cost now (7-day medians): {_num(cost['tokens_per_problem'])} tokens per problem solved, "
            f"{_num(cost['hitl_turns_per_pr'])} human-in-the-loop turns per PR.")
     if report is None:
-        return "Replay: no confirmed cases for this file yet, so the expected gain is unknown." + now
+        return missing + now
     cur, new = report["current"], report["proposed"]
     rule = {True: "yes", False: "no", None: "not enough cases to tell"}[report["meets_rule"]]
     spent = f"{report['tokens']:,} tokens" + (f", ${report['cost_usd']:.2f}" if report["cost_usd"] is not None else "")
@@ -220,7 +228,8 @@ def eval_summary(report: dict | None, cost: dict) -> str:
             f"(pass rate rises, clean set holds): {rule}. Replay cost: {spent}.{now}")
 
 
-def record_run(store: SqliteStore, proposals: Proposals, run: GardenerRun, replays: dict, day: str) -> list[str]:
+def record_run(store: SqliteStore, proposals: Proposals, run: GardenerRun, replays: dict, day: str,
+               missing: str = NO_CASES) -> list[str]:
     """The run and its proposals, in one transaction; a rerun finds them."""
     now = proposals.clock()
     cost = cost_now(store, day)
@@ -235,8 +244,10 @@ def record_run(store: SqliteStore, proposals: Proposals, run: GardenerRun, repla
         for d in run.drafts:
             report = replays.get(d.tool_call_id)
             payload = {"diff": d.diff, "rationale": d.rationale, "evidence": d.evidence,
-                       "eval_summary": eval_summary(report, cost), "batch": day, "run_id": run.run_id,
+                       "eval_summary": eval_summary(report, cost, missing), "batch": day, "run_id": run.run_id,
                        "tool_call_id": d.tool_call_id, "base_blob": d.base_blob, "replay": report}
+            if d.device_id is not None:
+                payload["device_id"] = d.device_id   # the laptop that applies it
             ids.append(proposals.create_in(conn, d.target, payload, f"gardener:{run.run_id}:{d.tool_call_id}",
                                            "gardener", now + EXPIRES_AFTER).id)
     return ids
@@ -324,11 +335,11 @@ def _results(store: SqliteStore, run_id: str) -> tuple[DeferredToolResults, dict
     return DeferredToolResults(approvals=approvals), branches
 
 
-async def resume(store: SqliteStore, run_id: str) -> dict:
+async def resume(store: SqliteStore, run_id: str, snapshot: SnapshotFiles | None = None) -> dict:
     row = _rows(store, "SELECT conversation FROM gardener_runs WHERE user_id = ? AND id = ?", run_id)[0]
     conversation = ConversationTypeAdapter.validate_json(row["conversation"])
     results, branches = await asyncio.to_thread(_results, store, run_id)
-    deps = Deps(resuming=True, branches=branches)
+    deps = Deps(resuming=True, branches=branches, snapshot=snapshot)
     result = await build_agent(gardener_model()).run(conversation=conversation, deferred_tool_results=results,
                                                      deps=deps)
     output = result.output if isinstance(result.output, str) else (

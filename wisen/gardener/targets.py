@@ -17,13 +17,18 @@ leaves the machine in a proposal packet. Two kinds of project:
 
 `allowed` is the allow-list. The applier checks it after approval, so it is
 the authority, not the model's instructions.
+
+The Gardener reads and drafts through one of two views of these files:
+`LocalFiles`, the repos on this machine, or `SnapshotFiles`, the text a
+laptop uploaded as config snapshots (the server's Gardener, stage B), which
+it drafts against without any repo.
 """
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from wisen import config
-from wisen.gardener.git import Repo
+from wisen.gardener.git import Repo, one_file_diff, text_diff
 
 HOME = "home"
 ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
@@ -197,3 +202,93 @@ def editable_files(repos: dict[str, Path] | None = None) -> list[str]:
             if meta.split(" ", 1)[0] in FILE_MODES and allowed(f):
                 names.append(f"{alias}:{f}")
     return names
+
+
+def base_blob(t: Target, current: str | None) -> str | None:
+    """The blob a change to `t` is drafted against: for home, the file on
+    disk (the applier records it on main before it branches); for a repo,
+    the file on the default branch."""
+    if t.is_home:
+        return t.repo.out("hash-object", "--stdin", input=current) if current is not None else None
+    base = t.base()
+    return t.repo.blob(base, t.path) if base else None
+
+
+@dataclass(frozen=True)
+class LocalFile:
+    target: Target
+    device_id = None   # drafted where it is applied
+
+    @property
+    def name(self) -> str:
+        return self.target.name
+
+    def current(self) -> str | None:
+        return self.target.current()
+
+    def diff(self, current: str | None, proposed: str) -> str:
+        return one_file_diff(self.target.repo, self.target.path, current, proposed)
+
+    def base_blob(self, current: str | None) -> str | None:
+        return base_blob(self.target, current)
+
+
+class LocalFiles:
+    """The files on this machine, found in its repos and home dir."""
+
+    def __init__(self, repos: dict[str, Path] | None = None):
+        self.repos = repos
+
+    def list(self) -> list[str]:
+        return editable_files(self.repos)
+
+    def open(self, name: str) -> LocalFile:
+        return LocalFile(resolve(name, self.repos))
+
+
+@dataclass(frozen=True)
+class SnapshotFile:
+    name: str
+    path: str
+    text: str | None
+    blob: str | None
+    device_id: str   # the laptop whose snapshot it is: the one that applies a change to it
+
+    def current(self) -> str | None:
+        return self.text
+
+    def diff(self, current: str | None, proposed: str) -> str:
+        return text_diff(self.path, current, proposed)
+
+    def base_blob(self, current: str | None) -> str | None:
+        return self.blob
+
+
+class SnapshotFiles:
+    """The files laptops uploaded as config snapshots, keyed by target, newest
+    upload first. Two laptops can hold the same target (each has its own home
+    dir): the newest snapshot wins, and a change to it goes to that laptop. The
+    text is secret-redacted; `base_blob` is the real file's blob, which the
+    applier checks."""
+
+    def __init__(self, files: dict[str, dict]):
+        self.files = files   # target -> {"text", "base_blob", "device_id"}
+
+    def list(self) -> list[str]:
+        return sorted(self.files)
+
+    def open(self, name: str) -> SnapshotFile:
+        alias, sep, path = name.partition(":")
+        if not sep or not ALIAS.match(alias):
+            raise Refused(f"{name!r} is not <project>:<path>")
+        if not allowed(path):
+            raise Refused(f"{path!r} is not a CLAUDE.md, AGENTS.md or skill file; the Gardener may not change it")
+        if entry := self.files.get(name):
+            return SnapshotFile(name, path, entry["text"], entry["base_blob"], entry["device_id"])
+        # A new file: in a project a laptop has shown, or in home.
+        devices = [e["device_id"] for t, e in self.files.items() if t.partition(":")[0] == alias]
+        if not devices and alias == HOME:
+            devices = [e["device_id"] for e in self.files.values()]
+        if not devices:
+            raise Refused(f"no project {alias!r} in the files the laptops uploaded")
+        return SnapshotFile(name, path, None, None, devices[0])

@@ -4,6 +4,7 @@ work tree: diffs and commits are built in a throwaway index file
 (GIT_INDEX_FILE), and branches are created by `update-ref` only if they do not
 exist yet. Your checkout, your index and your uncommitted work stay as they are.
 """
+import difflib
 import os
 import subprocess
 import tempfile
@@ -126,6 +127,19 @@ def one_file_diff(repo: Repo, path: str, old: str | None, new: str) -> str:
                 repo.run("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}", env=env)
             trees.append(repo.out("write-tree", env=env))
     return repo.run("diff-tree", "-p", "--no-color", "--no-ext-diff", trees[0], trees[1]).stdout
+
+
+def text_diff(path: str, old: str | None, new: str) -> str:
+    """`one_file_diff` without a repository: the same git-format unified diff
+    (3 lines of context), for a Gardener that has the file's text but not its
+    repo (the server, from a config snapshot). `git apply` takes it back."""
+    lines = []
+    for line in list(difflib.unified_diff((old or "").splitlines(keepends=True), new.splitlines(keepends=True),
+                                          n=3))[2:]:
+        lines.append(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n")
+    head = f"diff --git a/{path} b/{path}\n"
+    head += "new file mode 100644\n--- /dev/null\n" if old is None else f"--- a/{path}\n"
+    return head + f"+++ b/{path}\n" + "".join(lines)
 
 
 def diff_paths(repo: Repo, diff: str) -> list[str]:
