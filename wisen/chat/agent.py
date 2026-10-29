@@ -13,6 +13,10 @@ On a stage-B server (wisen/cloud) the same agent answers from reflections
 only (`raw_history=False`), on DeepSeek (WISEN_CHAT_MODEL; see llm.py): the
 two search tools read the laptop's raw history and configs, which never
 reach the server.
+
+`answer` is the one-shot form for a question asked in Telegram (a device job
+from the server, answered on the laptop): reflection tools only, unless the
+question came with /search.
 """
 from __future__ import annotations
 
@@ -92,6 +96,17 @@ class ChatDeps:
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
 
 
+_TELEGRAM_PROMPT = """\
+This question came from the builder's phone, over Telegram. Answer in plain text \
+(no Markdown), in a few short paragraphs. Quote briefly; never paste whole turns \
+or search results.\
+"""
+_TELEGRAM_REFLECTIONS_ONLY = """\
+Only the reflection tools are available for this question. If the answer needs \
+the raw transcripts, say so and suggest asking again with /search.\
+"""
+
+
 def _make_agent(raw_history: bool = True) -> Agent:
     model = get_model() if raw_history else chat_model()
     # thinking=False keeps Gemini fast; other providers may not accept it
@@ -118,6 +133,43 @@ def _get_agent(raw_history: bool = True) -> Agent:
     if raw_history not in _agents:
         _agents[raw_history] = _make_agent(raw_history)
     return _agents[raw_history]
+
+
+_answer_agents: dict[bool, Agent] = {}
+
+
+def answer_agent(raw_search: bool) -> Agent:
+    """The agent for `answer`: with raw_search it may also search transcripts
+    and configs; without, it sees reflections only. It runs on the laptop's
+    model (WISEN_MODEL) in either case, unlike the stage-B server's
+    reflections-only agent."""
+    if raw_search not in _answer_agents:
+        model = get_model()
+        settings = ModelSettings(thinking=False) if model.startswith("google:") else None
+        agent = Agent(
+            model=model,
+            output_type=str,
+            deps_type=ChatDeps,
+            system_prompt=(_SYSTEM_PROMPT, _TELEGRAM_PROMPT, *(() if raw_search else (_TELEGRAM_REFLECTIONS_ONLY,))),
+            retries=1,
+            model_settings=settings,
+        )
+        for fn in (get_reflection, list_reflections) + ((search_chat_history, search_agent_configs) if raw_search
+                                                         else ()):
+            agent.tool(fn)
+        _answer_agents[raw_search] = agent
+    return _answer_agents[raw_search]
+
+
+async def answer(question: str, *, raw_search: bool) -> str:
+    """Answer one question, anchored on the latest reflection like a new chat."""
+    db = get_store()
+    latest = next(iter(await db.list_reflections(limit=1)), None)
+    context = latest.get("synthesis_context", "") if latest else "No reflection available yet."
+    deps = ChatDeps(db=db, synthesis_context=context)
+    result = await answer_agent(raw_search).run(
+        f"## Your Reflection Context\n\n{context}\n\n---\n\n{question}", deps=deps)
+    return result.output
 
 
 def _resolve_date(raw: str) -> str:

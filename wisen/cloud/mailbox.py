@@ -1,15 +1,16 @@
 """
 The server's mailbox: one SQLite file (WAL) holding users, browser sessions,
 paired devices, received packets, proposals and their decisions, push
-subscriptions, and the job queue. Every rule about that data lives here; the
-HTTP app (server.py) only translates requests.
+subscriptions, linked Telegram chats, and the job queue. Every rule about that
+data lives here; the HTTP app (server.py) and the Telegram bot (telegram.py)
+only translate requests.
 
 Each user gets the same job engine and proposal state machine the laptop runs
 (wisen/jobs.py, wisen/proposals.py), on this file and scoped to their user id.
-The server's own jobs ('local' runner) are push sends, proposal expiry and the
-daily schedule. Device jobs ('device' runner) are leased to the user's paired
-laptops over HTTPS (`poll`), under the same lease rules, so a laptop that
-sleeps mid-job just lets its lease expire and the job waits for it.
+The server's own jobs ('local' runner) are push and Telegram sends, proposal
+expiry and the daily schedule. Device jobs ('device' runner) are leased to the
+user's paired laptops over HTTPS (`poll`), under the same lease rules, so a
+laptop that sleeps mid-job just lets its lease expire and the job waits for it.
 
 Stage B (`stage="b"`, WISEN_CLOUD_STAGE=b; docs/plan/cloud-architecture.md
 §3.2): laptops also upload what the REM side needs, and the server runs it
@@ -44,6 +45,7 @@ from pydantic import BaseModel
 
 from wisen.cloud import auth
 from wisen.cloud.push import Gone, PushSender
+from wisen.cloud.telegram import QUESTION_FAILED, TelegramApi, proposal_message
 from wisen.gardener.applier import MEASURE_AFTER
 from wisen.gardener.targets import HOME, SnapshotFiles
 from wisen.jobs import Job, JobContext, JobEngine, insert_job, ts
@@ -64,9 +66,10 @@ SEEN_EVERY = timedelta(minutes=1)  # how often a device's last_seen_at is rewrit
 POLL_RECHECK = 2.0  # seconds; a long poll rechecks at least this often (timers come due without a signal)
 # What a device may upload into the mailbox; stage B adds what the server's
 # REM side reads. Job status arrives only as the end of a device job.
-ACCEPTED = ("result", "usage", "proposal", "proposal_update", "metrics")
+ACCEPTED = ("result", "usage", "proposal", "proposal_update", "metrics", "answer")
 STAGE_B = ("observation", "config_snapshot")
-DEVICE_KINDS = ("synthesize", "measure", "publish", "observe")
+# ask and search answer a question asked in Telegram (wisen/cloud/telegram.py).
+DEVICE_KINDS = ("synthesize", "measure", "publish", "observe", "ask", "search")
 STAGES = ("a", "b")
 # Stage B: how long the day's synthesis waits for a laptop to send fresh
 # notes before it runs on what is already uploaded (a sleeping laptop never
@@ -147,6 +150,15 @@ MIGRATIONS = [
                coalesce(json_extract(body, '$.note'), ''), json_extract(body, '$.measure'), json_extract(body, '$.at')
         FROM packets WHERE packet_type = 'proposal_update' AND json_extract(body, '$.measure') IS NOT NULL;
     """,
+    # 3: Telegram links (wisen/cloud/telegram.py).
+    """
+    -- One linked Telegram chat per user; only it may decide or ask.
+    CREATE TABLE telegram_links (
+        user_id   TEXT PRIMARY KEY,
+        chat_id   INTEGER NOT NULL UNIQUE,
+        linked_at TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -173,12 +185,14 @@ def fire_time(day: date, timezone: str, daily_at: str) -> datetime:
 
 
 class Mailbox:
-    def __init__(self, path: Path, *, sender: PushSender | None, clock: Callable[[], datetime] = _utcnow,
-                 stage: str = "a"):
+    def __init__(self, path: Path, *, sender: PushSender | None, telegram: TelegramApi | None = None,
+                 public_url: str = "", clock: Callable[[], datetime] = _utcnow, stage: str = "a"):
         if stage not in STAGES:
             raise ValueError(f"unknown stage {stage!r}; use one of {', '.join(STAGES)}")
         self.path = path
         self.sender = sender
+        self.telegram = telegram
+        self.public_url = public_url  # for links in Telegram messages
         self.clock = clock
         self.stage = stage
         self.accepted = ACCEPTED + (STAGE_B if stage == "b" else ())
@@ -203,10 +217,11 @@ class Mailbox:
             self._engines[user_id] = JobEngine(self.store(user_id), {
                 "push": self._push_job,
                 "expire-proposal": self._expire_job,
+                "telegram": self._telegram_job,
                 "schedule-daily": self._schedule_job,
                 "synthesize": self._rem("synthesize_job"),
                 "gardener-resume": self._rem("resume_job"),
-            }, clock=self.clock)
+            }, clock=self.clock, on_failed=lambda conn, job: self._job_failed(conn, user_id, job))
         return self._engines[user_id]
 
     def proposals(self, user_id: str) -> Proposals:
@@ -385,6 +400,51 @@ class Mailbox:
                 )
         return revoked
 
+    def device_online(self, user_id: str, within: timedelta) -> bool:
+        """Whether one of the user's live devices was heard from in `within`."""
+        with closing(self._db._connect()) as conn:
+            return conn.execute(
+                "SELECT 1 FROM devices WHERE user_id = ? AND revoked_at IS NULL AND last_seen_at > ?",
+                (user_id, ts(self.clock() - within)),
+            ).fetchone() is not None
+
+    # ── Telegram links ────────────────────────────────────────────────────────
+
+    def link_telegram(self, code: str, chat_id: int) -> str | None:
+        """Spend a pairing code (the dashboard's one-time code) on linking a
+        Telegram chat to its user, replacing the user's earlier chat. Returns
+        the user id; None if the code is unknown, used or expired."""
+        now = ts(self.clock())
+        with self._db.transaction() as conn:
+            row = conn.execute(
+                "UPDATE pairing_codes SET device_id = ? WHERE code_hash = ? AND device_id IS NULL "
+                "AND expires_at > ? RETURNING user_id",
+                (f"telegram:{chat_id}", auth.token_hash(auth.normalize_code(code)), now),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute("DELETE FROM telegram_links WHERE chat_id = ?", (chat_id,))
+            conn.execute(
+                "INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (?, ?, ?) "
+                "ON CONFLICT (user_id) DO UPDATE SET chat_id = excluded.chat_id, linked_at = excluded.linked_at",
+                (row["user_id"], chat_id, now),
+            )
+        return row["user_id"]
+
+    def telegram_user(self, chat_id: int) -> str | None:
+        with closing(self._db._connect()) as conn:
+            row = conn.execute("SELECT user_id FROM telegram_links WHERE chat_id = ?", (chat_id,)).fetchone()
+        return row["user_id"] if row else None
+
+    def _telegram_chat(self, user_id: str) -> int | None:
+        with closing(self._db._connect()) as conn:
+            row = conn.execute("SELECT chat_id FROM telegram_links WHERE user_id = ?", (user_id,)).fetchone()
+        return row["chat_id"] if row else None
+
+    def unlink_telegram(self, user_id: str) -> None:
+        with self._db.transaction() as conn:
+            conn.execute("DELETE FROM telegram_links WHERE user_id = ?", (user_id,))
+
     # ── packets ───────────────────────────────────────────────────────────────
 
     def store_packet(self, user_id: str, device_id: str, packet: BaseModel) -> bool:
@@ -401,7 +461,8 @@ class Mailbox:
                "proposal_update": lambda: packet.request_id, "metrics": lambda: packet.date,
                # one per laptop: several laptops' notes on a day merge into one reflection
                "observation": lambda: f"{packet.date}:{device_id}",
-               "config_snapshot": lambda: f"{device_id}:{packet.target}"}[packet.packet_type]()
+               "config_snapshot": lambda: f"{device_id}:{packet.target}",
+               "answer": lambda: packet.job_id}[packet.packet_type]()
         now = self.clock()
         with self.store(user_id).transaction() as conn:
             row = conn.execute(
@@ -412,6 +473,13 @@ class Mailbox:
                 return False
             if row and packet.packet_type == "proposal":
                 raise Conflict(f"proposal {key} was already sent with different content; a proposal never changes")
+            if row and packet.packet_type == "answer":
+                return False
+            if packet.packet_type == "answer" and not conn.execute(
+                "SELECT 1 FROM jobs WHERE user_id = ? AND id = ? AND runner = 'device' AND kind IN ('ask', 'search')",
+                (user_id, key),
+            ).fetchone():
+                raise Conflict(f"no question {key} to answer")
             conn.execute(
                 "INSERT INTO packets (user_id, packet_type, key, packet_id, device_id, body, received_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user_id, packet_type, key) DO UPDATE SET "
@@ -430,6 +498,12 @@ class Mailbox:
                     f" · {waiting} proposal{'s' if waiting != 1 else ''} waiting" if waiting else "")
                 self._queue_push(conn, user_id, f"result:{packet.packet_id}", now, title="Reflection ready",
                                  body=body, url=f"/#day-{packet.date}")
+                self._queue_telegram(conn, user_id, f"result:{packet.packet_id}", now,
+                                     text=f"Reflection ready\n{body}", url=f"/#day-{packet.date}")
+                for (proposal_id,) in conn.execute(
+                    "SELECT id FROM proposals WHERE user_id = ? AND state = 'proposed' "
+                    "AND json_extract(payload, '$.batch') = ? ORDER BY created_at", (user_id, packet.date)):
+                    self._queue_telegram(conn, user_id, f"proposal:{proposal_id}", now, proposal_id=proposal_id)
             elif packet.packet_type == "proposal":
                 self._record_proposal(conn, user_id, device_id, packet)
                 if packet.batch is None:  # e.g. a revert after a worse measurement
@@ -440,6 +514,11 @@ class Mailbox:
                     # The briefing already went out: one push for the rest of the batch.
                     self._queue_push(conn, user_id, f"batch:{packet.batch}", now, title="Proposals waiting",
                                      body=f"from {packet.batch}", url=f"/#day-{packet.batch}")
+                else:
+                    return True  # Telegram sends it after the day's briefing, like the push
+                # Each proposal is its own Telegram message: it carries its buttons.
+                self._queue_telegram(conn, user_id, f"proposal:{packet.proposal_id}", now,
+                                     proposal_id=packet.proposal_id)
             elif packet.packet_type == "proposal_update":
                 self._record_update(conn, user_id, device_id, packet, now)
             elif packet.packet_type == "metrics":
@@ -447,6 +526,8 @@ class Mailbox:
                              packet.model_dump(mode="json", exclude=set(ENVELOPE)))
             elif packet.packet_type == "observation":
                 self._late_observation(conn, user_id, packet.date, now)
+            elif packet.packet_type == "answer":
+                self._queue_telegram(conn, user_id, f"answer:{packet.job_id}", now, text=packet.answer)
         return True
 
     def _mirror(self, conn: sqlite3.Connection, table: str, user_id: str, date: str, doc: dict) -> None:
@@ -495,6 +576,9 @@ class Mailbox:
                      "revert_proposed": "Change made things worse"}[packet.to_state]
             self._queue_push(conn, user_id, f"update:{packet.request_id}", now, title=title,
                              body=packet.note or packet.to_state, url=f"/#proposal-{packet.proposal_id}")
+            self._queue_telegram(conn, user_id, f"update:{packet.request_id}", now,
+                                 text=f"{title}\n{packet.note or packet.to_state}",
+                                 url=f"/#proposal-{packet.proposal_id}")
 
     def _record_proposal(self, conn: sqlite3.Connection, user_id: str, device_id: str, packet: BaseModel) -> None:
         payload = packet.model_dump(include={"diff", "rationale", "evidence", "eval_summary", "batch"})
@@ -526,6 +610,16 @@ class Mailbox:
 
     def _queue_push(self, conn: sqlite3.Connection, user_id: str, key: str, now: datetime, **message: str) -> None:
         insert_job(conn, user_id, "push", message, request_id=f"push:{key}", run_after=now, max_attempts=5, now=now)
+
+    def _queue_telegram(self, conn: sqlite3.Connection, user_id: str, key: str, now: datetime, **message: str) -> None:
+        """One Telegram message (text with an optional dashboard link, or a
+        proposal by id), if the bot runs and the user linked a chat. Keyed, so
+        a proposal is announced once however many briefings name it."""
+        if self.telegram is None or not conn.execute(
+                "SELECT 1 FROM telegram_links WHERE user_id = ?", (user_id,)).fetchone():
+            return
+        insert_job(conn, user_id, "telegram", message, request_id=f"telegram:{key}", run_after=now, max_attempts=5,
+                   now=now)
 
     def packets(self, user_id: str, packet_type: str, limit: int = 400) -> list[dict]:
         """Stored packets of one type, newest key first (a result's key is its date)."""
@@ -783,7 +877,8 @@ class Mailbox:
         deadline = asyncio.get_running_loop().time() + wait
         while True:
             changed = self._changes(user_id)  # taken before checking, so no change is missed
-            await engine.recover()
+            if await engine.recover():
+                engine.wake()
             job = await engine.claim_as(_owner(device_id), "device")
             events = await proposals.events_since(cursor)
             remaining = deadline - asyncio.get_running_loop().time()
@@ -807,7 +902,10 @@ class Mailbox:
         if job is None or job.runner != "device" or job.kind != status.kind:
             raise Conflict("no such device job")
         if status.state != "succeeded":
-            return await engine.fail_as(job_id, _owner(device_id), f"DeviceJobFailed: {status.error_class or 'unknown'}")
+            done = await engine.fail_as(job_id, _owner(device_id), f"DeviceJobFailed: {status.error_class or 'unknown'}")
+            if done:
+                engine.wake()
+            return done
         done = await engine.finish_as(job_id, _owner(device_id), status.model_dump(mode="json"))
         if done and job.kind == "publish" and status.pr_url:
             # The link lives on the proposal; its state stays applied until
@@ -817,6 +915,12 @@ class Mailbox:
             await asyncio.to_thread(self._observed, user_id, job.args["synthesis"])
             engine.wake()
         return done
+
+    def _job_failed(self, conn: sqlite3.Connection, user_id: str, job: Job) -> None:
+        """A Telegram question whose job failed for good, however it failed,
+        gets one plain reply, so a failure does not look like a slow answer."""
+        if job.kind in ("ask", "search"):
+            self._queue_telegram(conn, user_id, f"failed:{job.id}", self.clock(), text=QUESTION_FAILED)
 
     def _observed(self, user_id: str, synthesis: str) -> None:
         """A laptop sent its fresh notes: the synthesis waiting for them runs
@@ -920,3 +1024,28 @@ class Mailbox:
     def _drop_subscription(self, user_id: str, subscription_id: str) -> None:
         with self._db.transaction() as conn:
             conn.execute("DELETE FROM push_subscriptions WHERE user_id = ? AND id = ?", (user_id, subscription_id))
+
+    async def _telegram_job(self, ctx: JobContext, args: dict) -> dict:
+        """Send one message to the user's linked chat. Like a push, the send
+        is a step that is not safe to re-run. A proposal message is written at
+        send time, from the proposal's target and rationale only, and skipped
+        once it is no longer waiting."""
+        if self.telegram is None:
+            return {"sent": 0, "telegram": "off"}
+        user_id = ctx.engine.store.user_id
+        chat_id = await ctx.step("chat", lambda: asyncio.to_thread(self._telegram_chat, user_id),
+                                 replay_safe=True, output=int | None)
+        if chat_id is None:
+            return {"sent": 0, "telegram": "unlinked"}
+        buttons = None
+        if proposal_id := args.get("proposal_id"):
+            proposal = await self.proposals(user_id).get(proposal_id)
+            if proposal is None or proposal.state != "proposed":
+                return {"sent": 0, "state": proposal.state if proposal else None}
+            text, buttons = proposal_message(proposal_id, proposal.target, proposal.payload["rationale"],
+                                             self.public_url)
+        else:
+            text = args["text"] + (f"\n\n{self.public_url}{args['url']}" if args.get("url") and self.public_url
+                                   else "")
+        await ctx.step("send", lambda: self.telegram.send(chat_id, text, buttons), replay_safe=False)
+        return {"sent": 1}

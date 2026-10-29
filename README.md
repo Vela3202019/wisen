@@ -282,10 +282,12 @@ measurement side in [docs/plan/eval-loop.md](docs/plan/eval-loop.md).
 wisen runs fully on your laptop. Add a small server of your own and you get
 the dashboard on your phone as an installable web app, push notifications
 when a reflection or a proposal is ready, an approval inbox, and a daily
-schedule that runs while you sleep. The server is a mailbox: it never makes a
-model call, holds no model key, and never sees raw transcripts. Your laptop
-does all model work and only ever connects out to it, with a per-device token
-you can revoke.
+schedule that runs while you sleep. Optionally, a Telegram bot sends the same
+notifications, approves or rejects proposals with a tap, and answers
+questions about your history (your laptop writes the answers, in stage B too). The server is
+a mailbox: it never makes a model call, holds no model key, and never sees
+raw transcripts. Your laptop does all model work and only ever connects out
+to it, with a per-device token you can revoke.
 
 On the server (one Python process; see [deploy/README.md](deploy/README.md)
 for systemd, Caddy and backups):
@@ -294,6 +296,7 @@ for systemd, Caddy and backups):
 pip install "wisen[cloud] @ git+https://github.com/Vela3202019/wisen"
 wisen cloud user <name>             # your login (prompts for a password)
 wisen cloud vapid-keys              # Web Push keys -> WISEN_VAPID_* env vars
+# optional: WISEN_TELEGRAM_BOT_TOKEN from @BotFather (deploy/README.md, "Telegram")
 wisen cloud serve                   # 127.0.0.1:8722, behind your HTTPS proxy
 ```
 
@@ -405,6 +408,15 @@ characters, briefings at 4,000).
   left out rather than cut, and a deleted file is sent once as gone. Raw
   transcripts, tool output, other files and the SQLite file still never
   leave.
+- If you set up the Telegram bot, your server sends Telegram (whose servers
+  keep bot chats, not end-to-end encrypted): each proposal's target file, its
+  rationale cut to 300 characters and a dashboard link (never its diff or
+  evidence quotes), the "reflection ready" line, what became of an applied
+  proposal, and the answers to questions you ask the bot. An answer is
+  written by your laptop's chat model, sent to the server as an answer packet
+  (capped at 4,000 characters and redacted like other packet text), and can
+  quote short pieces of your sessions; raw search hits never leave the
+  laptop. Questions you type reach your laptop through your server.
 - `scripts/collect_usage.py` adds a usage packet with subscription usage
   percentages and reset times. To get the Claude percentages, it reads your
   Claude OAuth token from the Keychain and calls Anthropic's usage endpoint.

@@ -26,8 +26,8 @@ Browser (session cookie, after /login):
 
 Device (Authorization: Bearer <device token>; the laptop only connects out):
   POST /api/device/pair            {"code", "name"} -> a device token (no auth)
-  POST /api/device/packets         one packet (result, usage, proposal, proposal_update, metrics;
-                                   stage B adds observation and config_snapshot)
+  POST /api/device/packets         one packet (result, usage, proposal, proposal_update, metrics,
+                                   answer; stage B adds observation and config_snapshot)
   POST /api/device/poll            long poll: a device job to lease, and decisions (with the
                                    proposal itself when the server's Gardener drafted it)
   POST /api/device/jobs/{id}/heartbeat
@@ -45,6 +45,8 @@ Environment (stage A holds no model key: it makes no model calls):
   WISEN_VAPID_PRIVATE_KEY   from `wisen cloud vapid-keys`; both unset = no push
   WISEN_VAPID_PUBLIC_KEY
   WISEN_VAPID_SUBJECT       optional VAPID contact (mailto: or https URL)
+  WISEN_TELEGRAM_BOT_TOKEN  from @BotFather; unset = no Telegram bot. The bot
+                            long-polls Telegram, so it adds no endpoint here.
 """
 import asyncio
 import json
@@ -69,6 +71,7 @@ from wisen import config
 from wisen.cloud.backup import serving
 from wisen.cloud.mailbox import STAGES, Conflict, Mailbox, NotPublishable
 from wisen.cloud.push import WebPushSender
+from wisen.cloud.telegram import TelegramApi, TelegramBot
 from wisen.packets import PacketRejected, receive
 from wisen.proposals import IllegalTransition
 
@@ -160,9 +163,11 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         with serving(mailbox.path):
-            task = asyncio.create_task(mailbox.run_forever()) if run_engines else None
+            tasks = [asyncio.create_task(mailbox.run_forever())] if run_engines else []
+            if run_engines and mailbox.telegram:
+                tasks.append(asyncio.create_task(TelegramBot(mailbox, mailbox.telegram).run_forever()))
             yield
-            if task:
+            for task in tasks:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
@@ -224,7 +229,8 @@ def create_app(
 
     @app.get("/health")
     async def health():
-        return {"ok": True, "push": vapid_public_key is not None, "stage": mailbox.stage,
+        return {"ok": True, "push": vapid_public_key is not None, "telegram": mailbox.telegram is not None,
+                "stage": mailbox.stage,
                 "synthesis": ("claude-cli" if config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
                               .startswith("claude-cli:") else "api") if mailbox.stage == "b" else None,
                 "model_key": any(os.environ.get(k) for k in MODEL_KEYS)}
@@ -378,7 +384,7 @@ def create_app(
             stored = await asyncio.to_thread(mailbox.store_packet, user_id, device_id, packet)
         except Conflict as e:
             raise HTTPException(409, str(e)) from None
-        if stored and packet.packet_type in ("result", "proposal", "proposal_update", "observation"):
+        if stored and packet.packet_type in ("result", "proposal", "proposal_update", "observation", "answer"):
             mailbox.engine(user_id).wake()
         return {"stored": stored, "packet_id": packet.packet_id}
 
@@ -498,6 +504,13 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
         # Names only: a key's value is never printed or logged.
         print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener on WISEN_MODEL; chat on DeepSeek "
               f"({chat}); model keys set: {', '.join(keys) or 'none'}")
+    token = os.environ.get("WISEN_TELEGRAM_BOT_TOKEN")
+    if not token:
+        print("wisen cloud: no WISEN_TELEGRAM_BOT_TOKEN; the Telegram bot is off")
+    elif not public_url:
+        print("wisen cloud: warning: no WISEN_CLOUD_PUBLIC_URL; Telegram messages will carry no dashboard link")
     db = db or Path(os.environ.get("WISEN_CLOUD_DB", "~/.wisen/cloud/wisen.db")).expanduser()
-    return create_app(Mailbox(db, sender=sender, stage=stage), vapid_public_key=public if sender else None,
+    mailbox = Mailbox(db, sender=sender, stage=stage, telegram=TelegramApi(token) if token else None,
+                      public_url=public_url)
+    return create_app(mailbox, vapid_public_key=public if sender else None,
                       secure_cookies=public_url.startswith("https://"), run_engines=run_engines)

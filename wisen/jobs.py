@@ -233,10 +233,13 @@ class JobEngine:
         handlers: dict[str, Handler],
         *,
         clock: Callable[[], datetime] = _utcnow,
+        on_failed: Callable[[sqlite3.Connection, Job], None] | None = None,
     ):
         self.store = store
         self.handlers = handlers
         self.clock = clock
+        # Called in the transaction that fails a job for good, by any path.
+        self.on_failed = on_failed or (lambda conn, job: None)
         # New per process, so a restarted process never mistakes a lease its
         # previous life took for its own.
         self.worker_id = uuid.uuid4().hex
@@ -330,16 +333,18 @@ class JobEngine:
             failed = conn.execute(
                 "UPDATE jobs SET state = 'failed', error = ?, lease_owner = NULL, "
                 "lease_expires_at = NULL, updated_at = ? WHERE user_id = ? AND state = 'leased' "
-                "AND lease_expires_at <= ? AND attempts >= max_attempts",
+                "AND lease_expires_at <= ? AND attempts >= max_attempts RETURNING *",
                 ("LeaseExpired: the last attempt never finished", now, self._uid, now),
-            ).rowcount
+            ).fetchall()
+            for row in failed:
+                self.on_failed(conn, Job.from_row(row))
             requeued = conn.execute(
                 "UPDATE jobs SET state = 'queued', run_after = ?, lease_owner = NULL, "
                 "lease_expires_at = NULL, updated_at = ? WHERE user_id = ? AND state = 'leased' "
                 "AND lease_expires_at <= ?",
                 (now, now, self._uid, now),
             ).rowcount
-        return failed + requeued
+        return len(failed) + requeued
 
     async def recover(self) -> int:
         return await asyncio.to_thread(self._recover)
@@ -349,12 +354,13 @@ class JobEngine:
         with self.store.transaction() as conn:
             # One statement picks and leases the job, so two workers can never
             # claim the same one. Resuming from a wait is not a new attempt.
+            # Jobs due at the same time run in the order they were queued.
             row = conn.execute(
                 "UPDATE jobs SET state = 'leased', "
                 "attempts = attempts + CASE WHEN state = 'waiting' THEN 0 ELSE 1 END, "
                 "lease_owner = ?, lease_expires_at = ?, wait_key = NULL, updated_at = ? "
                 "WHERE id = (SELECT id FROM jobs WHERE user_id = ? AND runner = ? "
-                "AND state IN ('queued', 'waiting') AND run_after <= ? ORDER BY run_after, created_at LIMIT 1) "
+                "AND state IN ('queued', 'waiting') AND run_after <= ? ORDER BY run_after, created_at, rowid LIMIT 1) "
                 "RETURNING *",
                 (owner or self.worker_id, ts(now + LEASE), ts(now), self._uid, runner, ts(now)),
             ).fetchone()
@@ -467,6 +473,8 @@ class JobEngine:
             ).rowcount
             if done and state == "succeeded":
                 _prune_outputs(conn, job.id)
+            if done and state == "failed":
+                self.on_failed(conn, job)
         return bool(done)
 
     def _retry_or_fail(self, job: Job, error: str, owner: str | None = None) -> bool:
@@ -489,6 +497,8 @@ class JobEngine:
                 "lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?",
                 (state, run_after, error, ts(now), job.id),
             )
+            if state == "failed":
+                self.on_failed(conn, job)
         return True
 
     # ── outside workers (a paired device claiming over HTTPS) ─────────────────

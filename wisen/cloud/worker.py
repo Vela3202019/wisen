@@ -16,7 +16,8 @@
                 as a job_status packet: the daily synthesis, a measure, and
                 the owner's "Push & create PR" for an applied proposal
                 (wisen/gardener/publisher.py), whose status carries the
-                pull request's link
+                pull request's link, and a question asked in Telegram
+                (answered by the chat agent and sent back as an answer packet)
 
 It also runs the laptop's own job engine (the Gardener's jobs and timers) and
 checks applied Gardener branches for merges. Unpaired, `run_local` does only
@@ -54,6 +55,7 @@ from wisen.egress import EgressRejected
 from wisen.jobs import LEASE, JobEngine, get_engine, ts
 from wisen.packets import (
     MAX_SNAPSHOT,
+    answer_packet,
     config_snapshot_packet,
     job_status_packet,
     metrics_packet,
@@ -427,7 +429,19 @@ async def _observe(client: CloudClient, store: SqliteStore, args: dict) -> dict 
     return {"skipped": reason} if reason else None
 
 
-HANDLERS = {"synthesize": _synthesize, "measure": _measure, "publish": _publish, "observe": _observe}
+async def _answer(client: CloudClient, store: SqliteStore, args: dict) -> None:
+    """A question from Telegram: the chat agent answers it here, from
+    reflections, or also from the raw history for /search (kind `search`).
+    Only the written answer leaves, as an answer packet."""
+    from wisen.chat import agent as chat
+
+    text = await chat.answer(args["question"], raw_search=args["kind"] == "search")
+    await client.send_packet(answer_packet(args["job_id"], text, user=client.creds.user_id,
+                                           device_id=client.creds.device_id))
+
+
+HANDLERS = {"synthesize": _synthesize, "measure": _measure, "publish": _publish, "observe": _observe,
+            "ask": _answer, "search": _answer}
 
 
 async def _heartbeat(client: CloudClient, job_id: str) -> None:
@@ -451,6 +465,8 @@ async def run_device_job(client: CloudClient, store: SqliteStore, job: dict) -> 
         if handler is None:
             raise UnknownJobKind(job["kind"])
         args = {**job["args"], **({"context": job["context"]} if job.get("context") else {})}
+        if job["kind"] in ("ask", "search"):
+            args |= {"job_id": job["id"], "kind": job["kind"]}  # the answer packet names its job
         outcome = await handler(client, store, args)   # extra job status fields, if any
     except Revoked:
         raise
