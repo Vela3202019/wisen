@@ -141,7 +141,8 @@ Then:
   is asleep the bot says the question is queued, and answers when the
   laptop's worker wakes. This holds in stage B too: the server's own chat
   agent does not answer Telegram. If the laptop cannot answer (an
-  out-of-date worker, a model error), the bot says so in one plain line.
+  out-of-date worker, a model error, or a worker that keeps stopping
+  mid-answer until its retries run out), the bot says so in one plain line.
 - `/unlink` stops the bot messaging that chat. Messages from any chat that
   is not linked are ignored, and group chats cannot link.
 
