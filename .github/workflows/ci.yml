@@ -23,3 +23,4 @@ jobs:
       - run: python -m tests.test_cloud
       - run: python -m tests.test_gardener
       - run: python -m tests.test_stage_b
+      - run: python -m tests.test_telegram
