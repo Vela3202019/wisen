@@ -154,10 +154,6 @@ def _draft(deps: Deps, tool_call_id: str, target: str, old_text: str, new_text: 
         raise ModelRetry(str(e)) from None
     if t.name in deps.open_targets:
         raise ModelRetry(f"{t.name} already has a proposal waiting or being applied; leave it for now")
-    if deps.snapshot is not None and (held := [p for p in PLACEHOLDERS if p in new_text]):
-        # The server reads files redacted; copying a placeholder would write
-        # it over the real value.
-        raise ModelRetry(f"new_text holds {', '.join(held)}, a placeholder for text you cannot see; leave it out")
     current = t.current()
     if old_text:
         if current is None:
@@ -177,6 +173,12 @@ def _draft(deps: Deps, tool_call_id: str, target: str, old_text: str, new_text: 
         raise ModelRetry(f"could not build the diff: {e}") from None
     if redact(diff) != diff:
         raise ModelRetry("the change holds a secret, an email address or an absolute path; leave it out")
+    added = "\n".join(line for line in change_lines(diff).splitlines() if line.startswith("+"))
+    if deps.snapshot is not None and (held := [p for p in PLACEHOLDERS if p in added]):
+        # The server reads files redacted; a changed line holding a
+        # placeholder would write it over the real value.
+        raise ModelRetry(f"a line the change writes holds {', '.join(held)}, a placeholder for text you cannot "
+                         "see; leave that line as it is")
     if p := deps.proposed.get((t.name, change_lines(diff))):
         raise ModelRetry(f"this same change to {t.name} was already proposed on {p['created_at'][:10]} "
                          f"({p['state']}); see past_proposals, and do not propose it again")

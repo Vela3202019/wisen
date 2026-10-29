@@ -551,21 +551,29 @@ def check_no_placeholder_written():
     from wisen.gardener.agent import Deps, Evidence, _draft
     from wisen.gardener.targets import SnapshotFiles
 
-    shown = redact(HOME_MD)
+    shown = redact(HOME_MD + "- Run /srv/app/bin/test before committing.\n")
     evidence = [Evidence(date=DAY_BEFORE, quote="q"), Evidence(date=DAY, quote="q")]
 
-    def draft(new_text: str):
+    def draft(new_text: str, old_text: str = "- Be brief.\n"):
         deps = Deps(snapshot=SnapshotFiles({"home:.claude/CLAUDE.md": {
             "text": shown, "base_blob": "a" * 40, "device_id": "d1"}}), reflection_dates={DAY, DAY_BEFORE})
-        return _draft(deps, "c1", "home:.claude/CLAUDE.md", "- Be brief.\n", new_text, "why", evidence)
+        return _draft(deps, "c1", "home:.claude/CLAUDE.md", old_text, new_text, "why", evidence)
 
-    for placeholder in ("<secret>", "<email>", "~/", "…/"):
+    def refused(placeholder: str, new_text: str, old_text: str = "- Be brief.\n") -> None:
         try:
-            draft(f"- Be brief.\n- Run {placeholder}test first.\n")
-            raise AssertionError(f"a draft holding {placeholder} was accepted")
+            draft(new_text, old_text)
+            raise AssertionError(f"a draft writing {placeholder} was accepted")
         except ModelRetry as e:
             assert placeholder in str(e), e
-    assert draft("- Be brief.\n- Run the tests first.\n").proposed == shown + "- Run the tests first.\n"
+
+    for placeholder in ("<secret>", "<email>", "~/", "…/"):
+        refused(placeholder, f"- Be brief.\n- Run {placeholder}test first.\n")
+    # Editing part of a line keeps its redacted rest, which would be written too.
+    refused("…/", "pushing", "committing")
+    refused("~/", "sit", "live")
+    refused("<secret>", "tools", "scripts")
+    assert draft("- Be brief.\n- Run the tests first.\n").proposed == shown.replace(
+        "- Be brief.\n", "- Be brief.\n- Run the tests first.\n")
     print("✓ stage B: the server's Gardener never drafts a redaction placeholder into a file")
 
 
