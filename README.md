@@ -284,7 +284,7 @@ the dashboard on your phone as an installable web app, push notifications
 when a reflection or a proposal is ready, an approval inbox, and a daily
 schedule that runs while you sleep. Optionally, a Telegram bot sends the same
 notifications, approves or rejects proposals with a tap, and answers
-questions about your history (your laptop writes the answers). The server is
+questions about your history (your laptop writes the answers, in stage B too). The server is
 a mailbox: it never makes a model call, holds no model key, and never sees
 raw transcripts. Your laptop does all model work and only ever connects out
 to it, with a per-device token you can revoke.

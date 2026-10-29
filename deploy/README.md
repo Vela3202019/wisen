@@ -139,7 +139,9 @@ Then:
   answers from your reflections. `/search <words>` also searches the raw
   history on the laptop. Only the written answer comes back. If the laptop
   is asleep the bot says the question is queued, and answers when the
-  laptop's worker wakes.
+  laptop's worker wakes. This holds in stage B too: the server's own chat
+  agent does not answer Telegram. If the laptop cannot answer (an
+  out-of-date worker, a model error), the bot says so in one plain line.
 - `/unlink` stops the bot messaging that chat. Messages from any chat that
   is not linked are ignored, and group chats cannot link.
 

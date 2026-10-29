@@ -45,7 +45,7 @@ from pydantic import BaseModel
 
 from wisen.cloud import auth
 from wisen.cloud.push import Gone, PushSender
-from wisen.cloud.telegram import TelegramApi, proposal_message
+from wisen.cloud.telegram import QUESTION_FAILED, TelegramApi, proposal_message
 from wisen.gardener.applier import MEASURE_AFTER
 from wisen.gardener.targets import HOME, SnapshotFiles
 from wisen.jobs import Job, JobContext, JobEngine, insert_job, ts
@@ -901,7 +901,10 @@ class Mailbox:
         if job is None or job.runner != "device" or job.kind != status.kind:
             raise Conflict("no such device job")
         if status.state != "succeeded":
-            return await engine.fail_as(job_id, _owner(device_id), f"DeviceJobFailed: {status.error_class or 'unknown'}")
+            done = await engine.fail_as(job_id, _owner(device_id), f"DeviceJobFailed: {status.error_class or 'unknown'}")
+            if done and job.kind in ("ask", "search") and await asyncio.to_thread(self._question_failed, user_id, job_id):
+                engine.wake()
+            return done
         done = await engine.finish_as(job_id, _owner(device_id), status.model_dump(mode="json"))
         if done and job.kind == "publish" and status.pr_url:
             # The link lives on the proposal; its state stays applied until
@@ -911,6 +914,17 @@ class Mailbox:
             await asyncio.to_thread(self._observed, user_id, job.args["synthesis"])
             engine.wake()
         return done
+
+    def _question_failed(self, user_id: str, job_id: str) -> bool:
+        """A Telegram question whose job failed for good gets one plain reply,
+        so a failure does not look like a slow answer. True if one was queued."""
+        now = self.clock()
+        with self.store(user_id).transaction() as conn:
+            if not conn.execute("SELECT 1 FROM jobs WHERE user_id = ? AND id = ? AND state = 'failed'",
+                                (user_id, job_id)).fetchone():
+                return False
+            self._queue_telegram(conn, user_id, f"failed:{job_id}", now, text=QUESTION_FAILED)
+        return True
 
     def _observed(self, user_id: str, synthesis: str) -> None:
         """A laptop sent its fresh notes: the synthesis waiting for them runs

@@ -865,8 +865,8 @@ telegram"):
   result. A day's batch follows that day's briefing, as with Web Push, but
   each proposal is its own message because it carries its own buttons. A
   proposal message carries the target file, a short description (its
-  rationale, which the egress gate already redacted and capped, cut to 300
-  characters) and a link to it in the dashboard; never the diff or the
+  rationale, redacted again and cut to 300 characters, so one the server's
+  own Gardener drafted is treated the same) and a link to it in the dashboard; never the diff or the
   evidence quotes ([open question 8](#decided), decided).
 - **Approval buttons.** Approve / Reject buttons on each proposal (inline
   keyboard). A tap becomes a decision with a `request_id` (the tap's callback
@@ -874,16 +874,19 @@ telegram"):
   consistent. Every tap is checked against the linked chat.
 - **History chat** ("can i also add a chatbot where i can search history in
   telegram?"):
-  - **By default, it answers from reflections.** In stage A the question is
-    queued as a device job (`ask`), and the laptop's chat agent answers with
-    reflection tools only. In stage B the server answers directly.
+  - **By default, it answers from reflections.** In both stages the question
+    is queued as a device job (`ask`), and the laptop's chat agent answers
+    with reflection tools only. Answering on the server in stage B (it already
+    runs a reflections-only chat agent) is a possible follow-up.
   - **Raw-history search only on explicit request** (for example a `/search`
     command). It is always a device job (`search`), answered by the laptop
     with the existing grep-first search (`wisen/chat/search.py`). What comes
     back is an `AnswerPacket` (a written answer with short quotes), never raw
     hits.
   - If the laptop is asleep, the bot replies that the question is queued, and
-    answers when the laptop wakes.
+    answers when the laptop wakes. A question whose job fails for good (an
+    out-of-date laptop, a model error) gets one plain reply saying no answer
+    came, with no error details.
 
 The server reaches Telegram with long polling, so the bot needs no extra public
 endpoint. Telegram stores bot chats on its own servers (they are not end-to-end

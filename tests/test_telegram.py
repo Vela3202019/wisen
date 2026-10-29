@@ -7,12 +7,14 @@ FunctionModel. Covers:
   - linking: the dashboard's one-time code, sent as /link in a private chat
   - an unlinked chat is ignored: no reply, no question, no decision
   - a proposal message carries its target, a capped rationale and a
-    dashboard link, never the diff or the evidence quotes
+    dashboard link, never the diff or the evidence quotes; a rationale the
+    server's own Gardener drafted is redacted too
   - approving in Telegram and then in the web app records one decision; a
     retried tap returns the first result; a tap after the web app decided
     says so
   - /search while the laptop sleeps is answered after it wakes; a plain
-    question is answered from reflections only
+    question is answered from reflections only; a question whose job fails
+    for good gets one plain reply
   - the long-poll loop confirms each update and survives a failed call or
     an update that raises
   - the bot token never reaches a log line, an error, or the database
@@ -47,11 +49,14 @@ from wisen.cloud.server import create_app
 from wisen.cloud.telegram import (
     DESCRIPTION_CAP,
     HELP,
+    QUESTION_FAILED,
     TelegramApi,
     TelegramBot,
     TelegramError,
 )
+from wisen.packets import job_status_packet, receive
 from wisen.proposals import Proposals
+from wisen.redact import redact
 from wisen.store import get_store
 
 TOKEN = "123456789:AAH-telegram-test-token-0123456789abc"
@@ -226,6 +231,28 @@ async def check_notifications_carry_no_diff():
     print("✓ telegram: a proposal message is target + capped rationale + link + buttons, never diff or evidence")
 
 
+async def check_server_drafted_rationale_redacted():
+    server = TelegramServer("server-drafted")
+    async with server.browser() as browser:
+        await server.link(browser)
+    # Stage B: the server's own Gardener drafts a proposal for its own reflection.
+    rationale = "Ask alice@example.com; the runner is /Users/alice/work/secret-project/run.sh."
+    pid = (await server.mailbox.proposals(USER).create(
+        "wisen:CLAUDE.md", {"diff": DIFF, "rationale": rationale, "evidence": [EVIDENCE], "batch": "2026-10-21",
+                            "run_id": "run-1"},
+        request_id="gardener:server:1", actor="gardener", expires_at=server.clock() + timedelta(days=7))).id
+    await server.mailbox.store(USER).upsert_reflection(_reflection("2026-10-21"))
+    assert await asyncio.to_thread(server.mailbox.publish_result, USER, "2026-10-21")
+    await server.run_jobs()
+    (message,) = [m for m in server.fake.sent() if m["text"].startswith("Proposal:")]
+    _, description, link = message["text"].split("\n\n")
+    assert description == redact(rationale) and link == f"{PUBLIC_URL}/#proposal-{pid}", description
+    wire = json.dumps(server.fake.requests)
+    for raw in ("alice@example.com", "/Users/alice"):
+        assert raw not in wire, raw
+    print("✓ telegram: a rationale the server's Gardener drafted is redacted before it reaches Telegram")
+
+
 async def check_one_decision_across_channels():
     server = TelegramServer("decide")
     store = get_store()
@@ -346,6 +373,31 @@ async def check_history_chat():
     print("✓ telegram: /search while the laptop sleeps is answered after it wakes; questions use reflections only")
 
 
+async def check_failed_question():
+    clock = Clock()
+    server = TelegramServer("failed", clock)
+    async with server.browser() as browser:
+        await server.link(browser)
+        creds = await server.device(browser)
+    await server.say("how was my week?")
+    # A laptop on an older worker fails the job on every attempt.
+    for attempt in range(1, 4):
+        job, _ = await server.mailbox.poll(USER, creds.device_id, 0, 0)
+        assert job is not None and job.kind == "ask" and job.attempts == attempt, job
+        status = receive(job_status_packet({
+            "job_id": job.id, "kind": "ask", "state": "failed", "started_at": clock().isoformat(),
+            "finished_at": clock().isoformat(), "error_class": "UnknownJobKind"}, user=USER,
+            device_id=creds.device_id), ("job_status",))
+        assert await server.mailbox.finish(USER, creds.device_id, job.id, status)
+        await server.run_jobs()
+        failed = [m for m in server.fake.sent() if m["text"] == QUESTION_FAILED]
+        assert len(failed) == (attempt == 3), (attempt, server.fake.sent())
+        clock.now += timedelta(hours=1)
+    assert server.mailbox.device_jobs(USER, ("failed",))[0].id == job.id
+    assert "UnknownJobKind" not in json.dumps(server.fake.requests)
+    print("✓ telegram: a question whose job fails for good gets one plain reply")
+
+
 # ── the polling loop and the token ────────────────────────────────────────────
 
 async def check_poll_loop_and_token():
@@ -400,8 +452,10 @@ async def main():
     await check_linking()
     await check_unlinked_chat_ignored()
     await check_notifications_carry_no_diff()
+    await check_server_drafted_rationale_redacted()
     await check_one_decision_across_channels()
     await check_history_chat()
+    await check_failed_question()
     await check_poll_loop_and_token()
     print("\nall telegram tests passed")
 

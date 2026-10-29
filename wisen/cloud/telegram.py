@@ -10,7 +10,8 @@ opens no extra endpoint.
   notifications  a finished reflection, each proposal waiting for a decision
                  (with Approve / Reject buttons), what became of an applied
                  one. A proposal message carries its target, a short
-                 description (its rationale, cut to DESCRIPTION_CAP) and a
+                 description (its rationale, redacted and cut to
+                 DESCRIPTION_CAP, whoever drafted it) and a
                  link to the dashboard; never the diff or the evidence quotes,
                  so they stay off Telegram's servers (open question 8).
   buttons        a tap is a decision through Mailbox.decide, the same path
@@ -21,7 +22,8 @@ opens no extra endpoint.
                  answered from reflections; `/search …` also lets it search
                  the raw history. Both are device jobs, so a question asked
                  while the laptop sleeps is answered when it wakes. The
-                 answer comes back as an answer packet, never raw hits.
+                 answer comes back as an answer packet, never raw hits; a
+                 question whose job fails for good gets QUESTION_FAILED.
 
 The bot token (WISEN_TELEGRAM_BOT_TOKEN) is part of every API URL, so no
 error message or log line here may carry a URL: TelegramError names the
@@ -36,12 +38,14 @@ from datetime import timedelta
 import httpx
 
 from wisen.proposals import IllegalTransition
+from wisen.redact import redact
 
 API = "https://api.telegram.org"
 POLL_TIMEOUT = 25  # seconds Telegram holds a getUpdates call open
 DESCRIPTION_CAP = 300  # characters of a proposal's rationale in a message
 ONLINE = timedelta(minutes=2)  # a device seen this recently is awake (it polls every 25 s)
 BACKOFF_CAP = 60.0
+QUESTION_FAILED = "I could not get an answer; your laptop may be offline or out of date, try again later."
 HELP = (
     "Ask me anything about your coding sessions and I'll answer from your reflections.\n"
     "/search <words> also searches the raw history on your laptop.\n"
@@ -96,6 +100,7 @@ class TelegramApi:
 def proposal_message(proposal_id: str, target: str, rationale: str, public_url: str) -> tuple[str, list]:
     """What Telegram may see of a proposal: its target, a short description
     and a dashboard link, plus the decision buttons."""
+    rationale = redact(rationale)
     description = rationale if len(rationale) <= DESCRIPTION_CAP else rationale[:DESCRIPTION_CAP - 1] + "…"
     lines = [f"Proposal: {target}", description]
     if public_url:
