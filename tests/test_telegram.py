@@ -14,7 +14,7 @@ FunctionModel. Covers:
     says so
   - /search while the laptop sleeps is answered after it wakes; a plain
     question is answered from reflections only; a question whose job fails
-    for good gets one plain reply
+    for good (reported, or its last lease expired) gets one plain reply
   - the long-poll loop confirms each update and survives a failed call or
     an update that raises
   - the bot token never reaches a log line, an error, or the database
@@ -395,7 +395,20 @@ async def check_failed_question():
         clock.now += timedelta(hours=1)
     assert server.mailbox.device_jobs(USER, ("failed",))[0].id == job.id
     assert "UnknownJobKind" not in json.dumps(server.fake.requests)
-    print("✓ telegram: a question whose job fails for good gets one plain reply")
+    # A laptop that sleeps mid-answer every time: the last lease expires and the job fails.
+    await server.say("/search pagination")
+    for attempt in range(1, 4):
+        job, _ = await server.mailbox.poll(USER, creds.device_id, 0, 0)
+        assert job is not None and job.kind == "search" and job.attempts == attempt, job
+        clock.now += timedelta(minutes=5)
+        await server.run_jobs()
+        failed = [m for m in server.fake.sent() if m["text"] == QUESTION_FAILED]
+        assert len(failed) == 1 + (attempt == 3), (attempt, server.fake.sent())
+    assert (await server.mailbox.engine(USER).get(job.id)).error.startswith("LeaseExpired")
+    await server.mailbox.poll(USER, creds.device_id, 0, 0)
+    await server.run_jobs()
+    assert len([m for m in server.fake.sent() if m["text"] == QUESTION_FAILED]) == 2
+    print("✓ telegram: a question whose job fails for good, reported or by lease expiry, gets one plain reply")
 
 
 # ── the polling loop and the token ────────────────────────────────────────────

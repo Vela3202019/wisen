@@ -221,7 +221,7 @@ class Mailbox:
                 "schedule-daily": self._schedule_job,
                 "synthesize": self._rem("synthesize_job"),
                 "gardener-resume": self._rem("resume_job"),
-            }, clock=self.clock)
+            }, clock=self.clock, on_failed=lambda conn, job: self._job_failed(conn, user_id, job))
         return self._engines[user_id]
 
     def proposals(self, user_id: str) -> Proposals:
@@ -877,7 +877,8 @@ class Mailbox:
         deadline = asyncio.get_running_loop().time() + wait
         while True:
             changed = self._changes(user_id)  # taken before checking, so no change is missed
-            await engine.recover()
+            if await engine.recover():
+                engine.wake()
             job = await engine.claim_as(_owner(device_id), "device")
             events = await proposals.events_since(cursor)
             remaining = deadline - asyncio.get_running_loop().time()
@@ -902,7 +903,7 @@ class Mailbox:
             raise Conflict("no such device job")
         if status.state != "succeeded":
             done = await engine.fail_as(job_id, _owner(device_id), f"DeviceJobFailed: {status.error_class or 'unknown'}")
-            if done and job.kind in ("ask", "search") and await asyncio.to_thread(self._question_failed, user_id, job_id):
+            if done:
                 engine.wake()
             return done
         done = await engine.finish_as(job_id, _owner(device_id), status.model_dump(mode="json"))
@@ -915,16 +916,11 @@ class Mailbox:
             engine.wake()
         return done
 
-    def _question_failed(self, user_id: str, job_id: str) -> bool:
-        """A Telegram question whose job failed for good gets one plain reply,
-        so a failure does not look like a slow answer. True if one was queued."""
-        now = self.clock()
-        with self.store(user_id).transaction() as conn:
-            if not conn.execute("SELECT 1 FROM jobs WHERE user_id = ? AND id = ? AND state = 'failed'",
-                                (user_id, job_id)).fetchone():
-                return False
-            self._queue_telegram(conn, user_id, f"failed:{job_id}", now, text=QUESTION_FAILED)
-        return True
+    def _job_failed(self, conn: sqlite3.Connection, user_id: str, job: Job) -> None:
+        """A Telegram question whose job failed for good, however it failed,
+        gets one plain reply, so a failure does not look like a slow answer."""
+        if job.kind in ("ask", "search"):
+            self._queue_telegram(conn, user_id, f"failed:{job.id}", self.clock(), text=QUESTION_FAILED)
 
     def _observed(self, user_id: str, synthesis: str) -> None:
         """A laptop sent its fresh notes: the synthesis waiting for them runs
