@@ -268,8 +268,8 @@ an add-on, never a requirement.
 
 ### 4.1 Three tiers
 
-The README's [What leaves your machine](../../README.md#what-leaves-your-machine)
-section already names three tiers. This design keeps them and makes the third
+[What leaves your machine](../privacy.md)
+already names three tiers. This design keeps them and makes the third
 one strict:
 
 1. **Data at rest: local.** Raw transcripts stay where the agents wrote them.
