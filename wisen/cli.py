@@ -19,6 +19,7 @@ wisen command-line interface.
 import argparse
 import asyncio
 import getpass
+import json
 import os
 import sys
 import uuid
@@ -172,8 +173,17 @@ async def _gardener(args) -> None:
         await tend(store, engine)
         await drain(engine)
     if args.gardener_cmd in ("list", "status"):
-        for p in await proposals.list(states=None if args.all else ("proposed", "approved", "applied",
-                                                                    "merged", "measuring")):
+        rows = await proposals.list(states=None if args.all else ("proposed", "approved", "applied",
+                                                                  "merged", "measuring"))
+        if getattr(args, "json", False):
+            print(json.dumps([{
+                "id": p.id, "state": p.state, "target": p.target,
+                "rationale": p.payload.get("rationale", ""), "diff": p.payload.get("diff", ""),
+                "created_at": p.created_at, "expires_at": p.expires_at,
+                "branch": (row["branch"] if p.state == "applied" and (row := git_row(store, p.id)) else None),
+            } for p in rows], indent=2))
+            return
+        for p in rows:
             print(f"{p.id}  {p.state:<15} {p.target}")
             if p.state == "applied" and (row := git_row(store, p.id)):
                 where = f"git --git-dir {row['git_dir']}" if row["git_dir"] else f"git -C {row['work_tree']}"
@@ -221,8 +231,10 @@ def main() -> None:
     c.add_argument("date", nargs="?")
     c = gs.add_parser("list", help="open proposals with their diffs")
     c.add_argument("--all", action="store_true", help="every proposal, in any state")
+    c.add_argument("--json", action="store_true", help="machine-readable output (used by the Claude Code plugin)")
     c = gs.add_parser("status", help="check applied branches for merges, run due jobs, then list")
     c.add_argument("--all", action="store_true", help="every proposal, in any state")
+    c.add_argument("--json", action="store_true", help="machine-readable output")
     c = gs.add_parser("approve", help="approve a proposal; its branch is made at once")
     c.add_argument("id")
     c = gs.add_parser("reject", help="reject a proposal; the note reaches the Gardener")
