@@ -1,9 +1,3 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="wisen: a trail climbing a hill">
-  <!-- hill -->
-  <path d="M4 116 C 30 116, 48 44, 82 40 C 100 38, 112 84, 124 116 Z" fill="#3fb950"/>
-  <!-- trail climbing the slope -->
-  <path d="M30 110 C 46 96, 42 76, 60 68 S 76 56, 82 44" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-dasharray="0.1 11"/>
-  <!-- summit flag -->
-  <path d="M82 40 V 12" stroke="#3fb950" stroke-width="5" stroke-linecap="round"/>
-  <path d="M84 12 H 108 L 100 21 L 108 30 H 84 Z" fill="#3fb950"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="wisen: a loose line sketching a range of hills">
+  <path d="M12 94 C 18 90, 20 60, 30 58 C 39 56, 42 70, 50 68 C 60 66, 62 34, 77 34 C 91 34, 93 62, 102 64 C 109 66, 112 58, 117 60" fill="none" stroke="#3fb950" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
