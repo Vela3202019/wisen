@@ -88,6 +88,30 @@ Every command and install extra is in [docs/commands.md](docs/commands.md).
 - **No database server.** One SQLite file (`~/.wisen/wisen.db`), created on
   first use.
 
+## Claude Code plugin
+
+wisen ships as a Claude Code plugin, so the loop lives inside the sessions it
+learns from. Install the CLI first (see [Quickstart](#quickstart)), then:
+
+```bash
+claude plugin marketplace add Vela3202019/wisen
+claude plugin install wisen@vela
+```
+
+What it adds:
+
+- **At session start**, one line of context when the Gardener has proposals
+  waiting or approved branches you have not merged. Nothing when there is
+  nothing to say, and nothing when `wisen` is not installed.
+- **`/wisen:proposals`**: the approval inbox in chat. Shows each proposal's
+  target, rationale and diff; approves or rejects only the one you name.
+- **`/wisen:reflect`**: runs or reads a day's reflection and summarises it.
+- **`/wisen:setup`**: installs and configures the CLI on a machine that does
+  not have it.
+
+The plugin is the `plugin/` directory; the marketplace is `.claude-plugin/marketplace.json`
+at the repo root. `claude plugin validate .` checks both.
+
 ## How it works
 
 - **Read.** Connectors parse each agent's on-disk history into one shape and

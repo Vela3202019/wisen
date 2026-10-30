@@ -1,0 +1,23 @@
+{
+  "name": "vela",
+  "description": "Vela's Claude Code plugins.",
+  "owner": {
+    "name": "Vela Gao",
+    "url": "https://github.com/Vela3202019"
+  },
+  "plugins": [
+    {
+      "name": "wisen",
+      "source": "./plugin",
+      "description": "Continuous learning for your Claude Code sessions: see pending Gardener proposals at session start, approve them in chat, and run a reflection on demand.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "keywords": [
+        "continuous-learning",
+        "self-improving-agents",
+        "evals",
+        "CLAUDE.md"
+      ]
+    }
+  ]
+}
