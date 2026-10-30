@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/logo.svg" width="112" height="112" alt="wisen logo: a trail climbing a hill">
+<img src="docs/assets/logo.svg" width="112" height="112" alt="wisen logo: a loose line sketching a range of hills">
 
 # wisen
 
