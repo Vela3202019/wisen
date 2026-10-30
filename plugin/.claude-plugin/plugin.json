@@ -1,6 +1,6 @@
 {
   "name": "wisen",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Continuous learning for your Claude Code sessions: pending Gardener proposals at session start, approve them in chat, run a reflection on demand.",
   "author": {
     "name": "Vela Gao",
@@ -9,5 +9,10 @@
   "homepage": "https://github.com/Vela3202019/wisen",
   "repository": "https://github.com/Vela3202019/wisen",
   "license": "MIT",
-  "keywords": ["continuous-learning", "self-improving-agents", "evals", "CLAUDE.md"]
+  "keywords": [
+    "continuous-learning",
+    "self-improving-agents",
+    "evals",
+    "CLAUDE.md"
+  ]
 }
