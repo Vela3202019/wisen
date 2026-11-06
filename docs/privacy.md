@@ -45,8 +45,9 @@ characters, briefings at 4,000).
   redacting or cutting is not sent at all); what became of each approved
   proposal (its branch name, applied / merged / measured, and the measured
   numbers); one row of numbers per day for the verification loop (user turns,
-  corrections, tokens, problems solved; no text); and job status (state,
-  times, error class, never a traceback). Results' `evidence` fields and summaries
+  corrections, tokens, problems solved; no text); the subscription usage
+  percentages and reset times, sent each pass (never the token); and job
+  status (state, times, error class, never a traceback). Results' `evidence` fields and summaries
   can quote short pieces of your sessions word for word. Raw transcripts, the
   full turn excerpts, the Observer's notes, the SQLite file, and API keys
   never go to the server, and the server re-checks every packet against the
@@ -73,10 +74,12 @@ characters, briefings at 4,000).
   (capped at 4,000 characters and redacted like other packet text), and can
   quote short pieces of your sessions; raw search hits never leave the
   laptop. Questions you type reach your laptop through your server.
-- `scripts/collect_usage.py` adds a usage packet with subscription usage
-  percentages and reset times. To get the Claude percentages, it reads your
-  Claude OAuth token from the Keychain and calls Anthropic's usage endpoint.
-  Only the percentages and reset times reach the dashboard, not the token.
+- A subscription usage packet (Claude and Codex percentages and reset
+  times) goes up each worker pass. To get the Claude percentages, the laptop
+  reads your Claude OAuth token from the Keychain and calls Anthropic's usage
+  endpoint; only the percentages and reset times reach the dashboard, never
+  the token. `scripts/collect_usage.py` writes the same packet to a file for
+  an unpaired setup.
 
 Every packet that passes the gate is logged in `~/.wisen/egress.log`: time,
 destination, packet type, size, field names and a SHA-256 of the bytes, never
@@ -91,5 +94,5 @@ packet whose content has not changed is not rewritten or logged again.
 
 Network calls from your machine go to the model providers you configure, the
 GitHub API (the git commits connector reads your pushes), Anthropic's usage
-endpoint (the optional usage collector), and your own wisen server if you
+endpoint (the subscription usage collector), and your own wisen server if you
 pair one. Nothing else.

@@ -6,7 +6,8 @@
                 before its reflection's push), each with its decision if made
                 while unpaired, then the git states the laptop
                 decided for proposals (applied, merged, measured, …), each day's metrics,
-                and each day's reflection, when it changed since the last upload
+                and each day's reflection, when it changed since the last upload;
+                the subscription usage (percentages and reset times) goes up every pass
   2. poll       one long poll returns a device job to run and any decisions
                 made since the last one
   3. decisions  recorded in the local proposal table (the server decides; the
@@ -63,14 +64,17 @@ from wisen.packets import (
     proposal_packet,
     proposal_update_packet,
     result_packet,
+    usage_packet,
 )
 from wisen.proposals import DECISIONS, IllegalTransition, Proposal, Proposals, _proposal
 from wisen.store import SqliteStore
+from wisen.usage import ClaudeThrottled, claude_usage, codex_usage
 
 SYNC_EVERY = 300.0  # seconds between sync-up passes while idle
 BACKOFF_CAP = 60.0
 OBSERVE_EVERY = timedelta(hours=2)   # stage B: the most often a day is observed again (one model call each)
 SNAPSHOT_EVERY = timedelta(hours=1)  # stage B: how often the editable files are read for a snapshot
+CLAUDE_INTERVAL = timedelta(minutes=30)  # how often the Claude usage endpoint is fetched
 
 
 class SynthesisFailed(Exception):
@@ -269,6 +273,80 @@ async def snapshot_up(client: CloudClient, store: SqliteStore) -> int:
             sent += await _upload(client, store, f"sent:config:{target}",
                                   lambda t=target: config_snapshot_packet(t, None, None, **who))
     return sent
+
+
+def _last_good(store: SqliteStore, source: str, reading: dict | None,
+               collected_at: str) -> tuple[dict | None, str | None]:
+    """A source's reading this pass, or its last good one kept locally, so a
+    source that failed this pass does not blank its rows. Returns the reading
+    and when it was collected."""
+    key = f"usage:{source}"
+    if reading is not None:
+        _set(store, key, json.dumps({"collected_at": collected_at, **reading}))
+        return reading, collected_at
+    raw = _get(store, key)
+    if raw is None:
+        return None, None
+    last = json.loads(raw)
+    return {k: v for k, v in last.items() if k != "collected_at"}, last["collected_at"]
+
+
+def _claude_reading(store: SqliteStore, now: datetime) -> dict | None:
+    """Claude usage, fetched at most once per CLAUDE_INTERVAL (longer after a
+    429), with the window persisted so restarts respect it."""
+    raw = _get(store, "usage:claude:next_at")
+    next_at = None
+    if raw:
+        try:
+            next_at = datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+    if next_at is not None and now < next_at:
+        return None
+    next_at = now + CLAUDE_INTERVAL
+    try:
+        return claude_usage()
+    except ClaudeThrottled as e:
+        next_at = now + timedelta(seconds=max(CLAUDE_INTERVAL.total_seconds(), e.retry_after))
+        return None
+    except Exception:  # noqa: BLE001 - any unexpected error still records the window and fails to None
+        return None
+    finally:
+        _set(store, "usage:claude:next_at", next_at.isoformat())
+
+
+def _merged_usage(store: SqliteStore) -> dict | None:
+    now = datetime.now(UTC)
+    collected_at = now.isoformat()
+    claude_fresh = _claude_reading(store, now)
+    codex_fresh = codex_usage()
+    if claude_fresh is None and codex_fresh is None:
+        return None
+    claude, claude_at = _last_good(store, "claude", claude_fresh, collected_at)
+    codex, codex_at = _last_good(store, "codex", codex_fresh, collected_at)
+    times = [t for t in (claude_at, codex_at) if t is not None]
+    return {
+        "collected_at": min(times),
+        "claude": claude,
+        "codex": codex,
+    }
+
+
+async def usage_up(client: CloudClient, store: SqliteStore) -> None:
+    """Upload the subscription usage the dashboard's panel shows (percentages
+    and reset times only). When neither Claude nor Codex yields a reading, send
+    nothing, so a failed collection never replaces the last good one."""
+    try:
+        usage = await asyncio.to_thread(_merged_usage, store)
+    except Exception as e:  # noqa: BLE001 - a failed collection is retried on the next pass
+        print(f"[worker] usage collection failed: {type(e).__name__}: {e}", file=sys.stderr)
+        return
+    if usage is None:
+        return
+    try:
+        await client.send_packet(usage_packet(usage, user=client.creds.user_id, device_id=client.creds.device_id))
+    except (EgressRejected, Refused) as e:
+        print(f"[worker] usage not sent: {e}", file=sys.stderr)
 
 
 async def observe_day(client: CloudClient, store: SqliteStore, day: str, force: bool = False) -> str | None:
@@ -542,6 +620,7 @@ async def _poll_loop(creds: Credentials, store: SqliteStore, engine: JobEngine, 
                 if once or time.monotonic() - last_sync >= SYNC_EVERY:
                     await tend(store, engine)
                     await sync_up(client, store)
+                    await usage_up(client, store)
                     if stage_b():
                         await dream_up(client, store)
                     last_sync = time.monotonic()
