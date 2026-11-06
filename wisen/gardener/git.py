@@ -39,8 +39,9 @@ class Repo:
             check: bool = True, timeout: float | None = None) -> subprocess.CompletedProcess:
         full_env = {k: v for k, v in os.environ.items() if k not in _SCRUB}
         full_env.update({"GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C", **(env or {})})
+        # cwd at the work tree: from a subdirectory, `git apply` re-roots a patch by that prefix.
         r = subprocess.run(self._cmd(args), capture_output=True, text=True, input=input, env=full_env,
-                           check=False, timeout=timeout)
+                           check=False, timeout=timeout, cwd=self.work_tree)
         if check and r.returncode != 0:
             raise GitError(f"git {args[0]} failed: {r.stderr.strip()[:300]}")
         return r
