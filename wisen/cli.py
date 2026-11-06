@@ -12,7 +12,7 @@ wisen command-line interface.
                                   metrics, replay, compare)
   wisen worker                    laptop daemon: with a paired server, sync and run its
                                   device jobs (outbound only); unpaired, local jobs only
-  wisen gardener <command>        Gardener proposals: run, list, approve, reject, status
+  wisen gardener <command>        Gardener proposals: run, list, approve, reject, status, reset
   wisen cloud <command>           the server (serve, user, vapid-keys, backup,
                                   restore) and pairing this laptop with one (pair)
 """
@@ -133,6 +133,54 @@ def _worker(once: bool) -> None:
     asyncio.run(run(creds, get_store(), once=once))
 
 
+def _reset(args) -> None:
+    """Put failed proposals back in the approval inbox: on this laptop's
+    database, or on another (the server's) with --db."""
+    from contextlib import closing
+
+    from wisen.gardener.loop import EXPIRES_AFTER
+    from wisen.proposals import IllegalTransition, Proposals
+    from wisen.store import SqliteStore, get_store
+
+    if not args.ids and not args.failed:
+        raise SystemExit("name proposal ids, or pass --failed")
+    if args.db:
+        path = Path(args.db).expanduser()
+        if not path.is_file():
+            raise SystemExit(f"no database at {path}")
+        user = args.user
+        if user is None:
+            with closing(SqliteStore(path, "")._connect()) as conn:
+                users = [r[0] for r in conn.execute("SELECT DISTINCT user_id FROM proposals")]
+            if len(users) != 1:
+                raise SystemExit(f"{path} holds proposals of {len(users)} users; name one with --user")
+            user = users[0]
+        store = SqliteStore(path, user)
+    else:
+        store = get_store()
+    proposals = Proposals(store)
+    failed = asyncio.run(proposals.list(states=("failed",), limit=1_000_000))
+    by_id = {p.id: p for p in failed}
+    if args.failed:
+        chosen = [p for p in failed if p.id not in args.exclude]
+    else:
+        missing = [i for i in args.ids if i not in by_id]
+        if missing:
+            raise SystemExit(f"not failed (or unknown), nothing reset: {', '.join(missing)}")
+        chosen = [by_id[i] for i in args.ids]
+    expires_at = datetime.now(UTC) + EXPIRES_AFTER
+    for p in chosen:
+        print(f"{p.id}  {p.target}  failed -> proposed, expires {expires_at.isoformat(timespec='seconds')}")
+        if args.dry_run:
+            continue
+        try:
+            asyncio.run(proposals.reset(p.id, request_id=f"reset:{p.id}:{uuid.uuid4().hex}", actor=args.actor,
+                                        reason=args.reason, expires_at=expires_at))
+        except IllegalTransition as e:
+            raise SystemExit(str(e))
+    print(f"{'would reset' if args.dry_run else 'reset'} {len(chosen)} proposals")
+
+
 async def _gardener(args) -> None:
     """Local-only mode's approval inbox; with a paired server, decide in its
     dashboard instead (the server is the authority for decisions)."""
@@ -237,6 +285,16 @@ def main() -> None:
     c.add_argument("--json", action="store_true", help="machine-readable output")
     c = gs.add_parser("approve", help="approve a proposal; its branch is made at once")
     c.add_argument("id")
+    c = gs.add_parser("reset", help="put failed proposals back to proposed for a new decision (run on the "
+                                    "laptop first, then on the server with --db)")
+    c.add_argument("ids", nargs="*", help="proposal ids, each of which must be failed")
+    c.add_argument("--failed", action="store_true", help="every failed proposal, except those named by --exclude")
+    c.add_argument("--exclude", nargs="+", default=[], metavar="ID", help="with --failed: ids to leave failed")
+    c.add_argument("--reason", required=True, help="why, for the audit trail")
+    c.add_argument("--actor", default="vela", help="who asked for the reset (default: vela)")
+    c.add_argument("--dry-run", action="store_true", help="print what would change, change nothing")
+    c.add_argument("--db", help="another database file, e.g. the server's (default: this laptop's)")
+    c.add_argument("--user", help="with --db: the user id (default: the one user in the file)")
     c = gs.add_parser("reject", help="reject a proposal; the note reaches the Gardener")
     c.add_argument("id")
     c.add_argument("--note", help="why, in your words")
@@ -287,6 +345,8 @@ def main() -> None:
         _worker(args.once)
     elif args.cmd == "cloud":
         _cloud(args)
+    elif args.cmd == "gardener" and args.gardener_cmd == "reset":
+        _reset(args)
     elif args.cmd == "gardener":
         asyncio.run(_gardener(args))
     elif args.cmd == "eval":

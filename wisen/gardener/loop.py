@@ -6,7 +6,7 @@ The Gardener loop as durable jobs on the laptop (wisen/jobs.py):
                                               and record its proposals as that day's batch
   gardener-resume   gardener-resume:<run>     once every proposal of a run is decided:
                                               resume the run with the decisions
-  apply-proposal    apply:<proposal>          an approval: the branch (wisen/gardener/applier.py)
+  apply-proposal    apply:<proposal>:<approval> an approval: the branch (wisen/gardener/applier.py)
   measure-proposal  measure:<proposal>        2 weeks after merge: the field check; "worse"
                                               drafts a revert proposal
   expire-proposal   expire-proposal:<proposal>  7 days unanswered (wisen/proposals.py)
@@ -302,7 +302,8 @@ async def on_decided(store: SqliteStore, engine: JobEngine, proposal_id: str) ->
     if p is None:
         return
     if p.state == "approved":
-        await engine.enqueue("apply-proposal", {"proposal_id": proposal_id}, request_id=f"apply:{proposal_id}")
+        approval = await asyncio.to_thread(applier.attempt, store, proposal_id)
+        await engine.enqueue("apply-proposal", {"proposal_id": proposal_id}, request_id=f"apply:{proposal_id}:{approval}")
     run_id = p.payload.get("run_id")
     if run_id and p.state != "proposed" and not await asyncio.to_thread(_run_open, store, run_id):
         await engine.enqueue("gardener-resume", {"run_id": run_id}, request_id=f"gardener-resume:{run_id}")

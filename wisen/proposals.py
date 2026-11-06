@@ -11,6 +11,7 @@ transitions.
     applied   --> merged | abandoned    the branch reached the default branch, or was deleted
     merged    --> measuring             N weeks after merge
     measuring --> kept | revert_proposed
+    failed    --> proposed              only through reset(): an audited, human-requested retry
 
 Every move is a compare-and-set on the current state plus an audit row in
 `proposal_events`, in one transaction (lesson 1 in wisen/jobs.py). Each
@@ -343,6 +344,66 @@ class Proposals:
         return await asyncio.to_thread(
             self._transition, proposal_id, from_state, to_state, request_id, actor, note
         )
+
+    def reset_in(
+        self, conn: sqlite3.Connection, proposal_id: str, request_id: str, actor: str, reason: str,
+        expires_at: datetime,
+    ) -> ProposalEvent:
+        """`reset`, inside the caller's transaction. Not a general move: only
+        `failed` may go back to `proposed`, so it is not in TRANSITIONS. The
+        old decision memo is deleted (it would answer the next tap with the
+        old decision) and kept in the audit row's note."""
+        receipt = self._receipt(conn, request_id)
+        if receipt:
+            if (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
+                proposal_id, "failed", "proposed"
+            ):
+                raise ValueError(f"request id {request_id!r} was already used for a different move")
+            return _event(receipt)
+        now = ts(self.clock())
+        memo = conn.execute(
+            "SELECT * FROM proposal_decisions WHERE user_id = ? AND proposal_id = ?", (self._uid, proposal_id)
+        ).fetchone()
+        if conn.execute(
+            "UPDATE proposals SET state = 'proposed', expires_at = ?, updated_at = ? "
+            "WHERE user_id = ? AND id = ? AND state = 'failed'",
+            (ts(expires_at), now, self._uid, proposal_id),
+        ).rowcount != 1:
+            row = conn.execute(
+                "SELECT state FROM proposals WHERE user_id = ? AND id = ?", (self._uid, proposal_id)
+            ).fetchone()
+            raise IllegalTransition(
+                f"no proposal {proposal_id}" if row is None
+                else f"proposal {proposal_id} is {row['state']}, not failed: only a failed proposal can be reset"
+            )
+        note = f"reset requested by {actor}: {reason}"
+        if memo is not None:
+            conn.execute("DELETE FROM proposal_decisions WHERE user_id = ? AND proposal_id = ?",
+                         (self._uid, proposal_id))
+            note += f"; retired decision: {json.dumps(dict(memo), sort_keys=True)}"
+        conn.execute(
+            "INSERT INTO proposal_events (user_id, proposal_id, request_id, from_state, to_state, actor, note, at) "
+            "VALUES (?, ?, ?, 'failed', 'proposed', ?, ?, ?)",
+            (self._uid, proposal_id, request_id, actor, note, now),
+        )
+        # The first expiry timer ran (or will run) against the old deadline.
+        insert_job(
+            conn, self._uid, "expire-proposal", {"proposal_id": proposal_id},
+            request_id=f"expire-proposal:{proposal_id}:{request_id}", run_after=expires_at,
+            max_attempts=3, now=self.clock(),
+        )
+        return ProposalEvent(proposal_id, request_id, "failed", "proposed", actor, note, now)
+
+    async def reset(
+        self, proposal_id: str, *, request_id: str, actor: str, reason: str, expires_at: datetime,
+    ) -> ProposalEvent:
+        """Put a `failed` proposal back in `proposed` for a fresh decision,
+        with a new deadline `expires_at`. Any other state raises
+        IllegalTransition and changes nothing."""
+        def run() -> ProposalEvent:
+            with self.store.transaction() as conn:
+                return self.reset_in(conn, proposal_id, request_id, actor, reason, expires_at)
+        return await asyncio.to_thread(run)
 
     def record_pr_in(self, conn: sqlite3.Connection, proposal_id: str, url: str) -> None:
         """The pull request opened for the proposal's branch. Not a move: the

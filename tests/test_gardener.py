@@ -24,6 +24,7 @@ and the replay before approval, through the runner interface with a fake.
 Run: python3 -m tests.test_gardener
 """
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -79,7 +80,7 @@ from wisen.gardener.agent import Deps, build_agent
 from wisen.gardener.git import Repo, diff_paths, one_file_diff
 from wisen.gardener.targets import Refused, allowed, editable_files, resolve
 from wisen.jobs import LEASE, JobEngine
-from wisen.proposals import Proposals
+from wisen.proposals import IllegalTransition, Proposals
 from wisen.store import SqliteStore
 
 T0 = datetime.now(UTC).replace(microsecond=0)
@@ -419,6 +420,100 @@ async def check_disallowed_refused(store, engine, clock) -> None:
     assert gardener_refs(DEV / "demo") == before
     assert (DEV / "demo" / "src" / "app.py").read_text() == "print('hi')\n"
     print("✓ gardener: a proposal for a disallowed path (or a diff that strays) is refused after approval")
+
+
+async def check_reset(store, engine, clock) -> None:
+    demo = Repo(DEV / "demo")
+    proposals = Proposals(store, clock)
+    edited = CLAUDE_MD + "Run tests: make test\n"   # the file as it will be once someone edits it
+    diff = one_file_diff(demo, "CLAUDE.md", edited, edited + "Lint: make lint\n")
+    blob = demo.out("hash-object", "--stdin", input=edited)
+
+    async def make(tag: str, base_blob: str = blob) -> str:
+        p = await proposals.create("demo:CLAUDE.md", {"diff": diff, "rationale": "r", "evidence": [],
+                                                      "base_blob": base_blob},
+                                   request_id=f"reset-test:{tag}", actor="test",
+                                   expires_at=clock.now + timedelta(days=7))
+        return p.id
+
+    async def approve(pid: str, tap: str):
+        d = await proposals.decide(pid, "approved", request_id=tap, actor="web:vela")
+        await loop.on_decided(store, engine, pid)
+        await drain(engine)
+        return d
+
+    async def reset(pid: str, request_id: str):
+        return await proposals.reset(pid, request_id=request_id, actor="vela", reason="retry the failed ones",
+                                     expires_at=clock.now + loop.EXPIRES_AFTER)
+
+    def attempt_id(kind: str, pid: str, tap: str) -> str:
+        return f"{kind}:{hashlib.sha256(f'{pid}:{tap}'.encode()).hexdigest()[:32]}"
+
+    def request_ids(pid: str) -> list[str]:
+        return [r["request_id"] for r in _rows(store, "SELECT request_id FROM proposal_events "
+                                                      "WHERE proposal_id = ? ORDER BY id", pid)]
+
+    # The file has not been edited yet, so the approval fails: "changed since the diff was made".
+    pid = await make("a")
+    await approve(pid, "tap-1")
+    assert (await proposals.get(pid)).state == "failed"
+    assert request_ids(pid)[-1] == attempt_id("failed", pid, "tap-1")
+
+    # Only a failed proposal can be reset; nothing changes otherwise.
+    other = {s: await make(s) for s in ("proposed", "approved", "applied", "rejected")}
+    await proposals.decide(other["approved"], "approved", request_id="tap-x", actor="web:vela")
+    await proposals.decide(other["applied"], "approved", request_id="tap-y", actor="web:vela")
+    await proposals.transition(other["applied"], "approved", "applied", request_id="applied:y", actor="applier")
+    await proposals.decide(other["rejected"], "rejected", request_id="tap-z", actor="web:vela")
+    for state, other_id in {**other, "unknown": "no-such-proposal"}.items():
+        try:
+            await reset(other_id, f"reset:{state}")
+            raise AssertionError(f"reset a {state} proposal")
+        except IllegalTransition:
+            pass
+        assert state == "unknown" or (await proposals.get(other_id)).state == state
+        assert f"reset:{state}" not in request_ids(other_id)
+
+    # The file is edited since. Reset, and the old approval does not replay.
+    (DEV / "demo" / "CLAUDE.md").write_text(edited)
+    git(DEV / "demo", "commit", "-q", "-am", "edit CLAUDE.md")
+    expires = clock.now + loop.EXPIRES_AFTER
+    event = await reset(pid, "reset:1")
+    p = await proposals.get(pid)
+    assert p.state == "proposed" and datetime.fromisoformat(p.expires_at) == expires, p
+    assert (event.from_state, event.to_state, event.actor) == ("failed", "proposed", "vela")
+    assert "reset requested by vela: retry the failed ones" in event.note and '"request_id": "tap-1"' in event.note
+    assert not _rows(store, "SELECT 1 FROM proposal_decisions WHERE proposal_id = ?", pid)
+    (timer,) = _rows(store, "SELECT * FROM jobs WHERE request_id = ?", f"expire-proposal:{pid}:reset:1")
+    assert timer["kind"] == "expire-proposal" and datetime.fromisoformat(timer["run_after"]) == expires
+    await loop.on_decided(store, engine, pid)
+    await drain(engine)
+    assert (await proposals.get(pid)).state == "proposed", "a reset applies nothing"
+
+    # A new tap is a new decision, and its attempt applies.
+    d = await approve(pid, "tap-2")
+    assert d.request_id == "tap-2" and (await proposals.get(pid)).state == "applied"
+    assert request_ids(pid)[-4:] == [
+        attempt_id("failed", pid, "tap-1"), "reset:1", "tap-2", attempt_id("applied", pid, "tap-2")]
+    assert gardener_refs(DEV / "demo") == [f"refs/heads/wisen/gardener/{pid}"]
+
+    # Resends of the same commands are idempotent.
+    assert await reset(pid, "reset:1") == event and (await proposals.get(pid)).state == "applied"
+    await loop.on_decided(store, engine, pid)
+    await drain(engine)
+    assert request_ids(pid)[-1] == attempt_id("applied", pid, "tap-2")
+    assert len(_rows(store, "SELECT 1 FROM jobs WHERE kind = 'apply-proposal' AND args LIKE ?", f"%{pid}%")) == 2
+    assert gardener_refs(DEV / "demo") == [f"refs/heads/wisen/gardener/{pid}"]
+
+    # Reset, approved, and refused again: it ends in failed, not stuck in approved.
+    stale = await make("stale", base_blob="0" * 40)
+    await approve(stale, "tap-3")
+    await reset(stale, "reset:2")
+    await approve(stale, "tap-4")
+    assert (await proposals.get(stale)).state == "failed"
+    assert request_ids(stale)[-4:] == [
+        attempt_id("failed", stale, "tap-3"), "reset:2", "tap-4", attempt_id("failed", stale, "tap-4")]
+    print("✓ gardener: a failed proposal can be reset and decided again; its old decision does not replay")
 
 
 async def check_rejection_reaches_next_run(store, engine, clock, script, made) -> None:
@@ -1043,6 +1138,9 @@ async def main():
     await check_past_proposals()
     await check_one_reflection_no_run()
     await check_with_server()
+    world("reset")
+    store, engine, clock, script = _setup("reset")
+    await check_reset(store, engine, clock)
     print("\nall gardener tests passed")
 
 
