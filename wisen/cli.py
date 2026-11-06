@@ -175,7 +175,8 @@ def _reset(args) -> None:
             continue
         try:
             asyncio.run(proposals.reset(p.id, request_id=f"reset:{p.id}:{uuid.uuid4().hex}", actor=args.actor,
-                                        reason=args.reason, expires_at=expires_at))
+                                        reason=args.reason, expires_at=expires_at,
+                                        require_sent_updates=args.db is None))
         except IllegalTransition as e:
             raise SystemExit(str(e))
     print(f"{'would reset' if args.dry_run else 'reset'} {len(chosen)} proposals")

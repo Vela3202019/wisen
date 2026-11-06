@@ -453,11 +453,30 @@ async def check_reset(store, engine, clock) -> None:
         return [r["request_id"] for r in _rows(store, "SELECT request_id FROM proposal_events "
                                                       "WHERE proposal_id = ? ORDER BY id", pid)]
 
+    def mark_sent(*request_ids: str) -> None:
+        with sqlite3.connect(store.path) as conn:
+            conn.executemany(
+                "INSERT INTO cloud_state (user_id, key, value, at) VALUES (?, ?, 'sent', ?) "
+                "ON CONFLICT (user_id, key) DO NOTHING",
+                [(store.user_id, f"sent:update:{rid}", jobs_mod.ts(clock.now)) for rid in request_ids],
+            )
+
     # The file has not been edited yet, so the approval fails: "changed since the diff was made".
     pid = await make("a")
     await approve(pid, "tap-1")
     assert (await proposals.get(pid)).state == "failed"
     assert request_ids(pid)[-1] == attempt_id("failed", pid, "tap-1")
+
+    unsent = await make("unsent")
+    await approve(unsent, "tap-unsent")
+    assert (await proposals.get(unsent)).state == "failed"
+    try:
+        await reset(unsent, "reset:unsent")
+        raise AssertionError("reset accepted a proposal with unsent git-state updates")
+    except IllegalTransition as e:
+        assert "unsent git-state updates" in str(e)
+    assert (await proposals.get(unsent)).state == "failed"
+    assert "reset:unsent" not in request_ids(unsent)
 
     # Only a failed proposal can be reset; nothing changes otherwise.
     other = {s: await make(s) for s in ("proposed", "approved", "applied", "rejected")}
@@ -478,6 +497,7 @@ async def check_reset(store, engine, clock) -> None:
     (DEV / "demo" / "CLAUDE.md").write_text(edited)
     git(DEV / "demo", "commit", "-q", "-am", "edit CLAUDE.md")
     expires = clock.now + loop.EXPIRES_AFTER
+    mark_sent(attempt_id("failed", pid, "tap-1"))
     event = await reset(pid, "reset:1")
     p = await proposals.get(pid)
     assert p.state == "proposed" and datetime.fromisoformat(p.expires_at) == expires, p
@@ -511,6 +531,7 @@ async def check_reset(store, engine, clock) -> None:
     # Reset, approved, and refused again: it ends in failed, not stuck in approved.
     stale = await make("stale", base_blob="0" * 40)
     await approve(stale, "tap-3")
+    mark_sent(attempt_id("failed", stale, "tap-3"))
     await reset(stale, "reset:2")
     await approve(stale, "tap-4")
     assert (await proposals.get(stale)).state == "failed"

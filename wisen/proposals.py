@@ -353,7 +353,7 @@ class Proposals:
 
     def reset_in(
         self, conn: sqlite3.Connection, proposal_id: str, request_id: str, actor: str, reason: str,
-        expires_at: datetime,
+        expires_at: datetime, *, require_sent_updates: bool = True,
     ) -> ProposalEvent:
         """`reset`, inside the caller's transaction. Not a general move: only
         `failed` may go back to `proposed`, so it is not in TRANSITIONS. The
@@ -382,6 +382,22 @@ class Proposals:
                 f"no proposal {proposal_id}" if row is None
                 else f"proposal {proposal_id} is {row['state']}, not failed: only a failed proposal can be reset"
             )
+        if require_sent_updates:
+            unsent = conn.execute(
+                "SELECT request_id FROM proposal_events WHERE user_id = ? AND proposal_id = ? "
+                "AND to_state IN ('failed', 'applied') "
+                "AND NOT EXISTS (SELECT 1 FROM cloud_state c WHERE c.user_id = proposal_events.user_id "
+                "AND c.key = 'sent:update:' || proposal_events.request_id) "
+                "AND NOT EXISTS (SELECT 1 FROM cloud_state c2 WHERE c2.user_id = proposal_events.user_id "
+                "AND c2.key = 'local:proposal:' || proposal_events.proposal_id) ORDER BY id",
+                (self._uid, proposal_id),
+            ).fetchall()
+            if unsent:
+                raise IllegalTransition(
+                    f"proposal {proposal_id} has unsent git-state updates; "
+                    f"upload them with `wisen worker --once`, then reset: "
+                    + ", ".join(r["request_id"] for r in unsent)
+                )
         note = f"reset requested by {actor}: {reason}"
         if memo is not None:
             conn.execute("DELETE FROM proposal_decisions WHERE user_id = ? AND proposal_id = ?",
@@ -402,13 +418,18 @@ class Proposals:
 
     async def reset(
         self, proposal_id: str, *, request_id: str, actor: str, reason: str, expires_at: datetime,
+        require_sent_updates: bool = True,
     ) -> ProposalEvent:
         """Put a `failed` proposal back in `proposed` for a fresh decision,
         with a new deadline `expires_at`. Any other state raises
-        IllegalTransition and changes nothing."""
+        IllegalTransition and changes nothing. When `require_sent_updates`
+        (the laptop's own database), a proposal whose failed/applied moves
+        have not all been uploaded is refused so a later sync cannot replay a
+        stale git-state event over the reset."""
         def run() -> ProposalEvent:
             with self.store.transaction() as conn:
-                return self.reset_in(conn, proposal_id, request_id, actor, reason, expires_at)
+                return self.reset_in(conn, proposal_id, request_id, actor, reason, expires_at,
+                                     require_sent_updates=require_sent_updates)
         return await asyncio.to_thread(run)
 
     def record_pr_in(self, conn: sqlite3.Connection, proposal_id: str, url: str) -> None:
