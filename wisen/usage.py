@@ -8,6 +8,7 @@ Collect real subscription usage for Claude Code and Codex.
 
 Only percentages and reset times are returned; tokens never leave this machine.
 """
+import http.client
 import json
 import re
 import subprocess
@@ -104,7 +105,7 @@ def claude_usage() -> dict | None:
             "seven_day_pct": data["seven_day"]["utilization"],
             "seven_day_resets_at": data["seven_day"]["resets_at"],
         }
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, urllib.error.URLError):
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, OSError, http.client.HTTPException):
         return None
 
 

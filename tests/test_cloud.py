@@ -989,6 +989,15 @@ async def check_usage_debounce():
         next_at = datetime.fromisoformat(worker._get(throttled_store, "usage:claude:next_at"))
         assert next_at - before >= timedelta(hours=2), next_at
 
+        # An unexpected Claude error still records the window and lets Codex through.
+        boom_store = SqliteStore(_TMP / "usage-boom.db", "local")
+        worker.claude_usage = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        worker.codex_usage = lambda: {"plan": "pro", "five_hour_pct": 30.0}
+        merged = worker._merged_usage(boom_store)
+        assert merged["claude"] is None and merged["codex"]["five_hour_pct"] == 30.0, merged
+        next_at = datetime.fromisoformat(worker._get(boom_store, "usage:claude:next_at"))
+        assert next_at > datetime.now(UTC), next_at
+
         # A Claude fallback to a reading from two hours ago stamps the packet
         # with that older collected_at, not the fresh Codex one.
         fallback_store = SqliteStore(_TMP / "usage-fallback.db", "local")
@@ -1003,7 +1012,7 @@ async def check_usage_debounce():
         assert merged["collected_at"] == old, merged
     finally:
         worker.claude_usage, worker.codex_usage = original_claude, original_codex
-    print("✓ cloud: Claude usage is fetched at most once per window, a 429 extends the wait, and a fallback keeps its older collected_at")
+    print("✓ cloud: Claude usage is debounced per window, a 429 or unexpected error extends the wait, and a fallback keeps its older collected_at")
 
 
 async def main():

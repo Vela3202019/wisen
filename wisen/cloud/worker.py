@@ -295,17 +295,24 @@ def _claude_reading(store: SqliteStore, now: datetime) -> dict | None:
     """Claude usage, fetched at most once per CLAUDE_INTERVAL (longer after a
     429), with the window persisted so restarts respect it."""
     raw = _get(store, "usage:claude:next_at")
-    next_at = datetime.fromisoformat(raw) if raw else None
+    next_at = None
+    if raw:
+        try:
+            next_at = datetime.fromisoformat(raw)
+        except ValueError:
+            pass
     if next_at is not None and now < next_at:
         return None
-    reading = None
+    next_at = now + CLAUDE_INTERVAL
     try:
-        reading = claude_usage()
-        next_at = now + CLAUDE_INTERVAL
+        return claude_usage()
     except ClaudeThrottled as e:
         next_at = now + timedelta(seconds=max(CLAUDE_INTERVAL.total_seconds(), e.retry_after))
-    _set(store, "usage:claude:next_at", next_at.isoformat())
-    return reading
+        return None
+    except Exception:
+        return None
+    finally:
+        _set(store, "usage:claude:next_at", next_at.isoformat())
 
 
 def _merged_usage(store: SqliteStore) -> dict | None:
