@@ -274,12 +274,42 @@ async def snapshot_up(client: CloudClient, store: SqliteStore) -> int:
     return sent
 
 
-async def usage_up(client: CloudClient) -> None:
+def _last_good(store: SqliteStore, source: str, reading: dict | None, collected_at: str) -> dict | None:
+    """A source's reading this pass, or its last good one kept locally, so a
+    source that failed this pass does not blank its rows. Each kept reading
+    remembers when it was collected."""
+    key = f"usage:{source}"
+    if reading is not None:
+        _set(store, key, json.dumps({"collected_at": collected_at, **reading}))
+        return reading
+    raw = _get(store, key)
+    if raw is None:
+        return None
+    last = json.loads(raw)
+    return {k: v for k, v in last.items() if k != "collected_at"}
+
+
+def _merged_usage(store: SqliteStore) -> dict | None:
+    usage = collect_usage()
+    if usage["claude"] is None and usage["codex"] is None:
+        return None
+    return {
+        "collected_at": usage["collected_at"],
+        "claude": _last_good(store, "claude", usage["claude"], usage["collected_at"]),
+        "codex": _last_good(store, "codex", usage["codex"], usage["collected_at"]),
+    }
+
+
+async def usage_up(client: CloudClient, store: SqliteStore) -> None:
     """Upload the subscription usage the dashboard's panel shows (percentages
     and reset times only). When neither Claude nor Codex yields a reading, send
     nothing, so a failed collection never replaces the last good one."""
-    usage = await asyncio.to_thread(collect_usage)
-    if usage["claude"] is None and usage["codex"] is None:
+    try:
+        usage = await asyncio.to_thread(_merged_usage, store)
+    except Exception as e:  # noqa: BLE001 - a failed collection is retried on the next pass
+        print(f"[worker] usage collection failed: {type(e).__name__}: {e}", file=sys.stderr)
+        return
+    if usage is None:
         return
     try:
         await client.send_packet(usage_packet(usage, user=client.creds.user_id, device_id=client.creds.device_id))
@@ -558,7 +588,7 @@ async def _poll_loop(creds: Credentials, store: SqliteStore, engine: JobEngine, 
                 if once or time.monotonic() - last_sync >= SYNC_EVERY:
                     await tend(store, engine)
                     await sync_up(client, store)
-                    await usage_up(client)
+                    await usage_up(client, store)
                     if stage_b():
                         await dream_up(client, store)
                     last_sync = time.monotonic()

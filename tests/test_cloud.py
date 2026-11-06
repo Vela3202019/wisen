@@ -926,28 +926,38 @@ async def check_device_job_skips_empty_day():
 async def check_usage_sync():
     server = _server("usage")
     store = get_store()
-    reading = {"collected_at": "2026-10-20T09:00:00+00:00",
-               "claude": {"five_hour_pct": 12.0, "five_hour_resets_at": "2026-10-20T13:00:00+00:00",
-                          "seven_day_pct": 40.0, "seven_day_resets_at": "2026-10-25T09:00:00+00:00"},
-               "codex": None}
+    claude = {"five_hour_pct": 12.0, "five_hour_resets_at": "2026-10-20T13:00:00+00:00",
+              "seven_day_pct": 40.0, "seven_day_resets_at": "2026-10-25T09:00:00+00:00"}
+    codex = {"plan": "pro", "as_of": "2026-10-20T08:59:00+00:00",
+             "five_hour_pct": 30.0, "five_hour_resets_at": "2026-10-20T12:00:00+00:00",
+             "weekly_pct": 60.0, "weekly_resets_at": "2026-10-25T09:00:00+00:00"}
+    both = {"collected_at": "2026-10-20T09:00:00+00:00", "claude": claude, "codex": codex}
     nothing = {"collected_at": "2026-10-20T09:05:00+00:00", "claude": None, "codex": None}
+    claude_fails = {"collected_at": "2026-10-20T09:10:00+00:00", "claude": None, "codex": codex}
     nothing_readable = worker.collect_usage
     async with server.browser() as browser:
         creds = await server.device(browser)
         assert (await browser.get("/api/usage")).json() == {}
         try:
             async with server.http() as http:
-                worker.collect_usage = lambda: reading
+                worker.collect_usage = lambda: both
                 await worker.run(creds, store, http=http, once=True)
                 got = (await browser.get("/api/usage")).json()
-                assert got["claude"]["five_hour_pct"] == 12.0 and got["device_id"] == creds.device_id, got
+                assert got["claude"]["five_hour_pct"] == 12.0 and got["codex"]["five_hour_pct"] == 30.0, got
+                assert got["device_id"] == creds.device_id, got
                 # A pass where nothing could be read leaves the last good reading in place.
                 worker.collect_usage = lambda: nothing
                 await worker.run(creds, store, http=http, once=True)
                 assert (await browser.get("/api/usage")).json() == got
+                # A pass where one source fails keeps that source's last good reading.
+                worker.collect_usage = lambda: claude_fails
+                await worker.run(creds, store, http=http, once=True)
+                after = (await browser.get("/api/usage")).json()
+                assert after["claude"]["five_hour_pct"] == 12.0, after
+                assert after["codex"]["five_hour_pct"] == 30.0, after
         finally:
             worker.collect_usage = nothing_readable
-    print("✓ cloud: the worker uploads the subscription usage each pass, and keeps the last reading when none can be read")
+    print("✓ cloud: the worker uploads the subscription usage each pass, keeps the last reading when none can be read, and keeps each source's last good reading when only one fails")
 
 
 async def main():
