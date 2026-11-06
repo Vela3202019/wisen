@@ -76,7 +76,7 @@ from wisen.evals import runner, verification
 from wisen.evals.cases import Case, ContextTurn, save_case
 from wisen.gardener import applier, loop, publisher
 from wisen.gardener.agent import Deps, build_agent
-from wisen.gardener.git import Repo, one_file_diff
+from wisen.gardener.git import Repo, diff_paths, one_file_diff
 from wisen.gardener.targets import Refused, allowed, editable_files, resolve
 from wisen.jobs import LEASE, JobEngine
 from wisen.proposals import Proposals
@@ -872,6 +872,28 @@ def check_allow_list() -> None:
     print("✓ gardener: the allow-list takes CLAUDE.md, AGENTS.md and skill files only")
 
 
+def check_run_from_subdirectory() -> None:
+    """The worker's own cwd can be a subdirectory of the target's work tree;
+    git must still read the diff's paths from the root, and commit must work."""
+    repo = make_repo(DEV / "subdir")
+    git_dir = DEV / "subdir.git"   # apart from the work tree, as wisen's home repo is: git is given no -C
+    repo.joinpath(".git").rename(git_dir)
+    new = CLAUDE_MD + "\n- Run pytest.\n"
+    diff = one_file_diff(Repo(repo, git_dir), "CLAUDE.md", CLAUDE_MD, new)
+    before = os.getcwd()
+    os.chdir(repo / "src")
+    try:
+        assert diff_paths(Repo(repo, git_dir), diff) == ["CLAUDE.md"]
+        base = Repo(repo, git_dir).resolve("HEAD")
+        info = {"work_tree": str(repo), "git_dir": str(git_dir), "base": base, "path": "CLAUDE.md",
+                "branch": "wisen/gardener/subdir", "when": f"{int(T0.timestamp())} +0000"}
+        made = applier.commit(info, "p1", "subdir:CLAUDE.md", "why", diff)
+    finally:
+        os.chdir(before)
+    assert Repo(repo, git_dir).read_blob(made["new_blob"]) == new
+    print("✓ gardener: git reads the diff and commits the same from a subdirectory of the work tree")
+
+
 async def check_replay_before_proposal() -> None:
     """The controlled check runs through the runner's interface; here with a
     fake that passes a case only under the proposed text. Capped per kind,
@@ -1001,6 +1023,7 @@ def _jobs(mailbox: Mailbox, kind: str) -> list:
 async def main():
     world("laptop")
     check_allow_list()
+    check_run_from_subdirectory()
     check_verdicts()
     await check_replay_before_proposal()
     store, engine, clock, script = _setup("laptop")
