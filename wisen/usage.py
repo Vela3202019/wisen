@@ -67,6 +67,21 @@ def _claude_access_token() -> str | None:
     return None
 
 
+class ClaudeThrottled(Exception):
+    """The Claude usage endpoint answered 429; wait `retry_after` seconds."""
+
+    def __init__(self, retry_after: float):
+        self.retry_after = retry_after
+        super().__init__(f"claude usage throttled: retry after {retry_after:.0f}s")
+
+
+def _retry_after(err: urllib.error.HTTPError) -> float:
+    try:
+        return float(err.headers.get("Retry-After"))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def claude_usage() -> dict | None:
     try:
         token = _claude_access_token()
@@ -76,15 +91,20 @@ def claude_usage() -> dict | None:
             "https://api.anthropic.com/api/oauth/usage",
             headers={"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20"},
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                raise ClaudeThrottled(_retry_after(e)) from None
+            return None
         return {
             "five_hour_pct": data["five_hour"]["utilization"],
             "five_hour_resets_at": data["five_hour"]["resets_at"],
             "seven_day_pct": data["seven_day"]["utilization"],
             "seven_day_resets_at": data["seven_day"]["resets_at"],
         }
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, urllib.error.URLError):
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, urllib.error.URLError):
         return None
 
 
@@ -110,31 +130,38 @@ def codex_usage() -> dict | None:
         except (OSError, json.JSONDecodeError):
             continue
         if last:
-            ts, rl = last
-            iso = lambda epoch: datetime.fromtimestamp(epoch, UTC).isoformat() if epoch else None
-            # Codex reports `primary` and `secondary` rate-limit windows, but
-            # which is the 5-hour vs weekly limit depends on the plan. Identify
-            # each window by its `window_minutes` (300 = 5h, 10080 = 7d) rather
-            # than assuming primary is always the short window.
-            out: dict = {"plan": rl.get("plan_type"), "as_of": ts}
-            for slot in ("primary", "secondary"):
-                win = rl.get(slot)
-                if not win:
-                    continue
-                mins = win.get("window_minutes")
-                if mins is not None and mins <= 360:
-                    out["five_hour_pct"] = win.get("used_percent")
-                    out["five_hour_resets_at"] = iso(win.get("resets_at"))
-                else:
-                    out["weekly_pct"] = win.get("used_percent")
-                    out["weekly_resets_at"] = iso(win.get("resets_at"))
-            return out
+            try:
+                ts, rl = last
+                iso = lambda epoch: datetime.fromtimestamp(epoch, UTC).isoformat() if epoch else None
+                # Codex reports `primary` and `secondary` rate-limit windows, but
+                # which is the 5-hour vs weekly limit depends on the plan. Identify
+                # each window by its `window_minutes` (300 = 5h, 10080 = 7d) rather
+                # than assuming primary is always the short window.
+                out: dict = {"plan": rl.get("plan_type"), "as_of": ts}
+                for slot in ("primary", "secondary"):
+                    win = rl.get(slot)
+                    if not win:
+                        continue
+                    mins = win.get("window_minutes")
+                    if mins is not None and mins <= 360:
+                        out["five_hour_pct"] = win.get("used_percent")
+                        out["five_hour_resets_at"] = iso(win.get("resets_at"))
+                    else:
+                        out["weekly_pct"] = win.get("used_percent")
+                        out["weekly_resets_at"] = iso(win.get("resets_at"))
+                return out
+            except (TypeError, OverflowError, ValueError, AttributeError):
+                return None
     return None
 
 
 def collect() -> dict:
+    try:
+        claude = claude_usage()
+    except ClaudeThrottled:
+        claude = None
     return {
         "collected_at": datetime.now(UTC).isoformat(),
-        "claude": claude_usage(),
+        "claude": claude,
         "codex": codex_usage(),
     }

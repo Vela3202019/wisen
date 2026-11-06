@@ -68,12 +68,13 @@ from wisen.packets import (
 )
 from wisen.proposals import DECISIONS, IllegalTransition, Proposal, Proposals, _proposal
 from wisen.store import SqliteStore
-from wisen.usage import collect as collect_usage
+from wisen.usage import ClaudeThrottled, claude_usage, codex_usage
 
 SYNC_EVERY = 300.0  # seconds between sync-up passes while idle
 BACKOFF_CAP = 60.0
 OBSERVE_EVERY = timedelta(hours=2)   # stage B: the most often a day is observed again (one model call each)
 SNAPSHOT_EVERY = timedelta(hours=1)  # stage B: how often the editable files are read for a snapshot
+CLAUDE_INTERVAL = timedelta(minutes=30)  # how often the Claude usage endpoint is fetched
 
 
 class SynthesisFailed(Exception):
@@ -274,29 +275,53 @@ async def snapshot_up(client: CloudClient, store: SqliteStore) -> int:
     return sent
 
 
-def _last_good(store: SqliteStore, source: str, reading: dict | None, collected_at: str) -> dict | None:
+def _last_good(store: SqliteStore, source: str, reading: dict | None,
+               collected_at: str) -> tuple[dict | None, str | None]:
     """A source's reading this pass, or its last good one kept locally, so a
-    source that failed this pass does not blank its rows. Each kept reading
-    remembers when it was collected."""
+    source that failed this pass does not blank its rows. Returns the reading
+    and when it was collected."""
     key = f"usage:{source}"
     if reading is not None:
         _set(store, key, json.dumps({"collected_at": collected_at, **reading}))
-        return reading
+        return reading, collected_at
     raw = _get(store, key)
     if raw is None:
-        return None
+        return None, None
     last = json.loads(raw)
-    return {k: v for k, v in last.items() if k != "collected_at"}
+    return {k: v for k, v in last.items() if k != "collected_at"}, last["collected_at"]
+
+
+def _claude_reading(store: SqliteStore, now: datetime) -> dict | None:
+    """Claude usage, fetched at most once per CLAUDE_INTERVAL (longer after a
+    429), with the window persisted so restarts respect it."""
+    raw = _get(store, "usage:claude:next_at")
+    next_at = datetime.fromisoformat(raw) if raw else None
+    if next_at is not None and now < next_at:
+        return None
+    reading = None
+    try:
+        reading = claude_usage()
+        next_at = now + CLAUDE_INTERVAL
+    except ClaudeThrottled as e:
+        next_at = now + timedelta(seconds=max(CLAUDE_INTERVAL.total_seconds(), e.retry_after))
+    _set(store, "usage:claude:next_at", next_at.isoformat())
+    return reading
 
 
 def _merged_usage(store: SqliteStore) -> dict | None:
-    usage = collect_usage()
-    if usage["claude"] is None and usage["codex"] is None:
+    now = datetime.now(UTC)
+    collected_at = now.isoformat()
+    claude_fresh = _claude_reading(store, now)
+    codex_fresh = codex_usage()
+    if claude_fresh is None and codex_fresh is None:
         return None
+    claude, claude_at = _last_good(store, "claude", claude_fresh, collected_at)
+    codex, codex_at = _last_good(store, "codex", codex_fresh, collected_at)
+    times = [t for t in (claude_at, codex_at) if t is not None]
     return {
-        "collected_at": usage["collected_at"],
-        "claude": _last_good(store, "claude", usage["claude"], usage["collected_at"]),
-        "codex": _last_good(store, "codex", usage["codex"], usage["collected_at"]),
+        "collected_at": min(times),
+        "claude": claude,
+        "codex": codex,
     }
 
 

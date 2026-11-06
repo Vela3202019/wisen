@@ -81,14 +81,16 @@ from wisen.packets import (
     result_packet,
 )
 from wisen.proposals import Proposals
-from wisen.store import get_store
+from wisen.store import SqliteStore, get_store
+from wisen.usage import ClaudeThrottled
 from wisen.synthesis import agent
 from wisen.synthesis import job as synthesis_job
 from wisen.synthesis.schema import DayObservation, Reflection
 
 # The worker collects subscription usage from the Keychain, the network and
 # ~/.codex; these tests read none of it, so by default no reading is available.
-worker.collect_usage = lambda: {"collected_at": "2026-10-20T09:00:00+00:00", "claude": None, "codex": None}
+worker.claude_usage = lambda: None
+worker.codex_usage = lambda: None
 
 T0 = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
 USER, PASSWORD = "vela", "correct horse battery"
@@ -925,39 +927,83 @@ async def check_device_job_skips_empty_day():
 
 async def check_usage_sync():
     server = _server("usage")
-    store = get_store()
+    store = SqliteStore(_TMP / "usage-sync-laptop.db", "local")
     claude = {"five_hour_pct": 12.0, "five_hour_resets_at": "2026-10-20T13:00:00+00:00",
               "seven_day_pct": 40.0, "seven_day_resets_at": "2026-10-25T09:00:00+00:00"}
     codex = {"plan": "pro", "as_of": "2026-10-20T08:59:00+00:00",
              "five_hour_pct": 30.0, "five_hour_resets_at": "2026-10-20T12:00:00+00:00",
              "weekly_pct": 60.0, "weekly_resets_at": "2026-10-25T09:00:00+00:00"}
-    both = {"collected_at": "2026-10-20T09:00:00+00:00", "claude": claude, "codex": codex}
-    nothing = {"collected_at": "2026-10-20T09:05:00+00:00", "claude": None, "codex": None}
-    claude_fails = {"collected_at": "2026-10-20T09:10:00+00:00", "claude": None, "codex": codex}
-    nothing_readable = worker.collect_usage
+    codex2 = {"plan": "pro", "as_of": "2026-10-20T09:10:00+00:00",
+              "five_hour_pct": 45.0, "five_hour_resets_at": "2026-10-20T13:00:00+00:00",
+              "weekly_pct": 70.0, "weekly_resets_at": "2026-10-25T09:00:00+00:00"}
+    original_claude, original_codex = worker.claude_usage, worker.codex_usage
     async with server.browser() as browser:
         creds = await server.device(browser)
         assert (await browser.get("/api/usage")).json() == {}
         try:
             async with server.http() as http:
-                worker.collect_usage = lambda: both
+                worker.claude_usage, worker.codex_usage = lambda: claude, lambda: codex
                 await worker.run(creds, store, http=http, once=True)
                 got = (await browser.get("/api/usage")).json()
                 assert got["claude"]["five_hour_pct"] == 12.0 and got["codex"]["five_hour_pct"] == 30.0, got
                 assert got["device_id"] == creds.device_id, got
                 # A pass where nothing could be read leaves the last good reading in place.
-                worker.collect_usage = lambda: nothing
+                worker.claude_usage, worker.codex_usage = lambda: None, lambda: None
                 await worker.run(creds, store, http=http, once=True)
                 assert (await browser.get("/api/usage")).json() == got
-                # A pass where one source fails keeps that source's last good reading.
-                worker.collect_usage = lambda: claude_fails
+                # A pass where Claude fails keeps its last good reading, and the
+                # packet is stamped with that older collected_at.
+                worker.codex_usage = lambda: codex2
                 await worker.run(creds, store, http=http, once=True)
                 after = (await browser.get("/api/usage")).json()
                 assert after["claude"]["five_hour_pct"] == 12.0, after
-                assert after["codex"]["five_hour_pct"] == 30.0, after
+                assert after["codex"]["five_hour_pct"] == 45.0, after
+                assert after["collected_at"] == got["collected_at"], (after, got)
         finally:
-            worker.collect_usage = nothing_readable
+            worker.claude_usage, worker.codex_usage = original_claude, original_codex
     print("✓ cloud: the worker uploads the subscription usage each pass, keeps the last reading when none can be read, and keeps each source's last good reading when only one fails")
+
+
+async def check_usage_debounce():
+    original_claude, original_codex = worker.claude_usage, worker.codex_usage
+    try:
+        # Claude is fetched at most once per 30-minute window across failing passes.
+        store = SqliteStore(_TMP / "usage-debounce.db", "local")
+        calls = 0
+
+        def failing_claude():
+            nonlocal calls
+            calls += 1
+            return None
+
+        worker.claude_usage, worker.codex_usage = failing_claude, lambda: None
+        for _ in range(3):
+            assert worker._merged_usage(store) is None
+        assert calls == 1, calls
+
+        # A 429 with a Retry-After longer than the window extends the wait.
+        throttled_store = SqliteStore(_TMP / "usage-throttle.db", "local")
+        worker.claude_usage = lambda: (_ for _ in ()).throw(ClaudeThrottled(7200))
+        before = datetime.now(UTC)
+        assert worker._merged_usage(throttled_store) is None
+        next_at = datetime.fromisoformat(worker._get(throttled_store, "usage:claude:next_at"))
+        assert next_at - before >= timedelta(hours=2), next_at
+
+        # A Claude fallback to a reading from two hours ago stamps the packet
+        # with that older collected_at, not the fresh Codex one.
+        fallback_store = SqliteStore(_TMP / "usage-fallback.db", "local")
+        old = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+        old_claude = {"five_hour_pct": 12.0, "five_hour_resets_at": "2026-10-20T13:00:00+00:00",
+                      "seven_day_pct": 40.0, "seven_day_resets_at": "2026-10-25T09:00:00+00:00"}
+        worker._last_good(fallback_store, "claude", old_claude, old)
+        worker.claude_usage = lambda: None
+        worker.codex_usage = lambda: {"plan": "pro", "five_hour_pct": 30.0}
+        merged = worker._merged_usage(fallback_store)
+        assert merged["claude"]["five_hour_pct"] == 12.0 and merged["codex"]["five_hour_pct"] == 30.0, merged
+        assert merged["collected_at"] == old, merged
+    finally:
+        worker.claude_usage, worker.codex_usage = original_claude, original_codex
+    print("✓ cloud: Claude usage is fetched at most once per window, a 429 extends the wait, and a fallback keeps its older collected_at")
 
 
 async def main():
@@ -966,6 +1012,7 @@ async def main():
     await check_revoke()
     await check_result_sync_and_push()
     await check_usage_sync()
+    await check_usage_debounce()
     await check_approvals()
     await check_publish()
     await check_restart_mid_lease()
