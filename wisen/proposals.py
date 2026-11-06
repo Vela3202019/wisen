@@ -286,10 +286,16 @@ class Proposals:
             raise ValueError(f"a decision is one of {sorted(DECISIONS)}, not {decision!r}")
         now = ts(at)
         receipt = self._receipt(conn, request_id)
-        if receipt and (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
-            proposal_id, "proposed", decision
-        ):
-            raise ValueError(f"request id {request_id!r} was already used for a different command")
+        if receipt:
+            if (receipt["proposal_id"], receipt["from_state"], receipt["to_state"]) != (
+                proposal_id, "proposed", decision
+            ):
+                raise ValueError(f"request id {request_id!r} was already used for a different command")
+            return Decision(
+                proposal_id=receipt["proposal_id"], decision=receipt["to_state"],
+                actor=receipt["actor"], note=receipt["note"],
+                request_id=receipt["request_id"], at=receipt["at"],
+            )
         memo = conn.execute(
             "SELECT * FROM proposal_decisions WHERE user_id = ? AND proposal_id = ?",
             (self._uid, proposal_id),

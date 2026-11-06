@@ -484,6 +484,9 @@ async def check_reset(store, engine, clock) -> None:
     assert (event.from_state, event.to_state, event.actor) == ("failed", "proposed", "vela")
     assert "reset requested by vela: retry the failed ones" in event.note and '"request_id": "tap-1"' in event.note
     assert not _rows(store, "SELECT 1 FROM proposal_decisions WHERE proposal_id = ?", pid)
+    replayed = await proposals.decide(pid, "approved", request_id="tap-1", actor="web:vela")
+    assert replayed.request_id == "tap-1"
+    assert (await proposals.get(pid)).state == "proposed", "a replayed old decision re-approved the proposal"
     (timer,) = _rows(store, "SELECT * FROM jobs WHERE request_id = ?", f"expire-proposal:{pid}:reset:1")
     assert timer["kind"] == "expire-proposal" and datetime.fromisoformat(timer["run_after"]) == expires
     await loop.on_decided(store, engine, pid)
