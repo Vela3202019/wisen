@@ -8,7 +8,6 @@ Collect real subscription usage for Claude Code and Codex.
 
 Only percentages and reset times are returned; tokens never leave this machine.
 """
-import http.client
 import json
 import re
 import subprocess
@@ -105,33 +104,35 @@ def claude_usage() -> dict | None:
             "seven_day_pct": data["seven_day"]["utilization"],
             "seven_day_resets_at": data["seven_day"]["resets_at"],
         }
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, OSError, http.client.HTTPException):
+    except ClaudeThrottled:
+        raise
+    except Exception:
         return None
 
 
 def codex_usage() -> dict | None:
-    sessions = sorted(
-        Path.home().glob(".codex/sessions/*/*/*/*.jsonl"),
-        key=lambda p: p.stat().st_mtime, reverse=True,
-    )
-    for path in sessions[:5]:
-        last = None
-        try:
-            with open(path, errors="replace") as f:
-                for line in f:
-                    if '"rate_limits"' not in line:
-                        continue
-                    try:
-                        e = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    rl = (e.get("payload") or {}).get("rate_limits")
-                    if rl:
-                        last = (e.get("timestamp", ""), rl)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if last:
+    try:
+        sessions = sorted(
+            Path.home().glob(".codex/sessions/*/*/*/*.jsonl"),
+            key=lambda p: p.stat().st_mtime, reverse=True,
+        )
+        for path in sessions[:5]:
+            last = None
             try:
+                with open(path, errors="replace") as f:
+                    for line in f:
+                        if '"rate_limits"' not in line:
+                            continue
+                        try:
+                            e = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        rl = (e.get("payload") or {}).get("rate_limits")
+                        if rl:
+                            last = (e.get("timestamp", ""), rl)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if last:
                 ts, rl = last
                 iso = lambda epoch: datetime.fromtimestamp(epoch, UTC).isoformat() if epoch else None
                 # Codex reports `primary` and `secondary` rate-limit windows, but
@@ -151,9 +152,9 @@ def codex_usage() -> dict | None:
                         out["weekly_pct"] = win.get("used_percent")
                         out["weekly_resets_at"] = iso(win.get("resets_at"))
                 return out
-            except (TypeError, OverflowError, ValueError, AttributeError):
-                return None
-    return None
+        return None
+    except Exception:
+        return None
 
 
 def collect() -> dict:
