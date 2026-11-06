@@ -401,7 +401,7 @@ function renderHill(t) {
     out += `<line class="guide" y1="${PAD.t}" y2="${y(0)}" stroke="var(--dim)" stroke-width="1" visibility="hidden"/>
       <rect class="hillzone" x="${PAD.l}" y="${PAD.t}" width="${w}" height="${h}" fill="transparent"/>`;
     return `<div class="meta">${label}</div>
-      <svg viewBox="0 0 ${W} ${H}" tabindex="0" role="img" data-key="${key}" data-label="${esc(label)}"
+      <svg viewBox="0 0 ${W} ${H}" tabindex="0" role="img" data-key="${key}"
         aria-label="${esc(label)} per day, ${dates[0]} to ${dates[dates.length - 1]}. Left and right arrow keys step through days.">${out}</svg>
       <div class="tip hilltip" aria-live="polite">${HILL_HINT}</div>`;
   };
