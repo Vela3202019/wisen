@@ -6,7 +6,8 @@
                 before its reflection's push), each with its decision if made
                 while unpaired, then the git states the laptop
                 decided for proposals (applied, merged, measured, …), each day's metrics,
-                and each day's reflection, when it changed since the last upload
+                and each day's reflection, when it changed since the last upload;
+                the subscription usage (percentages and reset times) goes up every pass
   2. poll       one long poll returns a device job to run and any decisions
                 made since the last one
   3. decisions  recorded in the local proposal table (the server decides; the
@@ -63,9 +64,11 @@ from wisen.packets import (
     proposal_packet,
     proposal_update_packet,
     result_packet,
+    usage_packet,
 )
 from wisen.proposals import DECISIONS, IllegalTransition, Proposal, Proposals, _proposal
 from wisen.store import SqliteStore
+from wisen.usage import collect as collect_usage
 
 SYNC_EVERY = 300.0  # seconds between sync-up passes while idle
 BACKOFF_CAP = 60.0
@@ -269,6 +272,19 @@ async def snapshot_up(client: CloudClient, store: SqliteStore) -> int:
             sent += await _upload(client, store, f"sent:config:{target}",
                                   lambda t=target: config_snapshot_packet(t, None, None, **who))
     return sent
+
+
+async def usage_up(client: CloudClient) -> None:
+    """Upload the subscription usage the dashboard's panel shows (percentages
+    and reset times only). When neither Claude nor Codex yields a reading, send
+    nothing, so a failed collection never replaces the last good one."""
+    usage = await asyncio.to_thread(collect_usage)
+    if usage["claude"] is None and usage["codex"] is None:
+        return
+    try:
+        await client.send_packet(usage_packet(usage, user=client.creds.user_id, device_id=client.creds.device_id))
+    except (EgressRejected, Refused) as e:
+        print(f"[worker] usage not sent: {e}", file=sys.stderr)
 
 
 async def observe_day(client: CloudClient, store: SqliteStore, day: str, force: bool = False) -> str | None:
@@ -542,6 +558,7 @@ async def _poll_loop(creds: Credentials, store: SqliteStore, engine: JobEngine, 
                 if once or time.monotonic() - last_sync >= SYNC_EVERY:
                     await tend(store, engine)
                     await sync_up(client, store)
+                    await usage_up(client)
                     if stage_b():
                         await dream_up(client, store)
                     last_sync = time.monotonic()

@@ -369,8 +369,8 @@ def config_snapshot_packet(target: str, base_blob: str | None, text: str | None,
                    user, device_id)
 
 
-def usage_packet(usage: dict) -> dict:
-    return _packet("usage", validate(Usage, usage, "usage packet", extra="forbid"), None, None)
+def usage_packet(usage: dict, *, user: str | None = None, device_id: str | None = None) -> dict:
+    return _packet("usage", validate(Usage, usage, "usage packet", extra="forbid"), user, device_id)
 
 
 def proposal_packet(proposal_id: str, target: str, payload: dict, expires_at: str | None, *,

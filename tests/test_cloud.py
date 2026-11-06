@@ -86,6 +86,10 @@ from wisen.synthesis import agent
 from wisen.synthesis import job as synthesis_job
 from wisen.synthesis.schema import DayObservation, Reflection
 
+# The worker collects subscription usage from the Keychain, the network and
+# ~/.codex; these tests read none of it, so by default no reading is available.
+worker.collect_usage = lambda: {"collected_at": "2026-10-20T09:00:00+00:00", "claude": None, "codex": None}
+
 T0 = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
 USER, PASSWORD = "vela", "correct horse battery"
 BASE = "http://localhost"
@@ -919,11 +923,39 @@ async def check_device_job_skips_empty_day():
     print("✓ cloud: a scheduled job for a day with no sessions is skipped and says why; a Trigger runs it")
 
 
+async def check_usage_sync():
+    server = _server("usage")
+    store = get_store()
+    reading = {"collected_at": "2026-10-20T09:00:00+00:00",
+               "claude": {"five_hour_pct": 12.0, "five_hour_resets_at": "2026-10-20T13:00:00+00:00",
+                          "seven_day_pct": 40.0, "seven_day_resets_at": "2026-10-25T09:00:00+00:00"},
+               "codex": None}
+    nothing = {"collected_at": "2026-10-20T09:05:00+00:00", "claude": None, "codex": None}
+    nothing_readable = worker.collect_usage
+    async with server.browser() as browser:
+        creds = await server.device(browser)
+        assert (await browser.get("/api/usage")).json() == {}
+        try:
+            async with server.http() as http:
+                worker.collect_usage = lambda: reading
+                await worker.run(creds, store, http=http, once=True)
+                got = (await browser.get("/api/usage")).json()
+                assert got["claude"]["five_hour_pct"] == 12.0 and got["device_id"] == creds.device_id, got
+                # A pass where nothing could be read leaves the last good reading in place.
+                worker.collect_usage = lambda: nothing
+                await worker.run(creds, store, http=http, once=True)
+                assert (await browser.get("/api/usage")).json() == got
+        finally:
+            worker.collect_usage = nothing_readable
+    print("✓ cloud: the worker uploads the subscription usage each pass, and keeps the last reading when none can be read")
+
+
 async def main():
     await check_login()
     await check_pairing()
     await check_revoke()
     await check_result_sync_and_push()
+    await check_usage_sync()
     await check_approvals()
     await check_publish()
     await check_restart_mid_lease()
