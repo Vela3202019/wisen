@@ -603,7 +603,13 @@ solved rose 18%" shapes what it proposes next.
 and the two headline costs, tokens per problem solved and human-in-the-loop
 turns per PR, per day, with a marker at each merged Gardener change, labelled
 with its file and verdict. A climb shows as the lines stepping down after
-markers.
+markers. Hovering or keyboard-focusing a chart snaps a vertical guide line to
+the nearest day and shows a tooltip with that day's value and the counts it is
+computed from — for example "3 corrections / 120 user turns × 100" with the
+detectors that fired, or "1.2M tokens / 7 problems solved"; human-in-the-loop
+turns per PR is shown as the mean of that day's PR-landed problems. A day with
+a merged Gardener change also shows its target and verdict. Left/right arrow
+keys step through days; Escape or blur clears the line.
 
 ### 5.5 Step 5 decisions in practice
 
