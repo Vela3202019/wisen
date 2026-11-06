@@ -309,7 +309,7 @@ def _claude_reading(store: SqliteStore, now: datetime) -> dict | None:
     except ClaudeThrottled as e:
         next_at = now + timedelta(seconds=max(CLAUDE_INTERVAL.total_seconds(), e.retry_after))
         return None
-    except Exception:
+    except Exception:  # noqa: BLE001 - any unexpected error still records the window and fails to None
         return None
     finally:
         _set(store, "usage:claude:next_at", next_at.isoformat())

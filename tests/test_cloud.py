@@ -82,10 +82,10 @@ from wisen.packets import (
 )
 from wisen.proposals import Proposals
 from wisen.store import SqliteStore, get_store
-from wisen.usage import ClaudeThrottled
 from wisen.synthesis import agent
 from wisen.synthesis import job as synthesis_job
 from wisen.synthesis.schema import DayObservation, Reflection
+from wisen.usage import ClaudeThrottled
 
 # The worker collects subscription usage from the Keychain, the network and
 # ~/.codex; these tests read none of it, so by default no reading is available.
@@ -974,7 +974,6 @@ async def check_usage_debounce():
         def failing_claude():
             nonlocal calls
             calls += 1
-            return None
 
         worker.claude_usage, worker.codex_usage = failing_claude, lambda: None
         for _ in range(3):

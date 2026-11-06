@@ -106,7 +106,7 @@ def claude_usage() -> dict | None:
         }
     except ClaudeThrottled:
         raise
-    except Exception:
+    except Exception:  # noqa: BLE001 - one source's failure never discards the other
         return None
 
 
@@ -153,7 +153,7 @@ def codex_usage() -> dict | None:
                         out["weekly_resets_at"] = iso(win.get("resets_at"))
                 return out
         return None
-    except Exception:
+    except Exception:  # noqa: BLE001 - one source's failure never discards the other
         return None
 
 
