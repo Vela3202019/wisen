@@ -680,7 +680,7 @@ stateDiagram-v2
     rejected --> [*]
     expired --> [*]
     superseded --> [*]
-    failed --> [*]
+    failed --> proposed: reset (human-requested retry)
     abandoned --> [*]
     kept --> [*]
 ```
@@ -688,7 +688,9 @@ stateDiagram-v2
 Rules:
 
 - **One function moves a proposal**: `transition(proposal_id, from_state,
-  to_state, request_id, actor)`. It runs a compare-and-set
+  to_state, request_id, actor)` for the forward moves above. `reset()` is the
+  one backward move (`failed` → `proposed`) and is not in `TRANSITIONS`. Each
+  runs a compare-and-set
   (`UPDATE … WHERE id = ? AND state = ?`) and appends a row to an audit table in
   the same transaction. An illegal or stale transition changes nothing.
 - **Decisions are idempotent.** Every decision carries a `request_id`. The same

@@ -31,6 +31,7 @@ was based on, so gh is asked instead and the local branch is ignored: merged,
 closed unmerged (abandoned), or still open; if gh cannot answer, the pass
 reports nothing for it.
 """
+import hashlib
 import json
 import re
 import sqlite3
@@ -169,11 +170,28 @@ def apply_redacted(real: str, diff: str) -> str | None:
     return "".join(out + old[pos:])
 
 
+def attempt(store: SqliteStore, proposal_id: str) -> str | None:
+    """The request id of the approval being acted on (None: no approval on
+    record). A proposal that was reset and approved again is a new attempt, so
+    its moves carry new request ids; a resend of the same attempt still hits
+    its receipt."""
+    with closing(store._connect()) as conn:
+        memo = conn.execute("SELECT request_id FROM proposal_decisions WHERE user_id = ? AND proposal_id = ?",
+                            (store.user_id, proposal_id)).fetchone()
+    return memo["request_id"] if memo else None
+
+
+def move_id(kind: str, store: SqliteStore, proposal_id: str) -> str:
+    """The request id of the applier's move for this attempt, in the packet
+    format `<kind>:<32 hex>` (wisen/packets.py)."""
+    token = f"{proposal_id}:{attempt(store, proposal_id)}"
+    return f"{kind}:{hashlib.sha256(token.encode()).hexdigest()[:32]}"
+
+
 def record_applied(store: SqliteStore, proposals: Proposals, proposal_id: str, info: dict, made: dict) -> None:
-    now = ts(proposals.clock())
+    now, request_id = ts(proposals.clock()), move_id("applied", store, proposal_id)
     with store.transaction() as conn:
-        proposals.transition_in(conn, proposal_id, "approved", "applied", f"applied:{proposal_id}", "applier",
-                                info["branch"])
+        proposals.transition_in(conn, proposal_id, "approved", "applied", request_id, "applier", info["branch"])
         conn.execute(
             "INSERT INTO proposal_git (proposal_id, user_id, git_dir, work_tree, path, branch, base_commit, "
             "commit_sha, new_blob, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -184,9 +202,9 @@ def record_applied(store: SqliteStore, proposals: Proposals, proposal_id: str, i
 
 
 def record_failed(proposals: Proposals, proposal_id: str, reason: str) -> None:
+    request_id = move_id("failed", proposals.store, proposal_id)
     with proposals.store.transaction() as conn:
-        proposals.transition_in(conn, proposal_id, "approved", "failed", f"failed:{proposal_id}", "applier",
-                                reason[:1000])
+        proposals.transition_in(conn, proposal_id, "approved", "failed", request_id, "applier", reason[:1000])
 
 
 # ── merge detection ───────────────────────────────────────────────────────────

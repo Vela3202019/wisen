@@ -24,6 +24,7 @@ Covers the step-4 checks that do not need the box:
 No network or model needed. Run: python3 -m tests.test_cloud
 """
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -362,7 +363,7 @@ async def check_approvals():
             # project called "wisen" exists on this laptop (tests/test_gardener.py
             # covers the branch itself).
             await worker.run(creds, store, http=http, once=True)
-            moves = ["gardener:1", "tap-0001", f"failed:{proposal.id}"]
+            moves = ["gardener:1", "tap-0001", f"failed:{hashlib.sha256(f'{proposal.id}:tap-0001'.encode()).hexdigest()[:32]}"]
             assert (await local.get(proposal.id)).state == "failed"
             assert [e.request_id for e in await local.history(proposal.id)] == moves
             # The next pass uploads the failure; the change log then shows
