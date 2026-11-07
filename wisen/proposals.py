@@ -36,7 +36,8 @@ from typing import Any
 from wisen.jobs import JobContext, insert_job, ts
 from wisen.store import SqliteStore
 
-# The one place allowed moves are defined. States with no entry are final.
+# The one place allowed moves are defined. States with no entry are final,
+# except `failed`, which only `reset()` returns to `proposed`.
 TRANSITIONS: dict[str, frozenset[str]] = {
     "proposed": frozenset({"approved", "rejected", "expired", "superseded"}),
     "approved": frozenset({"applied", "failed"}),

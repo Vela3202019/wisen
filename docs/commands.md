@@ -9,7 +9,7 @@ wisen serve                     # POST /synthesize, GET /reflections, POST /chat
 wisen export [dir]              # dump reflections to JSON files
 wisen egress                    # what passed the egress gate today
 wisen eval <args>               # case bank: mine, list, review, metrics, replay, compare
-wisen gardener list|approve|reject|status|run  # Gardener proposals when not paired
+wisen gardener list|approve|reject|status|run|reset  # Gardener proposals when not paired
 wisen worker                    # laptop daemon: syncs with a paired server (outbound only);
                                 #   unpaired, runs local Gardener jobs only
 wisen cloud pair https://<host> # pair this laptop with your wisen server
