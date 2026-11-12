@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- Source for social-preview.png (the GitHub social preview, 1280x640).
+     Re-render from the repo root:
+     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars \
+       --force-device-scale-factor=1 --window-size=1280,640 \
+       --screenshot=docs/assets/social-preview.png docs/assets/social-preview.html -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>wisen social preview</title>
+<style>
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 0 96px; box-sizing: border-box;
+  }
+  .brand { display: flex; align-items: center; gap: 28px; }
+  .brand img { width: 120px; height: 120px; }
+  .brand h1 { margin: 0; font-size: 104px; font-weight: 700; letter-spacing: -2px; }
+  .hook { margin: 40px 0 0; font-size: 38px; line-height: 1.35; font-weight: 500; max-width: 1090px; text-wrap: balance; }
+  .hook code { font-family: ui-monospace, Menlo, monospace; font-size: 34px; color: #3fb950; }
+  .agents { margin-top: 56px; display: flex; gap: 40px; align-items: center; }
+  .agent { display: flex; align-items: center; gap: 12px; font-size: 26px; color: #8b949e; }
+  .agent img { width: 40px; height: 40px; }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <img src="logo.svg" alt="">
+    <h1>wisen</h1>
+  </div>
+  <p class="hook">Your coding agents repeat mistakes you already corrected.<br>
+    wisen turns those corrections into <code>CLAUDE.md</code> and <code>AGENTS.md</code> fixes you approve.</p>
+  <div class="agents">
+    <span class="agent"><img src="agents/claude-code.svg" alt="">Claude Code</span>
+    <span class="agent"><img src="agents/codex.svg" alt="">Codex</span>
+    <span class="agent"><img src="agents/cursor.svg" alt="">Cursor</span>
+    <span class="agent"><img src="agents/gemini-cli.svg" alt="">Gemini CLI</span>
+    <span class="agent"><img src="agents/opencode.svg" alt="">opencode</span>
+    <span class="agent"><img src="agents/pi.svg" alt="">Pi</span>
+  </div>
+</body>
+</html>
