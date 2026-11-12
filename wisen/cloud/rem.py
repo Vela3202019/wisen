@@ -51,13 +51,6 @@ def merge_observations(notes: list[tuple[str, dict]]) -> DayObservation:
     return DayObservation.model_validate(merged)
 
 
-async def _reflect(observation: DayObservation, yesterday: dict | None, past: list[dict], day: str) -> Reflection:
-    try:
-        return await agent.reflect(observation, yesterday, past, day, get_model())
-    except SystemExit as e:   # the CLI adapter's "claude not installed": fail the job, not the server
-        raise RuntimeError(str(e)) from None
-
-
 async def _history(store: SqliteStore, day: str) -> tuple[dict | None, list[dict]]:
     """Yesterday's reflection and the past 7 days, from the server's own record."""
     past = await store.list_reflections(limit=7, before=day)
@@ -105,7 +98,8 @@ async def _save(ctx: JobContext, day: str, notes: list[tuple[str, dict, str]], k
     store = ctx.engine.store
     observation = merge_observations([(device, note) for device, note, _ in notes])
     yesterday, past = await _history(store, day)
-    reflection = await ctx.step(f"synthesize:{key}", lambda: _reflect(observation, yesterday, past, day),
+    reflection = await ctx.step(f"synthesize:{key}",
+                                lambda: agent.reflect(observation, yesterday, past, day, get_model()),
                                 replay_safe=True, output=Reflection)
     # Stamped with the newest note it reflects on, which `skip_reason` compares with.
     await ctx.step(f"save:{key}", lambda: store.upsert_reflection(

@@ -279,7 +279,7 @@ async def garden_job(ctx: JobContext, args: dict) -> dict:
     if len(await recent_reflections(store, day)) < 2:
         return {"date": day, "proposals": 0, "skipped": "only one reflection so far"}
     if problem := model_problem():
-        return {"date": day, "proposals": 0, "skipped": problem}
+        return {"date": day, "proposals": 0, "skipped": problem, "needs_key": True}
     run = await ctx.step("propose", lambda: propose(store, day), replay_safe=True, output=GardenerRun)
     replays = {}
     for d in run.drafts:

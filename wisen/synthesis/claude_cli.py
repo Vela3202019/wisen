@@ -25,6 +25,7 @@ from typing import TypeVar
 from pydantic import BaseModel, ValidationError
 
 from wisen import config
+from wisen.jobs import PermanentFailure
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -162,15 +163,15 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
                 check=False,
             )
         except FileNotFoundError:
-            raise SystemExit(_NOT_INSTALLED) from None
+            raise PermanentFailure(_NOT_INSTALLED) from None
         except subprocess.TimeoutExpired as e:
             last_err = e
             continue
         if proc.returncode != 0:
             # A missing or logged-out CLI fails every retry the same way: say so
-            # in one line, and fail the run instead of retrying it.
+            # in one line, and fail the job instead of retrying it.
             if (problem := _probe_cli()) in _PERMANENT:
-                raise SystemExit(problem)
+                raise PermanentFailure(problem)
             last_err = RuntimeError(f"claude -p exited {proc.returncode}: {proc.stderr[:500]}")
             continue
         try:
