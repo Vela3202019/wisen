@@ -43,6 +43,8 @@ async def _synthesize(date: str, force: bool) -> None:
     garden = await garden_day(date)
     if garden.state != "succeeded":
         print(f"gardener failed: {garden.error}", file=sys.stderr)
+    elif skipped := garden.result.get("skipped"):
+        print(skipped)
     elif garden.result["proposals"]:
         print(f"gardener: {garden.result['proposals']} proposals waiting (wisen gardener list)")
 
@@ -200,7 +202,7 @@ async def _gardener(args) -> None:
         job = await garden_day(day)
         if job.state != "succeeded":
             raise SystemExit(f"gardener failed: {job.error}")
-        print(f"{job.result['proposals']} proposals from {day}")
+        print(job.result.get("skipped") or f"{job.result['proposals']} proposals from {day}")
     elif args.gardener_cmd in ("approve", "reject"):
         from wisen.cloud.client import Credentials
 

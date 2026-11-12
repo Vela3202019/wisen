@@ -70,6 +70,11 @@ class StepInterrupted(Exception):
     """A step that is not safe to re-run started but never finished."""
 
 
+class PermanentFailure(Exception):
+    """A failure no retry can fix (a missing CLI, a logged-out login, a missing
+    key): the job fails at once instead of backing off and running again."""
+
+
 class _Parked(BaseException):
     """Control flow: `ctx.wait` parked the job. A BaseException, so a handler's
     `except Exception` cannot swallow it."""
@@ -290,6 +295,17 @@ class JobEngine:
     async def get(self, job_id: str) -> Job | None:
         return await asyncio.to_thread(self._get, job_id)
 
+    def _by_request_id(self, request_id: str) -> Job | None:
+        with closing(self.store._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE user_id = ? AND request_id = ?", (self._uid, request_id)
+            ).fetchone()
+        return Job.from_row(row) if row else None
+
+    async def by_request_id(self, request_id: str) -> Job | None:
+        """The job recorded for `request_id`, if any."""
+        return await asyncio.to_thread(self._by_request_id, request_id)
+
     def wake(self) -> None:
         """Recheck the queue now: a caller wrote a job with `insert_job` in
         its own transaction, so `enqueue` did not wake the worker."""
@@ -436,6 +452,8 @@ class JobEngine:
             return
         except LeaseLost:
             return  # another worker owns the job now and decides what happens next
+        except PermanentFailure as e:
+            await asyncio.to_thread(self._finish, job, "failed", None, _describe(e))
         except StepInterrupted as e:
             await asyncio.to_thread(self._finish, job, "failed", None, _describe(e))
         except Exception as e:  # noqa: BLE001 - any handler error is retried, then recorded

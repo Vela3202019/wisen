@@ -10,15 +10,17 @@ providers (pydantic-ai model strings):
 Any other provider pydantic-ai supports works the same way — pass its model
 string and set that provider's API key env var.
 
-Synthesis uses the same model by default; set WISEN_SYNTH_MODEL=claude-cli:<model>
-to run it on a Claude subscription via the Claude Code CLI — see synthesis/claude_cli.py.
+Synthesis does not use this model by default: it runs on a Claude Pro/Max
+subscription via the Claude Code CLI (WISEN_SYNTH_MODEL=claude-cli:sonnet) — see
+synthesis/claude_cli.py. WISEN_SYNTH_MODEL=api runs it on this model instead.
 
 A stage-B server's chat (wisen/cloud) runs on DeepSeek instead: WISEN_CHAT_MODEL
 names the DeepSeek model, and DEEPSEEK_API_KEY is its key.
 
 Note: Claude Pro/Max subscription auth only works inside the Claude Code CLI —
-it cannot back an API integration like this one. Anthropic access here
-requires an API key.
+it cannot back the tool-using chat and Gardener agents built on this model.
+Anthropic access here requires an API key. Without that key the Gardener and
+chat skip with one line (`model_problem`) instead of failing.
 """
 import os
 
@@ -29,6 +31,33 @@ from wisen import config
 load_dotenv()
 
 DEFAULT_MODEL = "openai:gpt-5.6-terra"
+
+# The keys each pydantic-ai provider's model accepts; any one of them is enough.
+MODEL_KEY_ENV = {
+    "openai": ("OPENAI_API_KEY",),
+    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "anthropic": ("ANTHROPIC_API_KEY",),
+}
+
+
+def model_key_set(model: str) -> bool:
+    """Whether a key this model's provider accepts is set."""
+    return any(os.getenv(key) for key in MODEL_KEY_ENV.get(model.split(":", 1)[0], ()))
+
+
+def model_problem(model: str | None = None) -> str | None:
+    """Why chat and the Gardener cannot run, as one line; None when the
+    provider's API key is set."""
+    name = model or get_model()
+    if model_key_set(name):
+        return None
+    provider = name.split(":", 1)[0]
+    keys = MODEL_KEY_ENV.get(provider)
+    if keys is None:
+        return None
+    return (f"Gardener and chat need an API key for {provider}: set {' or '.join(keys)} "
+            "(or another WISEN_MODEL) to enable them")
 
 
 def get_model() -> str:

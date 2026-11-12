@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from wisen.chat.agent import stream_chat
 from wisen.jobs import Job, get_engine
 from wisen.store import get_store
+from wisen.synthesis import claude_cli
 from wisen.synthesis.job import enqueue_day
 from wisen.synthesis.schema import Reflection
 
@@ -183,21 +184,12 @@ async def voice_token():
     return {"token": token, "url": LIVEKIT_URL, "room": room_name}
 
 
-_MODEL_KEY_ENV = {
-    "google": "GEMINI_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-}
-
-
 @app.get("/health")
 async def health():
     import asyncio
-    import os
     import sqlite3
 
-    from wisen.llm import get_model
+    from wisen.llm import get_model, model_key_set
 
     status = {"storage": False}
     try:
@@ -205,7 +197,12 @@ async def health():
     except (TimeoutError, OSError, sqlite3.Error):
         pass  # store unreachable, status already False
     model = get_model()
-    provider = model.split(":", 1)[0]
     status["model"] = model
-    status["llm_key"] = bool(os.getenv(_MODEL_KEY_ENV.get(provider, ""), ""))
+    status["llm_key"] = model_key_set(model)
+    # Synthesis on the Claude subscription needs the `claude` CLI, not a key.
+    if claude_cli.is_cli_model():
+        status["synth_model"] = claude_cli.synth_model()
+        status["claude_cli"] = await asyncio.to_thread(claude_cli.cli_problem) or "ok"
+    else:
+        status["synth_model"] = model
     return status

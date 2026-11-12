@@ -17,6 +17,13 @@ First release published to PyPI (`pipx install wisen`).
 - `wisen gardener reset` returns failed proposals to the inbox.
 - Hover and keyboard tooltips on the dashboard's hill charts.
 
+### Changed
+
+- Synthesis runs on your Claude Pro/Max subscription by default
+  (`claude-cli:sonnet`, via the Claude Code CLI). Chat and the Gardener keep
+  using `WISEN_MODEL`, and without its API key they skip with one line naming
+  the key instead of failing.
+
 ### Fixed
 
 - Plugin setup verifies without running a synthesis and never overwrites an

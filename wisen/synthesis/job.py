@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from wisen.ingestion.pipeline import ingest_all, ingest_sessions
-from wisen.jobs import Job, JobContext, get_engine
+from wisen.jobs import Job, JobContext, JobEngine, get_engine
 from wisen.llm import get_model
 from wisen.store import get_store
 from wisen.synthesis import agent
@@ -27,6 +27,23 @@ class Skipped:
     """A day the run left alone, and why."""
     date: str
     reason: str
+
+
+def _garden_request_id(date: str) -> str:
+    return f"garden:{date}"
+
+
+def _skipped_for_a_key(job: Job | None) -> bool:
+    """True for a garden job that skipped only because no API key was set:
+    that skip says nothing about the day, so the day is gardened again."""
+    return bool(job and job.result and job.result.get("needs_key"))
+
+
+async def _enqueue_garden(engine: JobEngine, date: str) -> Job:
+    request_id = _garden_request_id(date)
+    prior = await engine.by_request_id(request_id)
+    return await engine.enqueue("garden", {"date": date}, request_id=request_id,
+                                rerun=_skipped_for_a_key(prior))
 
 
 async def run_synthesis_job(ctx: JobContext, args: dict) -> dict:
@@ -47,9 +64,10 @@ async def run_synthesis_job(ctx: JobContext, args: dict) -> dict:
     # Replay-safe: the save is an upsert by date.
     await ctx.step("save", lambda: agent.save_reflection(reflection), replay_safe=True)
     # The day's Gardener run (its proposals are the day's batch); one per day,
-    # keyed by date, so a re-synthesized day does not propose again.
+    # keyed by date, so a re-synthesized day does not propose again unless its
+    # run only skipped for a missing API key.
     async def queue_garden() -> str:
-        return (await ctx.engine.enqueue("garden", {"date": date}, request_id=f"garden:{date}")).id
+        return (await _enqueue_garden(ctx.engine, date)).id
 
     await ctx.step("garden", queue_garden, replay_safe=True)
     return {"date": date}
@@ -94,7 +112,8 @@ async def synthesize_day(date: str, force: bool = False) -> Job | Skipped:
 
 
 async def garden_day(date: str) -> Job:
-    """Run the day's Gardener job (queued by its synthesis) until it is final."""
+    """Run the day's Gardener job (queued by its synthesis) until it is final.
+    A day skipped only for a missing API key is run again."""
     engine = get_engine()
-    job = await engine.enqueue("garden", {"date": date}, request_id=f"garden:{date}")
+    job = await _enqueue_garden(engine, date)
     return await engine.run_until_done(job.id)

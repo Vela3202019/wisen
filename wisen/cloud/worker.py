@@ -464,10 +464,13 @@ async def _synthesize(client: CloudClient, store: SqliteStore, args: dict) -> di
         raise SynthesisFailed(job.error)
     # The day's Gardener batch, so it arrives with the morning reflection.
     garden = await garden_day(args["date"])
+    skipped = None
     if garden.state != "succeeded":
         print(f"[worker] gardener failed for {args['date']}: {garden.error}", file=sys.stderr)
+    else:
+        skipped = garden.result.get("skipped")
     await sync_up(client, store)
-    return None
+    return {"skipped": skipped} if skipped else None
 
 
 async def _measure(client: CloudClient, store: SqliteStore, args: dict) -> None:

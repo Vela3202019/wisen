@@ -29,7 +29,7 @@ from typing import get_origin
 
 from wisen.gardener import loop
 from wisen.jobs import JobContext, ts
-from wisen.llm import get_model
+from wisen.llm import get_model, model_problem
 from wisen.store import SqliteStore
 from wisen.synthesis import agent
 from wisen.synthesis.schema import DayObservation, Reflection
@@ -49,13 +49,6 @@ def merge_observations(notes: list[tuple[str, dict]]) -> DayObservation:
         else:
             merged[name] = "\n\n".join(f"[{device}] {note[name]}" for device, note in notes if note[name])
     return DayObservation.model_validate(merged)
-
-
-async def _reflect(observation: DayObservation, yesterday: dict | None, past: list[dict], day: str) -> Reflection:
-    try:
-        return await agent.reflect(observation, yesterday, past, day, get_model())
-    except SystemExit as e:   # the CLI adapter's "claude not installed": fail the job, not the server
-        raise RuntimeError(str(e)) from None
 
 
 async def _history(store: SqliteStore, day: str) -> tuple[dict | None, list[dict]]:
@@ -105,7 +98,8 @@ async def _save(ctx: JobContext, day: str, notes: list[tuple[str, dict, str]], k
     store = ctx.engine.store
     observation = merge_observations([(device, note) for device, note, _ in notes])
     yesterday, past = await _history(store, day)
-    reflection = await ctx.step(f"synthesize:{key}", lambda: _reflect(observation, yesterday, past, day),
+    reflection = await ctx.step(f"synthesize:{key}",
+                                lambda: agent.reflect(observation, yesterday, past, day, get_model()),
                                 replay_safe=True, output=Reflection)
     # Stamped with the newest note it reflects on, which `skip_reason` compares with.
     await ctx.step(f"save:{key}", lambda: store.upsert_reflection(
@@ -128,6 +122,8 @@ async def garden_day(mailbox, user: str, day: str) -> dict:
         return {"proposals": 0}
     if len(await loop.recent_reflections(store, day)) < 2:
         return {"proposals": 0, "gardener": "only one reflection so far"}
+    if problem := model_problem():
+        return {"proposals": 0, "gardener": problem}
     try:
         run = await loop.propose(store, day, await asyncio.to_thread(mailbox.snapshot, user))
         ids = await asyncio.to_thread(loop.record_run, store, mailbox.proposals(user), run, {}, day,

@@ -28,9 +28,9 @@ holds reflections (plus chat and voice session records).
   anything else.
 
 Pick the provider with `model` and `synth_model`. That provider's data terms
-apply to these excerpts. If `synth_model` is `claude-cli:…`, synthesis runs
-through the Claude Code CLI and sends the same excerpts to Anthropic under
-your own Claude account. The terms of that account apply.
+apply to these excerpts. Synthesis defaults to `synth_model = "claude-cli:…"`,
+which runs through the Claude Code CLI and sends the same excerpts to Anthropic
+under your own Claude account; the terms of that account apply.
 
 **3. Cloud: derived results only, which can include short quotes.** Everything
 bound for a server goes through one egress gate (`wisen/egress.py`) as a typed

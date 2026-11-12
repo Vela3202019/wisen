@@ -3,9 +3,10 @@ Structured-output LLM call routed through the Claude Code CLI (`claude -p`).
 
 Lets synthesis run on a Claude subscription model with no ANTHROPIC_API_KEY and no
 per-token API billing — subscription auth only works inside the CLI, not through
-pydantic-ai (see llm.py). Opt in with WISEN_SYNTH_MODEL=claude-cli:<model> (requires
-the `claude` CLI installed and logged in); by default synthesis runs on [model].model
-like everything else. Only synthesis reads this var; chat is unaffected.
+pydantic-ai (see llm.py). This is the default (WISEN_SYNTH_MODEL=claude-cli:sonnet;
+requires the `claude` CLI installed and logged in); WISEN_SYNTH_MODEL=api runs
+synthesis on [model].model instead. Only synthesis reads this var; chat and the
+Gardener use tools, which `claude -p` does not serve, so they stay on [model].model.
 
 `claude -p` is an agent, not a single-shot structured-output API: run inside the project
 it loads MCP servers/skills/tools and wanders instead of answering. So we run it in a
@@ -18,18 +19,20 @@ import json
 import os
 import re
 import subprocess
+import time
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from wisen import config
+from wisen.jobs import PermanentFailure
 
 T = TypeVar("T", bound=BaseModel)
 
 CLI_PREFIX = "claude-cli:"
-# Default: synthesis runs on the same API model as chat ([model].model). Set
-# WISEN_SYNTH_MODEL=claude-cli:<model> to route it through a Claude subscription.
-DEFAULT_SYNTH_MODEL = "api"
+# Default: synthesis runs on the Claude subscription. `sonnet` is the CLI's alias
+# for its latest Sonnet. WISEN_SYNTH_MODEL=api runs it on [model].model instead.
+DEFAULT_SYNTH_MODEL = "claude-cli:sonnet"
 _TIMEOUT_S = 300
 # Disable agentic tools so the model answers directly instead of exploring.
 _DISALLOWED = (
@@ -38,16 +41,73 @@ _DISALLOWED = (
 )
 
 
-def _synth_model() -> str:
+_NOT_INSTALLED = (
+    "synthesis runs on your Claude subscription through the `claude` CLI, which is not installed: "
+    "install Claude Code and run `claude auth login`, or set synth_model = \"api\" to use [model].model"
+)
+_NOT_LOGGED_IN = (
+    "synthesis runs on your Claude subscription through the `claude` CLI, which is not logged in: "
+    "run `claude auth login`, or set synth_model = \"api\" to use [model].model"
+)
+_COULD_NOT_CHECK = (
+    "could not check the `claude` CLI (`claude auth status --json` gave no login state): "
+    "synthesis needs it installed and logged in, or set synth_model = \"api\" to use [model].model"
+)
+# Misconfigurations: every run fails the same way, so they are not retried.
+_PERMANENT = (_NOT_INSTALLED, _NOT_LOGGED_IN)
+_PROBLEM_TTL_S = 60.0
+_problem_cache: tuple[float, str | None] | None = None
+
+
+def synth_model() -> str:
     return config.get("model", "synth_model", "WISEN_SYNTH_MODEL", DEFAULT_SYNTH_MODEL)
 
 
 def is_cli_model() -> bool:
-    return _synth_model().startswith(CLI_PREFIX)
+    return synth_model().startswith(CLI_PREFIX)
 
 
 def _model_name() -> str:
-    return _synth_model().split(CLI_PREFIX, 1)[-1].strip()
+    return synth_model().split(CLI_PREFIX, 1)[-1].strip()
+
+
+def _cli_env() -> dict[str, str]:
+    """The environment for `claude`, without ANTHROPIC_API_KEY: with it set the CLI
+    bills the API, so wisen always leaves it out and the subscription login is used."""
+    return {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+
+
+def _probe_cli() -> str | None:
+    """Why the `claude` CLI cannot run synthesis, as one line; None when it is
+    installed and logged in."""
+    try:
+        proc = subprocess.run(
+            ["claude", "auth", "status", "--json"], capture_output=True, text=True,
+            env=_cli_env(), timeout=30, check=False,
+        )
+    except FileNotFoundError:
+        return _NOT_INSTALLED
+    except (OSError, subprocess.TimeoutExpired):
+        return _COULD_NOT_CHECK
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return _COULD_NOT_CHECK
+    if isinstance(payload, dict):
+        if payload.get("loggedIn") is True:
+            return None
+        if payload.get("loggedIn") is False:
+            return _NOT_LOGGED_IN
+    return _COULD_NOT_CHECK
+
+
+def cli_problem() -> str | None:
+    """`_probe_cli()`, cached for a minute: `GET /health` asks on every request
+    and each probe spawns the CLI."""
+    global _problem_cache
+    if _problem_cache is None or time.monotonic() - _problem_cache[0] >= _PROBLEM_TTL_S:
+        _problem_cache = (time.monotonic(), _probe_cli())
+    return _problem_cache[1]
 
 
 def _extract_json_object(text: str) -> str:
@@ -90,8 +150,7 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         "--output-format", "json",
     ]
-    # Scrub the API key so the CLI always uses subscription auth, never API billing.
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    env = _cli_env()
     cwd = config.cli_cwd()
     cwd.mkdir(parents=True, exist_ok=True)
 
@@ -104,15 +163,15 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
                 check=False,
             )
         except FileNotFoundError:
-            raise SystemExit(
-                "`claude` CLI not found but synthesis is set to claude-cli. "
-                "Install Claude Code and log in, or unset WISEN_SYNTH_MODEL "
-                "(or set it to \"api\") to synthesize on the chat model instead."
-            )
+            raise PermanentFailure(_NOT_INSTALLED) from None
         except subprocess.TimeoutExpired as e:
             last_err = e
             continue
         if proc.returncode != 0:
+            # A missing or logged-out CLI fails every retry the same way: say so
+            # in one line, and fail the job instead of retrying it.
+            if (problem := _probe_cli()) in _PERMANENT:
+                raise PermanentFailure(problem)
             last_err = RuntimeError(f"claude -p exited {proc.returncode}: {proc.stderr[:500]}")
             continue
         try:
