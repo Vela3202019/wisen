@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,8 +7,23 @@ name = "wisen"
 version = "0.1.0"
 description = "A continuous-learning harness for coding agents: it learns from your real agent sessions with a private daily reflection, a chat you can ask about your work, and instruction files that keep improving as your agents work"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
+keywords = ["coding-agents", "claude-code", "codex", "llm", "reflection", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
 dependencies = [
     "httpx>=0.27",
     "pydantic>=2.12",
@@ -28,6 +43,9 @@ wisen = "wisen.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Vela3202019/wisen"
+Repository = "https://github.com/Vela3202019/wisen"
+Issues = "https://github.com/Vela3202019/wisen/issues"
+Changelog = "https://github.com/Vela3202019/wisen/releases"
 
 [tool.ruff.lint]
 ignore = ["E731", "E741"]

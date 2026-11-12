@@ -72,3 +72,5 @@ machine.
   `chore`, …). One logical change per commit.
 - **Changelog**: add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md)
   for any user-facing change.
+
+Releases: see [docs/releasing.md](docs/releasing.md) for the tag-to-PyPI pipeline.
