@@ -147,8 +147,9 @@ The full pipeline, with a diagram and a map of the code, is in
   (wisen does not copy them), the SQLite file and your API keys.
 - **Goes to the model provider you pick:** excerpts of the day's sessions
   (each turn cut to 400 characters, and a turn can include tool output), up to 20 config
-  files, commit messages, and chat search results. With `claude-cli:…`
-  synthesis, that provider is Anthropic under your own account. Voice sends
+  files, commit messages, and chat search results. Synthesis defaults to
+  `claude-cli:…`, which sends them to Anthropic under your own Claude account;
+  `synth_model = "api"` sends them to `model`'s provider instead. Voice sends
   your speech to Google's Gemini.
 - **Goes to your own server, if you pair one:** derived results, which can
   quote short pieces of your sessions; in stage B also the Observer's notes

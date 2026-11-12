@@ -224,9 +224,10 @@ What each job needs:
      on the owner's box) reads your own `~/.claude` login, which `claude`
      itself keeps there; it sets no `ProtectHome`, and its `PATH` includes
      `~/.local/bin`.
-   - An expired login fails the day's synthesis job with the CLI's
-     "Failed to authenticate" message (the job retries, then shows as
-     failed); log in again, or set `WISEN_SYNTH_MODEL=api`.
+   - A missing or logged-out CLI fails the day's synthesis job at once, in
+     one line naming the problem (`… is not installed` / `… is not logged
+     in`), instead of retrying it; install the CLI, run `claude auth login`
+     as the service's user, or set `WISEN_SYNTH_MODEL=api`.
 3. Restart the service. `curl https://<host>/health` shows `"stage": "b"`,
    `"synthesis": "claude-cli"` and `"model_key": true`.
 4. On each laptop: `[cloud] stage = "b"` in `~/.wisen/config.toml` (or

@@ -14,11 +14,11 @@ The three that matter:
 - **`model`** (`WISEN_MODEL`): chat and Gardener model, any pydantic-ai model
   string. They use tools, which the Claude Code CLI does not serve, so set
   that provider's API key: `openai:*` needs `OPENAI_API_KEY`, `google:*`
-  needs `GEMINI_API_KEY`, `deepseek:*` needs `DEEPSEEK_API_KEY`,
-  `anthropic:*` needs `ANTHROPIC_API_KEY`. Without that key the nightly
-  synthesis still saves the reflection: the Gardener and chat skip with one
-  line naming the key, and `wisen gardener run <date>` runs that day's
-  Gardener once the key is set. Running them on the subscription is coming
-  next.
+  needs `GEMINI_API_KEY` or `GOOGLE_API_KEY`, `deepseek:*` needs
+  `DEEPSEEK_API_KEY`, `anthropic:*` needs `ANTHROPIC_API_KEY`. Without that
+  key the nightly synthesis still saves the reflection: the Gardener and chat
+  skip with one line naming the key, and `wisen gardener run <date>` runs that
+  day's Gardener once the key is set. Running them on the subscription is
+  coming next.
 - **`[paths]`**: where your agents' dot-dirs and git repos live. Point
   `root_dir` at a synced copy to reflect on another machine.

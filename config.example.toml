@@ -14,7 +14,8 @@
 # pydantic-ai model string for chat and the Gardener (WISEN_MODEL). These use
 # tools, which the Claude Code CLI does not serve, so they need an API key:
 # openai:* needs OPENAI_API_KEY, deepseek:* needs DEEPSEEK_API_KEY,
-# google:* needs GEMINI_API_KEY, anthropic:* needs ANTHROPIC_API_KEY.
+# google:* needs GEMINI_API_KEY (or GOOGLE_API_KEY),
+# anthropic:* needs ANTHROPIC_API_KEY.
 # Without it the synthesis still saves its reflection; the Gardener and chat
 # skip with one line naming the key (running them on the subscription is next).
 # Any other pydantic-ai provider works the same way. Examples:
