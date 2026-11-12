@@ -6,17 +6,50 @@ import asyncio
 import json
 import os
 import subprocess
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 from wisen import config
+from wisen.llm import model_problem
 from wisen.synthesis import claude_cli
 from wisen.synthesis.claude_cli import _extract_json_object, _model_name, _parse_result
 from wisen.synthesis.schema import DayObservation
 
-# No ~/.wisen/config.toml: the defaults below are the built-in ones.
-config.CONFIG_PATH = Path("/nonexistent/wisen-config.toml")
-config._config.cache_clear()
+
+@contextmanager
+def _env(**values):
+    """Set these env vars for the block (None removes them), then put back what
+    was there: these tests run in-process, and a developer's shell exports
+    leak into every later test's subprocesses."""
+    saved = {k: os.environ.get(k) for k in values}
+    try:
+        for k, v in values.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        yield
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+@contextmanager
+def _no_config():
+    """The built-in defaults, not this developer's ~/.wisen/config.toml."""
+    saved = config.CONFIG_PATH
+    config.CONFIG_PATH = Path("/nonexistent/wisen-config.toml")
+    config._config.cache_clear()
+    try:
+        yield
+    finally:
+        config.CONFIG_PATH = saved
+        config._config.cache_clear()
 
 
 def _valid_observation() -> dict:
@@ -94,23 +127,21 @@ def test_extract_no_json():
 
 
 def test_model_name_strips_prefix():
-    import os
-    os.environ["WISEN_SYNTH_MODEL"] = "claude-cli:claude-sonnet-4-6"
-    assert _model_name() == "claude-sonnet-4-6"
+    with _env(WISEN_SYNTH_MODEL="claude-cli:claude-sonnet-4-6"):
+        assert _model_name() == "claude-sonnet-4-6"
     print("✓ model_name: strips claude-cli: prefix")
 
 
 def test_default_is_subscription():
-    os.environ.pop("WISEN_SYNTH_MODEL", None)
-    assert claude_cli.synth_model() == "claude-cli:sonnet"
-    assert claude_cli.is_cli_model() and _model_name() == "sonnet"
-    os.environ["WISEN_SYNTH_MODEL"] = "api"
-    assert not claude_cli.is_cli_model()
-    os.environ.pop("WISEN_SYNTH_MODEL")
+    with _no_config(), _env(WISEN_SYNTH_MODEL=None):
+        assert claude_cli.synth_model() == "claude-cli:sonnet"
+        assert claude_cli.is_cli_model() and _model_name() == "sonnet"
+    with _env(WISEN_SYNTH_MODEL="api"):
+        assert not claude_cli.is_cli_model()
     print("✓ default: synthesis runs on claude-cli:sonnet; WISEN_SYNTH_MODEL=api opts out")
 
 
-def _fake_cli(*, installed=True, logged_in=True, p_rc=0, calls=None):
+def _fake_cli(*, installed=True, logged_in=True, p_rc=0, calls=None, auth_stdout=None):
     """Stand-in for subprocess.run: `claude auth status` and `claude -p`."""
     def run(cmd, **kw):
         if calls is not None:
@@ -118,56 +149,104 @@ def _fake_cli(*, installed=True, logged_in=True, p_rc=0, calls=None):
         if not installed:
             raise FileNotFoundError("claude")
         if cmd[1:3] == ["auth", "status"]:
-            return SimpleNamespace(returncode=0 if logged_in else 1, stdout=json.dumps({"loggedIn": logged_in}),
-                                   stderr="")
+            stdout = auth_stdout if auth_stdout is not None else json.dumps({"loggedIn": logged_in})
+            return SimpleNamespace(returncode=0 if logged_in else 1, stdout=stdout, stderr="")
         return SimpleNamespace(returncode=p_rc, stdout=_envelope(json.dumps(_valid_observation())),
                                stderr="Not logged in")
     return run
 
 
+def _raising(exc: BaseException):
+    def run(cmd, **kw):
+        raise exc
+    return run
+
+
 def test_cli_problem():
+    """One line per state: logged in, logged out, missing, and could-not-check."""
     real = subprocess.run
     calls = []
-    os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
-    try:
-        subprocess.run = _fake_cli(calls=calls)
-        assert claude_cli.cli_problem() is None
+
+    def probe(monkey) -> str | None:
+        claude_cli._problem_cache = None
+        subprocess.run = monkey
+        try:
+            return claude_cli.cli_problem()
+        finally:
+            subprocess.run = real
+
+    with _env(ANTHROPIC_API_KEY="sk-ant-test"):
+        assert probe(_fake_cli(calls=calls)) is None
         assert "ANTHROPIC_API_KEY" not in calls[0][1]  # the check sees the subscription login
-        subprocess.run = _fake_cli(logged_in=False)
-        assert "not logged in" in claude_cli.cli_problem() and "claude auth login" in claude_cli.cli_problem()
-        subprocess.run = _fake_cli(installed=False)
-        assert "not installed" in claude_cli.cli_problem()
+        line = probe(_fake_cli(logged_in=False))
+        assert "not logged in" in line and "claude auth login" in line
+        assert "not installed" in probe(_fake_cli(installed=False))
+        # A probe that could not run or said nothing about the login is not "logged out".
+        for failure in (subprocess.TimeoutExpired("claude", 30), PermissionError("claude"), OSError("claude")):
+            line = probe(_raising(failure))
+            assert "could not check" in line and "not logged in" not in line, (failure, line)
+        for garbled in ("", "not json", "null", '"logged in"', "[]", "{}"):
+            line = probe(lambda cmd, out=garbled, **kw: SimpleNamespace(returncode=0, stdout=out, stderr=""))
+            assert "could not check" in line and "not logged in" not in line, (garbled, line)
+    print("✓ cli_problem: ok when logged in; a named fix when missing or logged out; a distinct line otherwise")
+
+
+def test_cli_problem_is_cached():
+    """/health asks on every request: the probe spawns the CLI once per minute."""
+    real = subprocess.run
+    spawns = []
+    claude_cli._problem_cache = None
+    subprocess.run = _fake_cli(calls=spawns)
+    try:
+        assert claude_cli.cli_problem() is None
+        assert claude_cli.cli_problem() is None
+        assert len(spawns) == 1
     finally:
         subprocess.run = real
-        os.environ.pop("ANTHROPIC_API_KEY")
-    print("✓ cli_problem: ok when logged in; one line naming the fix when missing or logged out")
+        claude_cli._problem_cache = None
+    print("✓ cli_problem: repeated calls reuse the brief cache instead of spawning claude")
 
 
 def test_run_structured_fails_in_one_line():
+    """A missing or logged-out CLI fails at once (SystemExit, one line), not
+    through the job engine's retries; a probe that could not check retries."""
     real = subprocess.run
-    os.environ.pop("WISEN_SYNTH_MODEL", None)
     try:
-        calls = []
-        subprocess.run = _fake_cli(logged_in=False, p_rc=1, calls=calls)
-        try:
-            claude_cli.run_structured("sys", "user", DayObservation)
-        except RuntimeError as e:
-            assert "not logged in" in str(e) and "\n" not in str(e)
-        else:
-            raise AssertionError("expected RuntimeError for a logged-out CLI")
-        assert sum(c[0][1] == "-p" for c in calls) == 1  # not retried
-        subprocess.run = _fake_cli(installed=False)
-        try:
-            claude_cli.run_structured("sys", "user", DayObservation)
-        except RuntimeError as e:
-            assert "not installed" in str(e)
-        else:
-            raise AssertionError("expected RuntimeError for a missing CLI")
-        subprocess.run = _fake_cli()
-        assert claude_cli.run_structured("sys", "user", DayObservation).topics_raw == ["synthesis", "cli adapter"]
+        with _env(WISEN_SYNTH_MODEL=None):
+            calls = []
+            subprocess.run = _fake_cli(logged_in=False, p_rc=1, calls=calls)
+            try:
+                claude_cli.run_structured("sys", "user", DayObservation)
+            except SystemExit as e:
+                assert "not logged in" in str(e) and "\n" not in str(e)
+            else:
+                raise AssertionError("expected SystemExit for a logged-out CLI")
+            assert sum(c[0][1] == "-p" for c in calls) == 1  # not retried
+
+            subprocess.run = _fake_cli(installed=False)
+            try:
+                claude_cli.run_structured("sys", "user", DayObservation)
+            except SystemExit as e:
+                assert "not installed" in str(e)
+            else:
+                raise AssertionError("expected SystemExit for a missing CLI")
+
+            # Not a permanent state: two attempts, then the CLI's own stderr.
+            calls = []
+            subprocess.run = _fake_cli(p_rc=1, calls=calls, auth_stdout="garbled")
+            try:
+                claude_cli.run_structured("sys", "user", DayObservation)
+            except RuntimeError as e:
+                assert "exited 1" in str(e) and "could not check" not in str(e), str(e)
+            else:
+                raise AssertionError("expected RuntimeError after both attempts")
+            assert sum(c[0][1] == "-p" for c in calls) == 2  # retried once
+
+            subprocess.run = _fake_cli()
+            assert claude_cli.run_structured("sys", "user", DayObservation).topics_raw == ["synthesis", "cli adapter"]
     finally:
         subprocess.run = real
-    print("✓ run_structured: a missing or logged-out CLI fails at once, in one line")
+    print("✓ run_structured: a missing or logged-out CLI fails at once, in one line; other failures retry")
 
 
 def test_health_reports_claude_cli():
@@ -179,24 +258,64 @@ def test_health_reports_claude_cli():
 
     real_store, real_problem = main.get_store, claude_cli.cli_problem
     main.get_store = Store
-    os.environ["WISEN_MODEL"] = "openai:gpt-5.6-terra"
-    os.environ.pop("OPENAI_API_KEY", None)
-    os.environ.pop("WISEN_SYNTH_MODEL", None)
     try:
-        claude_cli.cli_problem = lambda: None
-        status = asyncio.run(main.health())
-        assert status["synth_model"] == "claude-cli:sonnet" and status["claude_cli"] == "ok"
-        assert status["llm_key"] is False  # chat's key is optional for synthesis
-        claude_cli.cli_problem = lambda: claude_cli._NOT_LOGGED_IN
-        assert asyncio.run(main.health())["claude_cli"] == claude_cli._NOT_LOGGED_IN
-        os.environ["WISEN_SYNTH_MODEL"] = "api"
-        status = asyncio.run(main.health())
-        assert status["synth_model"] == "openai:gpt-5.6-terra" and "claude_cli" not in status
+        with _no_config(), _env(WISEN_MODEL="openai:gpt-5.6-terra", OPENAI_API_KEY=None, WISEN_SYNTH_MODEL=None):
+            claude_cli.cli_problem = lambda: None
+            status = asyncio.run(main.health())
+            assert status["synth_model"] == "claude-cli:sonnet" and status["claude_cli"] == "ok"
+            assert status["llm_key"] is False  # chat's key is optional for synthesis
+            claude_cli.cli_problem = lambda: claude_cli._NOT_LOGGED_IN
+            assert asyncio.run(main.health())["claude_cli"] == claude_cli._NOT_LOGGED_IN
+            with _env(WISEN_SYNTH_MODEL="api"):
+                status = asyncio.run(main.health())
+            assert status["synth_model"] == "openai:gpt-5.6-terra" and "claude_cli" not in status
     finally:
         main.get_store, claude_cli.cli_problem = real_store, real_problem
-        os.environ.pop("WISEN_SYNTH_MODEL", None)
-        os.environ.pop("WISEN_MODEL")
     print("✓ health: a claude-cli synthesis reports the CLI's state, not an API key")
+
+
+def test_chat_skips_without_a_key():
+    """No API key for the chat/Gardener model: a chat turn answers with the one
+    line saying so, instead of failing on a missing key."""
+    from wisen.chat import agent as chat
+
+    async def stream() -> list[dict]:
+        return [e async for e in chat.stream_chat([{"role": "user", "content": "what did I ship?"}])]
+
+    with _env(WISEN_MODEL="openai:gpt-5.6-terra", OPENAI_API_KEY=None):
+        line = model_problem()
+        assert "OPENAI_API_KEY" in line and "\n" not in line, line
+        assert asyncio.run(stream()) == [{"type": "token", "data": line}]
+        assert asyncio.run(chat.answer("what did I ship?", raw_search=False)) == line
+    with _env(OPENAI_API_KEY="sk-openai-test"):
+        assert model_problem() is None
+    print("✓ chat: with no API key a turn is answered with the one line naming the key")
+
+
+def test_gardener_skips_without_a_key():
+    """The Gardener needs the same key: its job for the day succeeds with one
+    line saying why, so `wisen synthesize` still ends with the reflection."""
+    from wisen.gardener import loop
+    from wisen.jobs import JobEngine
+    from wisen.store import SqliteStore
+
+    day, before = "2026-10-19", "2026-10-18"
+    rec = {"target": "claude-md", "action": "note the model switch", "reason": "it repeats"}
+
+    async def garden():
+        store = SqliteStore(Path(tempfile.mkdtemp(prefix="wisen-nokey-")) / "garden.db", "local")
+        for d in (before, day):
+            await store.upsert_reflection({"date": d, "recommendations": [rec], "friction_points": []})
+        engine = JobEngine(store, loop.HANDLERS)
+        return await engine.run_until_done((await engine.enqueue("garden", {"date": day})).id)
+
+    with _env(WISEN_MODEL="openai:gpt-5.6-terra", OPENAI_API_KEY=None,
+              WISEN_ROOT_DIR=tempfile.mkdtemp(prefix="wisen-root-")):
+        job = asyncio.run(garden())
+        assert job.state == "succeeded", job.error
+        assert job.result == {"date": day, "proposals": 0, "skipped": model_problem()}
+        assert "OPENAI_API_KEY" in job.result["skipped"]
+    print("✓ gardener: no API key skips the run in one line naming the key; the job succeeds")
 
 
 if __name__ == "__main__":
@@ -208,6 +327,9 @@ if __name__ == "__main__":
     test_model_name_strips_prefix()
     test_default_is_subscription()
     test_cli_problem()
+    test_cli_problem_is_cached()
     test_run_structured_fails_in_one_line()
     test_health_reports_claude_cli()
+    test_chat_skips_without_a_key()
+    test_gardener_skips_without_a_key()
     print("\nall claude_cli tests passed")

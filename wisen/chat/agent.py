@@ -42,7 +42,7 @@ from pydantic_ai.settings import ModelSettings
 
 from wisen.chat.search import search_agent_configs as _search_configs
 from wisen.chat.search import search_chat_history as _search
-from wisen.llm import chat_model, get_model
+from wisen.llm import chat_model, get_model, model_problem
 from wisen.store import Store, get_store
 
 load_dotenv()
@@ -163,6 +163,8 @@ def answer_agent(raw_search: bool) -> Agent:
 
 async def answer(question: str, *, raw_search: bool) -> str:
     """Answer one question, anchored on the latest reflection like a new chat."""
+    if problem := model_problem():
+        return problem
     db = get_store()
     latest = next(iter(await db.list_reflections(limit=1)), None)
     context = latest.get("synthesis_context", "") if latest else "No reflection available yet."
@@ -332,6 +334,10 @@ async def stream_chat(
     """
     if not messages or messages[-1]["role"] != "user":
         raise ValueError("Last message must be role=user")
+
+    if problem := model_problem(chat_model() if not raw_history else get_model()):
+        yield {"type": "token", "data": problem}
+        return
 
     db = store or get_store()
 

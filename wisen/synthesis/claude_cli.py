@@ -19,6 +19,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -47,6 +48,14 @@ _NOT_LOGGED_IN = (
     "synthesis runs on your Claude subscription through the `claude` CLI, which is not logged in: "
     "run `claude auth login`, or set synth_model = \"api\" to use [model].model"
 )
+_COULD_NOT_CHECK = (
+    "could not check the `claude` CLI (`claude auth status --json` gave no login state): "
+    "synthesis needs it installed and logged in, or set synth_model = \"api\" to use [model].model"
+)
+# Misconfigurations: every run fails the same way, so they are not retried.
+_PERMANENT = (_NOT_INSTALLED, _NOT_LOGGED_IN)
+_PROBLEM_TTL_S = 60.0
+_problem_cache: tuple[float, str | None] | None = None
 
 
 def synth_model() -> str:
@@ -67,7 +76,7 @@ def _cli_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
 
-def cli_problem() -> str | None:
+def _probe_cli() -> str | None:
     """Why the `claude` CLI cannot run synthesis, as one line; None when it is
     installed and logged in."""
     try:
@@ -77,11 +86,27 @@ def cli_problem() -> str | None:
         )
     except FileNotFoundError:
         return _NOT_INSTALLED
+    except (OSError, subprocess.TimeoutExpired):
+        return _COULD_NOT_CHECK
     try:
-        logged_in = json.loads(proc.stdout).get("loggedIn") is True
+        payload = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        logged_in = False
-    return None if logged_in else _NOT_LOGGED_IN
+        return _COULD_NOT_CHECK
+    if isinstance(payload, dict):
+        if payload.get("loggedIn") is True:
+            return None
+        if payload.get("loggedIn") is False:
+            return _NOT_LOGGED_IN
+    return _COULD_NOT_CHECK
+
+
+def cli_problem() -> str | None:
+    """`_probe_cli()`, cached for a minute: `GET /health` asks on every request
+    and each probe spawns the CLI."""
+    global _problem_cache
+    if _problem_cache is None or time.monotonic() - _problem_cache[0] >= _PROBLEM_TTL_S:
+        _problem_cache = (time.monotonic(), _probe_cli())
+    return _problem_cache[1]
 
 
 def _extract_json_object(text: str) -> str:
@@ -137,14 +162,15 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
                 check=False,
             )
         except FileNotFoundError:
-            raise RuntimeError(_NOT_INSTALLED) from None
+            raise SystemExit(_NOT_INSTALLED) from None
         except subprocess.TimeoutExpired as e:
             last_err = e
             continue
         if proc.returncode != 0:
-            # A logged-out CLI fails every retry the same way: say so in one line.
-            if problem := cli_problem():
-                raise RuntimeError(problem)
+            # A missing or logged-out CLI fails every retry the same way: say so
+            # in one line, and fail the run instead of retrying it.
+            if (problem := _probe_cli()) in _PERMANENT:
+                raise SystemExit(problem)
             last_err = RuntimeError(f"claude -p exited {proc.returncode}: {proc.stderr[:500]}")
             continue
         try:

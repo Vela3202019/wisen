@@ -74,6 +74,7 @@ from wisen.cloud.push import WebPushSender
 from wisen.cloud.telegram import TelegramApi, TelegramBot
 from wisen.packets import PacketRejected, receive
 from wisen.proposals import IllegalTransition
+from wisen.synthesis import claude_cli
 
 STATIC = Path(__file__).resolve().parent.parent / "dashboard"
 COOKIE = "wisen_session"
@@ -85,9 +86,6 @@ LOGIN_WINDOW, LOGIN_TRIES = 15 * 60, 5  # per user id, per process
 # stage-B server needs the key of its WISEN_MODEL (the Gardener) and
 # DEEPSEEK_API_KEY (chat).
 MODEL_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY")
-# Stage B synthesizes on the owner's Claude subscription unless told otherwise
-# (WISEN_SYNTH_MODEL=api: the API model, WISEN_MODEL). Owner's own box, own use.
-SERVER_SYNTH_MODEL = "claude-cli:sonnet"
 
 Short = Annotated[str, StringConstraints(max_length=200)]
 Id = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
@@ -498,7 +496,7 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
               " the stage-A server makes no model calls and should not hold one")
     if stage == "b":
         if not config.get("model", "synth_model", "WISEN_SYNTH_MODEL", ""):
-            os.environ["WISEN_SYNTH_MODEL"] = SERVER_SYNTH_MODEL
+            os.environ["WISEN_SYNTH_MODEL"] = claude_cli.DEFAULT_SYNTH_MODEL
         synth = config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
         chat = config.get("model", "chat_model", "WISEN_CHAT_MODEL", "WISEN_CHAT_MODEL unset")
         # Names only: a key's value is never printed or logged.

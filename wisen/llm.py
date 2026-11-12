@@ -19,7 +19,8 @@ names the DeepSeek model, and DEEPSEEK_API_KEY is its key.
 
 Note: Claude Pro/Max subscription auth only works inside the Claude Code CLI —
 it cannot back the tool-using chat and Gardener agents built on this model.
-Anthropic access here requires an API key.
+Anthropic access here requires an API key. Without that key the Gardener and
+chat skip with one line (`model_problem`) instead of failing.
 """
 import os
 
@@ -30,6 +31,26 @@ from wisen import config
 load_dotenv()
 
 DEFAULT_MODEL = "openai:gpt-5.6-terra"
+
+# The key each pydantic-ai provider's model needs.
+MODEL_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "google": "GEMINI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
+def model_problem(model: str | None = None) -> str | None:
+    """Why chat and the Gardener cannot run, as one line; None when the
+    provider's API key is set."""
+    name = model or get_model()
+    provider = name.split(":", 1)[0]
+    key = MODEL_KEY_ENV.get(provider)
+    if key is None or os.getenv(key):
+        return None
+    return (f"Gardener and chat need an API key for {provider}: set {key} "
+            "(or another WISEN_MODEL) to enable them")
 
 
 def get_model() -> str:

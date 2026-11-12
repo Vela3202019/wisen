@@ -38,6 +38,9 @@ Prefer an API key? Set `synth_model = "api"` (see
 Chat and the Gardener's proposals use tools, which the Claude Code CLI does
 not serve, so they need one API key. The default model is
 `openai:gpt-5.6-terra`, so `OPENAI_API_KEY`; any pydantic-ai provider works.
+Without that key `wisen synthesize` still saves the day's reflection and skips
+the Gardener with one line saying which key to set, and chat answers the same
+way; the Gardener and chat on your subscription are coming next.
 
 ```bash
 git clone https://github.com/Vela3202019/wisen && cd wisen
