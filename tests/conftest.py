@@ -32,7 +32,7 @@ class ScriptItem(pytest.Item):
     def runtest(self):
         proc = subprocess.run(
             [sys.executable, "-m", f"tests.{self.path.stem}"],
-            cwd=ROOT, capture_output=True, text=True,
+            check=False, cwd=ROOT, capture_output=True, text=True,
         )
         if proc.returncode != 0:
             raise AssertionError(f"exit {proc.returncode}\n{proc.stdout}\n{proc.stderr}")
