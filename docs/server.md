@@ -57,4 +57,3 @@ later (a laptop that slept through the morning) make that day's reflection
 again. Applying an approved proposal stays on the laptop whose file it
 changes. `POST /api/chat` on the server answers questions from its
 reflections (the dashboard does not call it yet).
-

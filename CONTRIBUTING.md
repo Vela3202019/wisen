@@ -26,8 +26,8 @@ python3 -m tests.test_stage_b        # stage B: two laptops, the server reflects
 python3 -m tests.test_telegram       # Telegram bot against a fake Bot API
 ```
 
-CI runs exactly `ruff check .` plus those tests, so if they pass locally
-you're green.
+CI runs `pytest tests` on Python 3.11 and 3.12, plus the pre-commit hooks
+(`pre-commit run --all-files`). If those pass locally, you're green.
 
 The other tests read *your* real local data and are useful once you actually
 use wisen:
@@ -39,8 +39,9 @@ python3 -m tests.test_search         # chat search tools over your real history
 python3 -m tests.test_synthesis      # end-to-end: calls the LLM, writes SQLite
 ```
 
-Tests are deliberately script-style (`python3 -m tests.<name>` from the repo
-root), not a pytest suite.
+Tests are script-style (`python3 -m tests.<name>` from the repo root).
+`tests/conftest.py` lets pytest run each script as one test. `pytest` also runs
+`test_ingest` and `test_sources`, but skips `test_search` and `test_synthesis`.
 
 ## Adding a connector
 

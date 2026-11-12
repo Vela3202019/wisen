@@ -35,7 +35,7 @@ dependencies = [
 server = ["fastapi>=0.115.0", "uvicorn[standard]>=0.30.0", "certifi>=2024.0.0"]
 cloud = ["fastapi>=0.115.0", "uvicorn[standard]>=0.30.0", "pywebpush>=2.0", "cryptography>=42"]
 voice = ["livekit-agents[google]~=1.5", "livekit>=0.17"]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+dev = ["pytest>=8.0", "ruff>=0.5", "pre-commit>=3.0"]
 migrate = ["pymongo>=4.6"]
 
 [project.scripts]
