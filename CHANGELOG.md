@@ -6,6 +6,10 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-11
+
+First release published to PyPI (`pipx install wisen`).
+
 ### Added
 
 - Claude Code plugin and marketplace: session-start hint, `/wisen:proposals`,
@@ -21,6 +25,14 @@ All notable changes to wisen are recorded here. The format follows
   worker's current directory.
 - The worker uploads the subscription usage packet again, so the dashboard
   panel comes back.
+
+### Changed
+
+- Tags publish to PyPI through trusted publishing and create a GitHub Release.
+- CI runs the full test suite with pytest on Python 3.11 and 3.12; pre-commit
+  and Dependabot are set up.
+- Security policy, code of conduct, changelog, issue and PR templates, and a
+  README that leads with a demo.
 
 ## [0.1.0] - 2026-10-29
 
@@ -47,5 +59,6 @@ First release.
   `claude -p`.
 - `wisen` CLI: `synthesize`, `serve`, `export`, `eval`, `egress` and more.
 
-[Unreleased]: https://github.com/Vela3202019/wisen/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Vela3202019/wisen/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Vela3202019/wisen/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Vela3202019/wisen/releases/tag/v0.1.0
