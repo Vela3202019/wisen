@@ -4,7 +4,7 @@
 
 # wisen
 
-**You've corrected your coding agent on the same thing five times this week.
+**You've corrected your coding agent on the same thing four times this week.
 wisen reads your sessions and turns the corrections that keep coming back into
 fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
 
