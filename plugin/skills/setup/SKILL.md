@@ -36,13 +36,15 @@ git clone https://github.com/Vela3202019/wisen && cd wisen && pip install -e ".[
 
 ## 3. Configure
 
-wisen needs one model for synthesis. Ask which:
+Synthesis runs on the user's Claude Pro/Max subscription by default, at no extra cost
+(`synth_model = "claude-cli:sonnet"`). It needs the `claude` CLI logged in: check with
+`claude auth status`. wisen leaves `ANTHROPIC_API_KEY` out of the CLI's environment, so a
+key in the shell never moves synthesis to API billing. If the user prefers an API key for
+synthesis, set `synth_model = "api"` under `[model]` in `~/.wisen/config.toml`.
 
-- An API key: set `OPENAI_API_KEY` (or the key for the provider named in `WISEN_MODEL`).
-- The user's Claude Pro/Max subscription, no API billing: `synth_model = "claude-cli:claude-sonnet-5"`
-  under `[model]` in `~/.wisen/config.toml`. Requires the `claude` CLI installed and logged
-  in. If `ANTHROPIC_API_KEY` is set in the shell, the Claude CLI bills the API instead, so
-  run wisen with `env -u ANTHROPIC_API_KEY` or unset it for wisen's launchd job.
+The Gardener's proposals and chat use tools, which the Claude CLI does not serve, so they
+need an API key: `OPENAI_API_KEY` for the default model, or the key for the provider named
+in `WISEN_MODEL`. Ask whether the user has one.
 
 Editing `~/.wisen/config.toml`:
 

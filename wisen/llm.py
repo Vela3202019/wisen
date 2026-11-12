@@ -10,15 +10,16 @@ providers (pydantic-ai model strings):
 Any other provider pydantic-ai supports works the same way — pass its model
 string and set that provider's API key env var.
 
-Synthesis uses the same model by default; set WISEN_SYNTH_MODEL=claude-cli:<model>
-to run it on a Claude subscription via the Claude Code CLI — see synthesis/claude_cli.py.
+Synthesis does not use this model by default: it runs on a Claude Pro/Max
+subscription via the Claude Code CLI (WISEN_SYNTH_MODEL=claude-cli:sonnet) — see
+synthesis/claude_cli.py. WISEN_SYNTH_MODEL=api runs it on this model instead.
 
 A stage-B server's chat (wisen/cloud) runs on DeepSeek instead: WISEN_CHAT_MODEL
 names the DeepSeek model, and DEEPSEEK_API_KEY is its key.
 
 Note: Claude Pro/Max subscription auth only works inside the Claude Code CLI —
-it cannot back an API integration like this one. Anthropic access here
-requires an API key.
+it cannot back the tool-using chat and Gardener agents built on this model.
+Anthropic access here requires an API key.
 """
 import os
 

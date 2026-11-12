@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from wisen.chat.agent import stream_chat
 from wisen.jobs import Job, get_engine
 from wisen.store import get_store
+from wisen.synthesis import claude_cli
 from wisen.synthesis.job import enqueue_day
 from wisen.synthesis.schema import Reflection
 
@@ -208,4 +209,10 @@ async def health():
     provider = model.split(":", 1)[0]
     status["model"] = model
     status["llm_key"] = bool(os.getenv(_MODEL_KEY_ENV.get(provider, ""), ""))
+    # Synthesis on the Claude subscription needs the `claude` CLI, not a key.
+    if claude_cli.is_cli_model():
+        status["synth_model"] = claude_cli.synth_model()
+        status["claude_cli"] = await asyncio.to_thread(claude_cli.cli_problem) or "ok"
+    else:
+        status["synth_model"] = model
     return status

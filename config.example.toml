@@ -2,19 +2,22 @@
 # Environment variables (in parentheses) always override these values.
 
 [model]
-# pydantic-ai model string for chat (WISEN_MODEL)
+# Synthesis model (WISEN_SYNTH_MODEL). The nightly synthesis is the big token
+# spend. Already have a Claude Pro/Max subscription? wisen runs it there at no
+# extra cost, via the Claude Code CLI: `claude` installed and logged in
+# (`claude auth status`). wisen leaves ANTHROPIC_API_KEY out of the CLI's
+# environment, so a key in your shell never moves it to API billing.
+# synth_model = "claude-cli:sonnet"   # the default; or claude-cli:opus
+# Prefer an API key? Synthesize on the chat model below instead:
+# synth_model = "api"
+
+# pydantic-ai model string for chat and the Gardener (WISEN_MODEL). These use
+# tools, which the Claude Code CLI does not serve, so they need an API key:
 # openai:* needs OPENAI_API_KEY, deepseek:* needs DEEPSEEK_API_KEY,
 # google:* needs GEMINI_API_KEY, anthropic:* needs ANTHROPIC_API_KEY.
 # Any other pydantic-ai provider works the same way. Examples:
 #   deepseek:deepseek-v4-flash · google:gemini-2.5-flash · anthropic:claude-sonnet-5
 model = "openai:gpt-5.6-terra"
-
-# Synthesis model (WISEN_SYNTH_MODEL). The nightly synthesis is the big token
-# spend; pick one of two ways to run it:
-#   1. (default) the same API model as chat above — nothing to configure
-#   2. a Claude Pro/Max subscription via the Claude Code CLI — no API billing;
-#      requires `claude` installed and logged in:
-# synth_model = "claude-cli:claude-sonnet-5"
 
 [storage]
 sqlite_path = "~/.wisen/wisen.db"           # (WISEN_DB_PATH) created on first use

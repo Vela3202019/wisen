@@ -3,9 +3,10 @@ Structured-output LLM call routed through the Claude Code CLI (`claude -p`).
 
 Lets synthesis run on a Claude subscription model with no ANTHROPIC_API_KEY and no
 per-token API billing — subscription auth only works inside the CLI, not through
-pydantic-ai (see llm.py). Opt in with WISEN_SYNTH_MODEL=claude-cli:<model> (requires
-the `claude` CLI installed and logged in); by default synthesis runs on [model].model
-like everything else. Only synthesis reads this var; chat is unaffected.
+pydantic-ai (see llm.py). This is the default (WISEN_SYNTH_MODEL=claude-cli:sonnet;
+requires the `claude` CLI installed and logged in); WISEN_SYNTH_MODEL=api runs
+synthesis on [model].model instead. Only synthesis reads this var; chat and the
+Gardener use tools, which `claude -p` does not serve, so they stay on [model].model.
 
 `claude -p` is an agent, not a single-shot structured-output API: run inside the project
 it loads MCP servers/skills/tools and wanders instead of answering. So we run it in a
@@ -27,9 +28,9 @@ from wisen import config
 T = TypeVar("T", bound=BaseModel)
 
 CLI_PREFIX = "claude-cli:"
-# Default: synthesis runs on the same API model as chat ([model].model). Set
-# WISEN_SYNTH_MODEL=claude-cli:<model> to route it through a Claude subscription.
-DEFAULT_SYNTH_MODEL = "api"
+# Default: synthesis runs on the Claude subscription. `sonnet` is the CLI's alias
+# for its latest Sonnet. WISEN_SYNTH_MODEL=api runs it on [model].model instead.
+DEFAULT_SYNTH_MODEL = "claude-cli:sonnet"
 _TIMEOUT_S = 300
 # Disable agentic tools so the model answers directly instead of exploring.
 _DISALLOWED = (
@@ -38,16 +39,49 @@ _DISALLOWED = (
 )
 
 
-def _synth_model() -> str:
+_NOT_INSTALLED = (
+    "synthesis runs on your Claude subscription through the `claude` CLI, which is not installed: "
+    "install Claude Code and run `claude auth login`, or set synth_model = \"api\" to use [model].model"
+)
+_NOT_LOGGED_IN = (
+    "synthesis runs on your Claude subscription through the `claude` CLI, which is not logged in: "
+    "run `claude auth login`, or set synth_model = \"api\" to use [model].model"
+)
+
+
+def synth_model() -> str:
     return config.get("model", "synth_model", "WISEN_SYNTH_MODEL", DEFAULT_SYNTH_MODEL)
 
 
 def is_cli_model() -> bool:
-    return _synth_model().startswith(CLI_PREFIX)
+    return synth_model().startswith(CLI_PREFIX)
 
 
 def _model_name() -> str:
-    return _synth_model().split(CLI_PREFIX, 1)[-1].strip()
+    return synth_model().split(CLI_PREFIX, 1)[-1].strip()
+
+
+def _cli_env() -> dict[str, str]:
+    """The environment for `claude`, without ANTHROPIC_API_KEY: with it set the CLI
+    bills the API, so wisen always leaves it out and the subscription login is used."""
+    return {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+
+
+def cli_problem() -> str | None:
+    """Why the `claude` CLI cannot run synthesis, as one line; None when it is
+    installed and logged in."""
+    try:
+        proc = subprocess.run(
+            ["claude", "auth", "status", "--json"], capture_output=True, text=True,
+            env=_cli_env(), timeout=30, check=False,
+        )
+    except FileNotFoundError:
+        return _NOT_INSTALLED
+    try:
+        logged_in = json.loads(proc.stdout).get("loggedIn") is True
+    except json.JSONDecodeError:
+        logged_in = False
+    return None if logged_in else _NOT_LOGGED_IN
 
 
 def _extract_json_object(text: str) -> str:
@@ -90,8 +124,7 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         "--output-format", "json",
     ]
-    # Scrub the API key so the CLI always uses subscription auth, never API billing.
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    env = _cli_env()
     cwd = config.cli_cwd()
     cwd.mkdir(parents=True, exist_ok=True)
 
@@ -104,15 +137,14 @@ def run_structured(system_prompt: str, user_prompt: str, output_type: type[T]) -
                 check=False,
             )
         except FileNotFoundError:
-            raise SystemExit(
-                "`claude` CLI not found but synthesis is set to claude-cli. "
-                "Install Claude Code and log in, or unset WISEN_SYNTH_MODEL "
-                "(or set it to \"api\") to synthesize on the chat model instead."
-            )
+            raise RuntimeError(_NOT_INSTALLED) from None
         except subprocess.TimeoutExpired as e:
             last_err = e
             continue
         if proc.returncode != 0:
+            # A logged-out CLI fails every retry the same way: say so in one line.
+            if problem := cli_problem():
+                raise RuntimeError(problem)
             last_err = RuntimeError(f"claude -p exited {proc.returncode}: {proc.stderr[:500]}")
             continue
         try:

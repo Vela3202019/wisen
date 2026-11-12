@@ -28,14 +28,22 @@ read. You approve each fix, and later sessions show whether it helped.
 
 ## Quickstart
 
-You need Python 3.11+ and one LLM API key. The default model is
-`openai:gpt-5.6-terra`, so `OPENAI_API_KEY`; any pydantic-ai provider works
-(see [Configuration](docs/configuration.md)).
+You need Python 3.11+. **Already have a Claude Pro/Max subscription? The
+daily reflection runs on it at no extra cost**, through the Claude Code CLI:
+`claude` installed and logged in. wisen leaves `ANTHROPIC_API_KEY` out of the
+CLI's environment, so a key in your shell never moves it to API billing.
+Prefer an API key? Set `synth_model = "api"` (see
+[Configuration](docs/configuration.md)).
+
+Chat and the Gardener's proposals use tools, which the Claude Code CLI does
+not serve, so they need one API key. The default model is
+`openai:gpt-5.6-terra`, so `OPENAI_API_KEY`; any pydantic-ai provider works.
 
 ```bash
 git clone https://github.com/Vela3202019/wisen && cd wisen
 pip install -e ".[server]"
-export OPENAI_API_KEY=sk-...            # or put it in a repo-root .env
+claude auth status                      # logged in? the reflection runs on your subscription
+export OPENAI_API_KEY=sk-...            # chat and proposals; or put it in a repo-root .env
 wisen synthesize                        # reflect on yesterday (one real LLM call)
 wisen serve                             # API on :8000: reflections and chat
 ```
