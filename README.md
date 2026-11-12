@@ -4,8 +4,19 @@
 
 # wisen
 
-**wisen reads your coding-agent sessions and turns each day into a private
-reflection, a chat about your work, and better instruction files for your agents.**
+**You've corrected your coding agent on the same thing five times this week.
+wisen reads your sessions and turns the corrections that keep coming back into
+fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
+
+<img src="docs/assets/wisen-flow.gif" width="760" alt="wisen demo: sessions from six coding agents flow through normalize, observe and synthesize into a daily reflection, shown on the dashboard with the learning loop">
+
+<sub>[Full walkthrough](docs/walkthrough.html) (a standalone HTML page: download it and open it in a browser)</sub>
+
+```bash
+pipx install wisen && wisen synthesize
+```
+
+<sub>Not on PyPI yet: the package lands with the first release. Until then, install from source as in the [Quickstart](#quickstart).</sub>
 
 [![CI](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml/badge.svg)](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Built with pydantic-ai](https://img.shields.io/badge/built%20with-pydantic--ai-E92063.svg)](https://ai.pydantic.dev)
 
@@ -38,31 +49,6 @@ pip install -e ".[server]"
 export OPENAI_API_KEY=sk-...            # or put it in a repo-root .env
 wisen synthesize                        # reflect on yesterday (one real LLM call)
 wisen serve                             # API on :8000: reflections and chat
-```
-
-A real reflection, abridged:
-
-```jsonc
-// 2026-07-20.json
-{
-  "your_mood":  { "label": "deep-focus",
-    "summary": "Determined execution — dispatched 4 bugs, wrote a design doc,
-                reviewed 2 PRs, 5 commits across 5 hours with zero hesitation." },
-  "agent_mood": { "label": "confident",
-    "summary": "Took ownership without hedging — zero 'I think', zero
-                clarifications across 3 sessions, incl. a 213-turn debug session." },
-  "alignment_score": 0.85,
-  "insight": "The 70% rephrase rate on your end didn't indicate friction — it
-              was tight-ship compression the agent could follow.",
-  "friction_points": [
-    { "type": "unclear-prompt",
-      "description": "150 rephrases across 213 turns. The agent handled it,
-                      but this is a load pattern worth examining." } ],
-  "recommendations": [
-    { "target": "workflow",
-      "action": "If you switch models mid-session again, note why in a
-                 one-liner so the pattern becomes analyzable." } ]
-}
 ```
 
 Every command and install extra is in [docs/commands.md](docs/commands.md).
@@ -127,6 +113,31 @@ at the repo root. `claude plugin validate .` checks both.
 
 The full pipeline, with a diagram and a map of the code, is in
 [docs/how-it-works.md](docs/how-it-works.md).
+
+A real reflection, abridged:
+
+```jsonc
+// 2026-07-20.json
+{
+  "your_mood":  { "label": "deep-focus",
+    "summary": "Determined execution — dispatched 4 bugs, wrote a design doc,
+                reviewed 2 PRs, 5 commits across 5 hours with zero hesitation." },
+  "agent_mood": { "label": "confident",
+    "summary": "Took ownership without hedging — zero 'I think', zero
+                clarifications across 3 sessions, incl. a 213-turn debug session." },
+  "alignment_score": 0.85,
+  "insight": "The 70% rephrase rate on your end didn't indicate friction — it
+              was tight-ship compression the agent could follow.",
+  "friction_points": [
+    { "type": "unclear-prompt",
+      "description": "150 rephrases across 213 turns. The agent handled it,
+                      but this is a load pattern worth examining." } ],
+  "recommendations": [
+    { "target": "workflow",
+      "action": "If you switch models mid-session again, note why in a
+                 one-liner so the pattern becomes analyzable." } ]
+}
+```
 
 ## Privacy
 
