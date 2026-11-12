@@ -8,7 +8,7 @@
 wisen reads your sessions and turns the corrections that keep coming back into
 fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
 
-<img src="docs/assets/wisen-flow.gif" width="760" alt="wisen demo: sessions from six coding agents flow through normalize, observe and synthesize into a daily reflection, shown on the dashboard with the learning loop">
+<img src="docs/assets/wisen-flow.gif" width="760" alt="wisen demo: a day's reflection surfaces a correction you made four times, the Gardener proposes one CLAUDE.md change, you approve it, and it becomes a branch you merge">
 
 <sub>[Full walkthrough](docs/walkthrough.html) (a standalone HTML page: download it and open it in a browser)</sub>
 
