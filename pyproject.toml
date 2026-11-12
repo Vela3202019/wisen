@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wisen"
-version = "0.2.0"
+version = "0.2.1"
 description = "A continuous-learning harness for coding agents: it learns from your real agent sessions with a private daily reflection, a chat you can ask about your work, and instruction files that keep improving as your agents work"
 readme = "README.md"
 license = "MIT"

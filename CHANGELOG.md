@@ -6,6 +6,15 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-12
+
+### Changed
+
+- Synthesis runs on your Claude Pro/Max subscription by default
+  (`claude-cli:sonnet`, via the Claude Code CLI). Chat and the Gardener keep
+  using `WISEN_MODEL`, and without its API key they skip with one line naming
+  the key instead of failing.
+
 ## [0.2.0] - 2026-11-11
 
 First release published to PyPI (`pipx install wisen`).
@@ -16,13 +25,6 @@ First release published to PyPI (`pipx install wisen`).
   `/wisen:reflect` and `/wisen:setup`.
 - `wisen gardener reset` returns failed proposals to the inbox.
 - Hover and keyboard tooltips on the dashboard's hill charts.
-
-### Changed
-
-- Synthesis runs on your Claude Pro/Max subscription by default
-  (`claude-cli:sonnet`, via the Claude Code CLI). Chat and the Gardener keep
-  using `WISEN_MODEL`, and without its API key they skip with one line naming
-  the key instead of failing.
 
 ### Fixed
 
@@ -66,6 +68,7 @@ First release.
   `claude -p`.
 - `wisen` CLI: `synthesize`, `serve`, `export`, `eval`, `egress` and more.
 
-[Unreleased]: https://github.com/Vela3202019/wisen/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Vela3202019/wisen/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Vela3202019/wisen/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Vela3202019/wisen/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Vela3202019/wisen/releases/tag/v0.1.0
