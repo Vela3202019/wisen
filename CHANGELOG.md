@@ -6,6 +6,16 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Chat and the Gardener run on your Claude Pro/Max subscription through the
+  Claude Agent SDK (`claude-sdk:sonnet`) when no model is configured and
+  `OPENAI_API_KEY` is unset, so a subscription alone covers the reflection,
+  chat and the Gardener. A configured API model works as before. Evals stay
+  on the API model. They skip with one line only when neither a key nor a
+  logged-in `claude` CLI is available. A stage-B server's chat runs on the
+  subscription when `WISEN_CHAT_MODEL` is unset.
+
 ## [0.2.1] - 2026-11-12
 
 ### Changed

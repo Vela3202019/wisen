@@ -14,13 +14,19 @@ Synthesis does not use this model by default: it runs on a Claude Pro/Max
 subscription via the Claude Code CLI (WISEN_SYNTH_MODEL=claude-cli:sonnet) — see
 synthesis/claude_cli.py. WISEN_SYNTH_MODEL=api runs it on this model instead.
 
-A stage-B server's chat (wisen/cloud) runs on DeepSeek instead: WISEN_CHAT_MODEL
-names the DeepSeek model, and DEEPSEEK_API_KEY is its key.
+Chat and the Gardener (`agent_model_name`) run on this model too, or on the
+developer's own Claude subscription through the Claude Agent SDK
+(claude-sdk:sonnet; see claude_sdk.py). That is their default when no model is
+configured and OPENAI_API_KEY is unset; WISEN_MODEL=claude-sdk:<model> picks it
+explicitly. Evals stay on this API model.
 
-Note: Claude Pro/Max subscription auth only works inside the Claude Code CLI —
-it cannot back the tool-using chat and Gardener agents built on this model.
-Anthropic access here requires an API key. Without that key the Gardener and
-chat skip with one line (`model_problem`) instead of failing.
+A stage-B server's chat (wisen/cloud) runs on DeepSeek when WISEN_CHAT_MODEL
+names the DeepSeek model (DEEPSEEK_API_KEY is its key), and on the
+subscription when it is unset.
+
+Without a usable model — no key for an API model, or the `claude` CLI missing
+or logged out for the subscription — the Gardener and chat skip with one line
+(`model_problem`) instead of failing.
 """
 import os
 
@@ -31,6 +37,9 @@ from wisen import config
 load_dotenv()
 
 DEFAULT_MODEL = "openai:gpt-5.6-terra"
+SDK_PREFIX = "claude-sdk:"
+# `sonnet` is Claude Code's alias for its latest Sonnet.
+DEFAULT_SDK_MODEL = "claude-sdk:sonnet"
 
 # The keys each pydantic-ai provider's model accepts; any one of them is enough.
 MODEL_KEY_ENV = {
@@ -48,8 +57,21 @@ def model_key_set(model: str) -> bool:
 
 def model_problem(model: str | None = None) -> str | None:
     """Why chat and the Gardener cannot run, as one line; None when the
-    provider's API key is set."""
-    name = model or get_model()
+    provider's API key is set, or the subscription's `claude` CLI is
+    installed and logged in."""
+    name = model or agent_model_name()
+    if name.startswith(SDK_PREFIX):
+        from wisen.synthesis import claude_cli
+
+        problem = claude_cli.cli_problem()
+        if problem is None:
+            return None
+        state = {
+            claude_cli._NOT_INSTALLED: "not installed: install Claude Code and run `claude auth login`",
+            claude_cli._NOT_LOGGED_IN: "not logged in: run `claude auth login`",
+        }.get(problem, "not answering `claude auth status --json`: check it is installed and logged in")
+        return (f"Gardener and chat run on your Claude subscription through the `claude` CLI, which is {state}; "
+                "or set OPENAI_API_KEY (or another WISEN_MODEL and its key) to use the API")
     if model_key_set(name):
         return None
     provider = name.split(":", 1)[0]
@@ -57,7 +79,7 @@ def model_problem(model: str | None = None) -> str | None:
     if keys is None:
         return None
     return (f"Gardener and chat need an API key for {provider}: set {' or '.join(keys)} "
-            "(or another WISEN_MODEL) to enable them")
+            f"(or another WISEN_MODEL; {DEFAULT_SDK_MODEL} runs them on your Claude subscription) to enable them")
 
 
 def get_model() -> str:
@@ -68,9 +90,27 @@ def get_model() -> str:
     return model
 
 
+def agent_model_name() -> str:
+    """The model chat and the Gardener run on: the configured model; with none
+    configured, the default API model when its key is set, else the Claude
+    subscription."""
+    if config.get("model", "model", "WISEN_MODEL") or model_key_set(DEFAULT_MODEL):
+        return get_model()
+    return DEFAULT_SDK_MODEL
+
+
+def as_model(name: str):
+    """A pydantic-ai model for `name`: the string itself, or for claude-sdk:*
+    the Agent SDK-backed model."""
+    if name.startswith(SDK_PREFIX):
+        from wisen.claude_sdk import sdk_model
+
+        return sdk_model(name)
+    return name
+
+
 def chat_model() -> str:
-    """The stage-B server's chat model: DeepSeek, named by WISEN_CHAT_MODEL."""
+    """The stage-B server's chat model: DeepSeek, named by WISEN_CHAT_MODEL;
+    unset, the Claude subscription."""
     name = config.get("model", "chat_model", "WISEN_CHAT_MODEL")
-    if not name:
-        raise RuntimeError("set WISEN_CHAT_MODEL to the DeepSeek model the server's chat runs on")
-    return f"deepseek:{name}"
+    return f"deepseek:{name}" if name else DEFAULT_SDK_MODEL

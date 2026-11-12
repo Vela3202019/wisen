@@ -1,7 +1,8 @@
 """
 Wisen chat agent — answers questions about your coding sessions and reflections.
 
-Backed by the WISEN_MODEL-configured model (see llm.py) with four tools:
+Backed by the WISEN_MODEL-configured model, or the developer's own Claude
+subscription through the Agent SDK (`agent_model_name`, see llm.py), with four tools:
   get_reflection        → fetch a specific day's Reflection from the local store
   list_reflections      → last 7 days of alignment scores
   search_chat_history  → grep raw session files across all coding agents
@@ -10,7 +11,8 @@ Backed by the WISEN_MODEL-configured model (see llm.py) with four tools:
 Designed to be called via POST /chat (SSE streaming).
 
 On a stage-B server (wisen/cloud) the same agent answers from reflections
-only (`raw_history=False`), on DeepSeek (WISEN_CHAT_MODEL; see llm.py): the
+only (`raw_history=False`), on DeepSeek (WISEN_CHAT_MODEL) or, with that
+unset, the owner's Claude subscription (see llm.py): the
 two search tools read the laptop's raw history and configs, which never
 reach the server.
 
@@ -42,7 +44,7 @@ from pydantic_ai.settings import ModelSettings
 
 from wisen.chat.search import search_agent_configs as _search_configs
 from wisen.chat.search import search_chat_history as _search
-from wisen.llm import chat_model, get_model, model_problem
+from wisen.llm import agent_model_name, as_model, chat_model, get_model, model_problem
 from wisen.store import Store, get_store
 
 load_dotenv()
@@ -108,11 +110,11 @@ the raw transcripts, say so and suggest asking again with /search.\
 
 
 def _make_agent(raw_history: bool = True) -> Agent:
-    model = get_model() if raw_history else chat_model()
+    model = agent_model_name() if raw_history else chat_model()
     # thinking=False keeps Gemini fast; other providers may not accept it
     settings = ModelSettings(thinking=False) if model.startswith("google:") else None
     agent = Agent(
-        model=model,
+        model=as_model(model),
         output_type=str,
         deps_type=ChatDeps,
         system_prompt=_SYSTEM_PROMPT if raw_history else _SYSTEM_PROMPT + _REFLECTIONS_ONLY,
@@ -141,13 +143,13 @@ _answer_agents: dict[bool, Agent] = {}
 def answer_agent(raw_search: bool) -> Agent:
     """The agent for `answer`: with raw_search it may also search transcripts
     and configs; without, it sees reflections only. It runs on the laptop's
-    model (WISEN_MODEL) in either case, unlike the stage-B server's
+    model (`agent_model_name`) in either case, unlike the stage-B server's
     reflections-only agent."""
     if raw_search not in _answer_agents:
-        model = get_model()
+        model = agent_model_name()
         settings = ModelSettings(thinking=False) if model.startswith("google:") else None
         agent = Agent(
-            model=model,
+            model=as_model(model),
             output_type=str,
             deps_type=ChatDeps,
             system_prompt=(_SYSTEM_PROMPT, _TELEGRAM_PROMPT, *(() if raw_search else (_TELEGRAM_REFLECTIONS_ONLY,))),
@@ -335,7 +337,7 @@ async def stream_chat(
     if not messages or messages[-1]["role"] != "user":
         raise ValueError("Last message must be role=user")
 
-    if problem := model_problem(chat_model() if not raw_history else get_model()):
+    if problem := model_problem(chat_model() if not raw_history else agent_model_name()):
         yield {"type": "token", "data": problem}
         return
 

@@ -34,7 +34,8 @@ def _garden_request_id(date: str) -> str:
 
 
 def _skipped_for_a_key(job: Job | None) -> bool:
-    """True for a garden job that skipped only because no API key was set:
+    """True for a garden job that skipped only because no model was usable
+    (no API key, or the subscription's CLI missing or logged out):
     that skip says nothing about the day, so the day is gardened again."""
     return bool(job and job.result and job.result.get("needs_key"))
 
@@ -65,7 +66,7 @@ async def run_synthesis_job(ctx: JobContext, args: dict) -> dict:
     await ctx.step("save", lambda: agent.save_reflection(reflection), replay_safe=True)
     # The day's Gardener run (its proposals are the day's batch); one per day,
     # keyed by date, so a re-synthesized day does not propose again unless its
-    # run only skipped for a missing API key.
+    # run only skipped for a missing API key or subscription login.
     async def queue_garden() -> str:
         return (await _enqueue_garden(ctx.engine, date)).id
 
@@ -113,7 +114,7 @@ async def synthesize_day(date: str, force: bool = False) -> Job | Skipped:
 
 async def garden_day(date: str) -> Job:
     """Run the day's Gardener job (queued by its synthesis) until it is final.
-    A day skipped only for a missing API key is run again."""
+    A day skipped only for a missing API key or subscription login is run again."""
     engine = get_engine()
     job = await _enqueue_garden(engine, date)
     return await engine.run_until_done(job.id)

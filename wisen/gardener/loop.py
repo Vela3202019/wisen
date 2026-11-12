@@ -48,10 +48,11 @@ TENDS = ("claude-md", "agents-md")   # reflection recommendation targets the Gar
 
 
 def gardener_model():
-    """The model the Gardener runs on: the chat model (wisen/llm.py)."""
-    from wisen.llm import get_model
+    """The model the Gardener runs on: the chat model (wisen/llm.py), an API
+    model or the Claude subscription."""
+    from wisen.llm import agent_model_name, as_model
 
-    return get_model()
+    return as_model(agent_model_name())
 
 
 # The replay runner's interface (wisen/evals/runner.py); a test swaps in a fake.

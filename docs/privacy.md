@@ -24,13 +24,16 @@ holds reflections (plus chat and voice session records).
   model.
 - **Stage B server** ([Your own server](server.md#stage-b-the-server-reflects-while-your-laptop-sleeps)): the server's
   Synthesizer, Gardener and chat send the packets your laptop uploaded
-  (tier 3) to the server's model providers (chat's to DeepSeek), never
-  anything else.
+  (tier 3) to the server's model providers (chat's to DeepSeek when
+  `WISEN_CHAT_MODEL` is set, otherwise to Anthropic under your own Claude
+  account), never anything else.
 
 Pick the provider with `model` and `synth_model`. That provider's data terms
 apply to these excerpts. Synthesis defaults to `synth_model = "claude-cli:…"`,
 which runs through the Claude Code CLI and sends the same excerpts to Anthropic
-under your own Claude account; the terms of that account apply.
+under your own Claude account; the terms of that account apply. Chat and the
+Gardener do the same (`claude-sdk:…`, through the Claude Agent SDK) unless an
+API model is configured or `OPENAI_API_KEY` is set.
 
 **3. Cloud: derived results only, which can include short quotes.** Everything
 bound for a server goes through one egress gate (`wisen/egress.py`) as a typed

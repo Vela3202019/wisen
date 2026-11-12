@@ -42,9 +42,12 @@ Synthesis runs on the user's Claude Pro/Max subscription by default, at no extra
 key in the shell never moves synthesis to API billing. If the user prefers an API key for
 synthesis, set `synth_model = "api"` under `[model]` in `~/.wisen/config.toml`.
 
-The Gardener's proposals and chat use tools, which the Claude CLI does not serve, so they
-need an API key: `OPENAI_API_KEY` for the default model, or the key for the provider named
-in `WISEN_MODEL`. Ask whether the user has one.
+The Gardener's proposals and chat run on the same subscription by default, through the Claude
+Agent SDK, which drives the same logged-in CLI (`claude-sdk:sonnet`). It is the user's own
+subscription, on their own server or machine, over their own history. Anthropic's policy on
+claude.ai login in Agent SDK products is at https://code.claude.com/docs/en/agent-sdk/overview. An API key is the alternative:
+`OPENAI_API_KEY` switches the default to `openai:gpt-5.6-terra`, or set `model` (`WISEN_MODEL`)
+to another pydantic-ai model string and its provider's key. Ask which the user wants.
 
 Editing `~/.wisen/config.toml`:
 

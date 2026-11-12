@@ -677,20 +677,21 @@ async def check_chat():
 
 def check_chat_model():
     """The server's chat runs on DeepSeek, named by WISEN_CHAT_MODEL, with
-    DEEPSEEK_API_KEY; neither has a default. The laptop's chat keeps WISEN_MODEL."""
+    DEEPSEEK_API_KEY; with WISEN_CHAT_MODEL unset, on the owner's Claude
+    subscription. The laptop's chat keeps WISEN_MODEL."""
     from pydantic_ai.models.openai import OpenAIChatModel
 
     saved = {k: os.environ.get(k) for k in ("WISEN_CHAT_MODEL", "DEEPSEEK_API_KEY")}
     try:
         for k in saved:
             os.environ.pop(k, None)
-        for env, missing in (({}, "WISEN_CHAT_MODEL"), ({"WISEN_CHAT_MODEL": "deepseek-v4-flash"}, "DEEPSEEK_API_KEY")):
-            os.environ.update(env)
-            try:
-                chat._make_agent(raw_history=False)
-                raise AssertionError(f"the server's chat built without {missing}")
-            except RuntimeError as e:
-                assert missing in str(e), e
+        assert chat._make_agent(raw_history=False).model.model_name == "claude-sdk:sonnet"
+        os.environ["WISEN_CHAT_MODEL"] = "deepseek-v4-flash"
+        try:
+            chat._make_agent(raw_history=False)
+            raise AssertionError("the server's chat built without DEEPSEEK_API_KEY")
+        except RuntimeError as e:
+            assert "DEEPSEEK_API_KEY" in str(e), e
         os.environ["DEEPSEEK_API_KEY"] = "fake-deepseek-key"
         model = chat._make_agent(raw_history=False).model
         assert isinstance(model, OpenAIChatModel) and model.system == "deepseek", model
@@ -702,7 +703,8 @@ def check_chat_model():
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-    print("✓ stage B: the server's chat runs on DeepSeek by WISEN_CHAT_MODEL and DEEPSEEK_API_KEY")
+    print("✓ stage B: the server's chat runs on DeepSeek by WISEN_CHAT_MODEL and DEEPSEEK_API_KEY, "
+          "else on the subscription")
 
 
 def check_server_synthesis_path():

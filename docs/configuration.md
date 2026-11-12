@@ -11,14 +11,23 @@ The three that matter:
   wisen leaves `ANTHROPIC_API_KEY` out of the CLI's environment, so a key in
   your shell never moves it to API billing. Prefer an API key? Set `"api"` to
   run it on `model`.
-- **`model`** (`WISEN_MODEL`): chat and Gardener model, any pydantic-ai model
-  string. They use tools, which the Claude Code CLI does not serve, so set
-  that provider's API key: `openai:*` needs `OPENAI_API_KEY`, `google:*`
-  needs `GEMINI_API_KEY` or `GOOGLE_API_KEY`, `deepseek:*` needs
-  `DEEPSEEK_API_KEY`, `anthropic:*` needs `ANTHROPIC_API_KEY`. Without that
-  key the nightly synthesis still saves the reflection: the Gardener and chat
-  skip with one line naming the key, and `wisen gardener run <date>` runs that
-  day's Gardener once the key is set. Running them on the subscription is
-  coming next.
+- **`model`** (`WISEN_MODEL`): the chat and Gardener model. Unset, they run on
+  your Claude Pro/Max subscription (`claude-sdk:sonnet`) unless
+  `OPENAI_API_KEY` is set, which makes the default `openai:gpt-5.6-terra`.
+  `claude-sdk:<model>` (for example `claude-sdk:opus`) picks the subscription
+  explicitly. They use tools, so they go through the [Claude Agent
+  SDK](https://code.claude.com/docs/en/agent-sdk/overview), which drives the same logged-in `claude` CLI as synthesis
+  (`/health` shows `claude_cli`). `ANTHROPIC_API_KEY` is blanked in its
+  environment. It is your own subscription, on your own server or machine,
+  over your own history. Anthropic does not let third-party products offer
+  claude.ai login unless it has approved them ([Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)).
+  An API key is the alternative. Any other pydantic-ai model string runs on
+  that provider's key: `openai:*` needs `OPENAI_API_KEY`, `google:*` needs
+  `GEMINI_API_KEY` or `GOOGLE_API_KEY`, `deepseek:*` needs `DEEPSEEK_API_KEY`,
+  `anthropic:*` needs `ANTHROPIC_API_KEY`. With neither that key nor a
+  logged-in CLI, the nightly synthesis still saves the reflection. The
+  Gardener and chat skip with one line saying what to set, and
+  `wisen gardener run <date>` runs that day's Gardener once it is set. Evals
+  (`wisen eval`) always use an API model.
 - **`[paths]`**: where your agents' dot-dirs and git repos live. Point
   `root_dir` at a synced copy to reflect on another machine.

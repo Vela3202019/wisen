@@ -38,8 +38,9 @@ Environment (stage A holds no model key: it makes no model calls):
   WISEN_CLOUD_STAGE         a (default) or b: the Synthesizer and Gardener run here over
                             packets (wisen/cloud/rem.py). Synthesis runs on `claude -p`
                             (WISEN_SYNTH_MODEL, default claude-cli:sonnet; "api" falls back to
-                            WISEN_MODEL); the Gardener uses WISEN_MODEL and its key; chat
-                            runs on DeepSeek (WISEN_CHAT_MODEL, DEEPSEEK_API_KEY)
+                            WISEN_MODEL); the Gardener runs on the subscription through the
+                            Agent SDK, or on WISEN_MODEL and its key; chat runs on DeepSeek
+                            (WISEN_CHAT_MODEL, DEEPSEEK_API_KEY), or unset, the subscription
   WISEN_CLOUD_PUBLIC_URL    e.g. https://wisen.example.org; https makes the
                             session cookie Secure, and it is the VAPID contact
   WISEN_VAPID_PRIVATE_KEY   from `wisen cloud vapid-keys`; both unset = no push
@@ -498,10 +499,11 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
         if not config.get("model", "synth_model", "WISEN_SYNTH_MODEL", ""):
             os.environ["WISEN_SYNTH_MODEL"] = claude_cli.DEFAULT_SYNTH_MODEL
         synth = config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
-        chat = config.get("model", "chat_model", "WISEN_CHAT_MODEL", "WISEN_CHAT_MODEL unset")
+        from wisen.llm import agent_model_name, chat_model
+
         # Names only: a key's value is never printed or logged.
-        print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener on WISEN_MODEL; chat on DeepSeek "
-              f"({chat}); model keys set: {', '.join(keys) or 'none'}")
+        print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener on {agent_model_name()}; chat on "
+              f"{chat_model()}; model keys set: {', '.join(keys) or 'none'}")
     token = os.environ.get("WISEN_TELEGRAM_BOT_TOKEN")
     if not token:
         print("wisen cloud: no WISEN_TELEGRAM_BOT_TOKEN; the Telegram bot is off")
