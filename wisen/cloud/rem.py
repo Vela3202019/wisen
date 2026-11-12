@@ -29,7 +29,7 @@ from typing import get_origin
 
 from wisen.gardener import loop
 from wisen.jobs import JobContext, ts
-from wisen.llm import get_model
+from wisen.llm import get_model, model_problem
 from wisen.store import SqliteStore
 from wisen.synthesis import agent
 from wisen.synthesis.schema import DayObservation, Reflection
@@ -122,6 +122,8 @@ async def garden_day(mailbox, user: str, day: str) -> dict:
         return {"proposals": 0}
     if len(await loop.recent_reflections(store, day)) < 2:
         return {"proposals": 0, "gardener": "only one reflection so far"}
+    if problem := model_problem():
+        return {"proposals": 0, "gardener": problem}
     try:
         run = await loop.propose(store, day, await asyncio.to_thread(mailbox.snapshot, user))
         ids = await asyncio.to_thread(loop.record_run, store, mailbox.proposals(user), run, {}, day,

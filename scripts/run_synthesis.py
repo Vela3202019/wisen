@@ -34,6 +34,8 @@ async def main() -> None:
     garden = await garden_day(date)
     if garden.state != "succeeded":
         print(f"gardener failed: {garden.error}", file=sys.stderr)
+    elif skipped := garden.result.get("skipped"):
+        print(skipped)
 
 
 if __name__ == "__main__":

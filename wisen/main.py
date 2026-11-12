@@ -187,10 +187,9 @@ async def voice_token():
 @app.get("/health")
 async def health():
     import asyncio
-    import os
     import sqlite3
 
-    from wisen.llm import MODEL_KEY_ENV, get_model
+    from wisen.llm import get_model, model_key_set
 
     status = {"storage": False}
     try:
@@ -198,9 +197,8 @@ async def health():
     except (TimeoutError, OSError, sqlite3.Error):
         pass  # store unreachable, status already False
     model = get_model()
-    provider = model.split(":", 1)[0]
     status["model"] = model
-    status["llm_key"] = bool(os.getenv(MODEL_KEY_ENV.get(provider, ""), ""))
+    status["llm_key"] = model_key_set(model)
     # Synthesis on the Claude subscription needs the `claude` CLI, not a key.
     if claude_cli.is_cli_model():
         status["synth_model"] = claude_cli.synth_model()

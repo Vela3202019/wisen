@@ -320,6 +320,30 @@ def test_chat_skips_without_a_key():
     print("✓ chat: with no API key a turn is answered with the one line naming the key")
 
 
+def test_google_key_is_accepted():
+    """Either Google key the provider takes counts as set: with GOOGLE_API_KEY
+    alone, chat, the Gardener and /health must not report google as keyless."""
+    from wisen import main
+
+    class Store:
+        async def ping(self):
+            return True
+
+    real_store = main.get_store
+    main.get_store = Store
+    try:
+        with _no_config(), _env(WISEN_MODEL="google:gemini-2.5-flash", GEMINI_API_KEY=None,
+                                GOOGLE_API_KEY="gk-test", WISEN_SYNTH_MODEL="api"):
+            assert model_problem() is None
+            assert asyncio.run(main.health())["llm_key"] is True
+        with _env(WISEN_MODEL="google:gemini-2.5-flash", GEMINI_API_KEY=None, GOOGLE_API_KEY=None):
+            line = model_problem()
+            assert "GEMINI_API_KEY" in line and "GOOGLE_API_KEY" in line, line
+    finally:
+        main.get_store = real_store
+    print("✓ google: GOOGLE_API_KEY alone is a key; with neither set, the line names both")
+
+
 def test_gardener_skips_without_a_key():
     """The Gardener needs the same key: its job for the day succeeds with one
     line saying why, so `wisen synthesize` still ends with the reflection."""
@@ -411,6 +435,7 @@ if __name__ == "__main__":
     test_permanent_cli_failure_fails_the_job_at_once()
     test_health_reports_claude_cli()
     test_chat_skips_without_a_key()
+    test_google_key_is_accepted()
     test_gardener_skips_without_a_key()
     test_gardener_runs_again_once_the_key_is_set()
     print("\nall claude_cli tests passed")
