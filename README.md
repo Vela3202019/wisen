@@ -167,7 +167,10 @@ move. Plans live in [docs/plan/](docs/plan/).
 
 Dev setup, offline tests and a guide to adding a connector for a new agent
 are in [CONTRIBUTING.md](CONTRIBUTING.md). Connectors are small, so a first
-contribution is too.
+contribution is too. Please follow the
+[Code of Conduct](CODE_OF_CONDUCT.md), report security problems as
+[SECURITY.md](SECURITY.md) describes, and see [CHANGELOG.md](CHANGELOG.md) for
+what changed in each release.
 
 ## License
 

@@ -1,5 +1,9 @@
 # Contributing to wisen
 
+By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+Report security problems privately as [SECURITY.md](SECURITY.md) describes,
+never in a public issue.
+
 ## Dev setup
 
 ```bash
@@ -66,3 +70,5 @@ machine.
 - **Commits**: conventional commits — `<type>(<scope>): <subject>`, imperative
   mood, lowercase, ≤72 chars (`feat`, `fix`, `docs`, `refactor`, `test`,
   `chore`, …). One logical change per commit.
+- **Changelog**: add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md)
+  for any user-facing change.
