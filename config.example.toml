@@ -8,7 +8,8 @@
 # (`claude auth status`). wisen leaves ANTHROPIC_API_KEY out of the CLI's
 # environment, so a key in your shell never moves it to API billing.
 # synth_model = "claude-cli:sonnet"   # the default; or claude-cli:opus
-# Prefer an API key? Synthesize on the API chat model below instead:
+# Prefer an API key? Synthesize on the API chat model below instead (`model`
+# must then be an API model, not claude-sdk:*):
 # synth_model = "api"
 
 # The model for chat and the Gardener (WISEN_MODEL). Unset, they run on your

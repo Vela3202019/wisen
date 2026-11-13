@@ -17,6 +17,7 @@ the fixture test runs entirely offline:
 ```bash
 python3 -m tests.test_fixtures       # committed sample sessions in tests/fixtures/
 python3 -m tests.test_claude_cli     # claude -p adapter parsing (no live call)
+python3 -m tests.test_claude_sdk     # Claude Agent SDK model + tool bridge (no live call)
 python3 -m tests.test_egress         # cloud export leaks nothing off the allow-list
 python3 -m tests.test_store          # SQLite store on a temp file
 python3 -m tests.test_jobs           # job engine + proposal state machine
