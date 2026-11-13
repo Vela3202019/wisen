@@ -39,8 +39,9 @@ first** (an older server refuses the new packets):
   run on your own Claude subscription, on your own server, over your own
   history. Log the CLI in for the service's user. Synthesis uses `claude -p`,
   and the Gardener and chat use the Claude Agent SDK on the same login, while
-  the mailbox holds a single account (a server with more needs an API model
-  for both). An API key is the alternative: `WISEN_MODEL` with its provider's
+  the mailbox holds a single account: a server with more refuses all three on
+  the subscription (even when configured explicitly) and needs API models.
+  An API key is the alternative: `WISEN_MODEL` with its provider's
   key for the Gardener, DeepSeek for chat (`WISEN_CHAT_MODEL`,
   `DEEPSEEK_API_KEY`), and `WISEN_SYNTH_MODEL=api` to put synthesis on the
   API model too. See

@@ -14,9 +14,9 @@ from wisen.connectors.agent_configs import AgentConfig
 from wisen.ingestion.normalizer import NormalizedSession
 from wisen.ingestion.pipeline import IngestResult
 from wisen.jobs import PermanentFailure
-from wisen.llm import get_model, is_subscription
+from wisen.llm import get_model, is_subscription, subscription_refused
 from wisen.store import get_store
-from wisen.synthesis.claude_cli import is_cli_model, run_structured
+from wisen.synthesis.claude_cli import is_cli_model, run_structured, synth_model
 from wisen.synthesis.prompt import OBSERVER_PROMPT, SYNTHESIZER_PROMPT
 from wisen.synthesis.schema import DayObservation, Reflection
 
@@ -144,6 +144,8 @@ async def _generate(
     WISEN_SYNTH_MODEL=claude-cli:*, otherwise via pydantic-ai, which needs an
     API model."""
     if is_cli_model():
+        if problem := subscription_refused([synth_model()]):
+            raise PermanentFailure(problem)
         return await asyncio.to_thread(run_structured, system_prompt, user_prompt, output_type)
     if is_subscription(model):
         raise PermanentFailure(

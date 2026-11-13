@@ -187,12 +187,15 @@ still applied by the laptop whose file they change.
 By default every job runs on your own subscription, on your own server or
 machine, over your own history: the owner's Claude subscription, on the
 owner's own box, for the owner's own use. A server that serves other people
-must use an API key. wisen holds chat and the Gardener to that: the
-subscription default applies only while the mailbox holds a single account.
-Adding a second one (`wisen cloud user`) means chat and the Gardener need an
-API model — `WISEN_CHAT_MODEL` (DeepSeek), or `WISEN_MODEL` and its key — and
-the start-up line and `/health` say so (with the account count and both
-models). Synthesis runs on `claude -p`. The Gardener and chat use
+must use an API key. wisen holds every per-user job to that, and explicit
+config does not override it: with a single account the jobs default to the
+subscription; adding a second one (`wisen cloud user`) refuses
+`claude-sdk:`/`claude-cli:` for chat, the Gardener and synthesis **even when
+`/etc/wisen/wisen.env` names them**. Then chat and the Gardener need an API
+model — `WISEN_CHAT_MODEL` (DeepSeek), or `WISEN_MODEL` and its key — and
+synthesis `WISEN_SYNTH_MODEL=api`; the start-up line and `/health` say so
+(the account count, the models, and any refusal). Synthesis runs on
+`claude -p`. The Gardener and chat use
 tools, so they run through the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), which drives the
 same logged-in CLI, with `ANTHROPIC_API_KEY` blanked. Anthropic does not let
 third-party products offer claude.ai login unless it has approved them ([Agent

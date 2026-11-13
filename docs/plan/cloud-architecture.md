@@ -245,7 +245,10 @@ the new packet types.
   API key; chat runs on DeepSeek when `WISEN_CHAT_MODEL` is set (owner's
   decision), so the reflections it reads, already redacted, reach DeepSeek.
   A server that serves other people must use an API key: these subscription
-  defaults apply only while the mailbox holds a single account (the owner).
+  paths apply only while the mailbox holds a single account (the owner), and
+  explicit configuration does not override that — with more accounts chat, the
+  Gardener and synthesis refuse `claude-sdk:`/`claude-cli:` and say so at
+  start-up and in `/health`.
 
 ### 3.3 What runs where
 

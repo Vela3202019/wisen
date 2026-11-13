@@ -739,10 +739,17 @@ def check_server_synthesis_path():
 async def check_multi_account_models():
     """The subscription default for chat and the Gardener is for a server with
     one account (the owner). A second account (`wisen cloud user`) takes it
-    away: both resolve to an API model, the one line says what to set, and
-    /health carries the count and the two models."""
+    away: both resolve to an API model, an explicitly configured subscription is
+    refused with one line, and /health carries the count, the models and the
+    refusal."""
     from tests.test_claude_cli import _no_config
     from wisen import llm
+    from wisen.cloud import rem
+    from wisen.synthesis import claude_cli
+
+    async def chat_turn() -> list[dict]:
+        return [e async for e in chat.stream_chat([{"role": "user", "content": "how was it?"}],
+                                                  raw_history=False)]
 
     saved = {k: os.environ.get(k) for k in ("WISEN_MODEL", "WISEN_CHAT_MODEL", "OPENAI_API_KEY")}
     try:
@@ -756,14 +763,37 @@ async def check_multi_account_models():
             app = create_app(mailbox, secure_cookies=False, run_engines=False)
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
                 assert (await http.get("/health")).json()["llm"] == {
-                    "accounts": 1, "gardener": "claude-sdk:sonnet", "chat": "claude-sdk:sonnet"}
+                    "accounts": 1, "gardener": "claude-sdk:sonnet", "chat": "claude-sdk:sonnet",
+                    "refused": None}
             mailbox.set_user("guest", "another long password")
             assert (chat.chat_model(), llm.agent_model_name()) == (llm.DEFAULT_MODEL, llm.DEFAULT_MODEL)
             line = llm.model_problem()
             assert "need an API key for openai" in line and "more than one account" in line, line
+            # An explicitly configured subscription model is refused too.
+            os.environ["WISEN_MODEL"] = "claude-sdk:sonnet"
+            assert llm.agent_model_name() == "claude-sdk:sonnet"
+            refused = llm.model_problem()
+            assert "must not serve others" in refused and "WISEN_CHAT_MODEL" in refused, refused
+            assert (await chat_turn()) == [{"type": "token", "data": refused}]
+            assert (await rem.resume_job(None, None, {"run_id": "x"}))["gardener"] == refused
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
-                assert (await http.get("/health")).json()["llm"] == {
-                    "accounts": 2, "gardener": llm.DEFAULT_MODEL, "chat": llm.DEFAULT_MODEL}
+                health = (await http.get("/health")).json()
+            assert health["llm"] == {"accounts": 2, "gardener": "claude-sdk:sonnet",
+                                     "chat": "claude-sdk:sonnet", "refused": refused}, health
+            os.environ.pop("WISEN_MODEL", None)
+            # One account runs the same subscription config.
+            single = Mailbox(_TMP / "one-account.db", sender=None, stage="b")
+            single.set_user(USER, PASSWORD)
+            llm.set_server_accounts(lambda: len(single.user_ids()))
+            real_probe = claude_cli.cli_problem
+            claude_cli.cli_problem = lambda: None
+            try:
+                os.environ["WISEN_MODEL"] = "claude-sdk:sonnet"
+                assert llm.subscription_refused(["claude-sdk:sonnet"]) is None
+                assert llm.model_problem() is None
+            finally:
+                claude_cli.cli_problem = real_probe
+                os.environ.pop("WISEN_MODEL", None)
     finally:
         llm.set_server_accounts(None)
         for k, v in saved.items():

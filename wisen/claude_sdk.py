@@ -169,14 +169,20 @@ async def _turn(model: str, messages: list[ModelMessage], info: AgentInfo, strea
 
 
 def _request_usage(raw: dict | None) -> RequestUsage:
-    """The turn's usage as the CLI reported it. A turn whose result carried none
-    is marked `unmeasured_requests`, so pydantic-ai never fills in its own
-    estimate for a number the owner would read."""
-    fields = {"input_tokens": "input_tokens", "output_tokens": "output_tokens",
-              "cache_creation_input_tokens": "cache_write_tokens",
-              "cache_read_input_tokens": "cache_read_tokens"}
-    usage = RequestUsage(**{field: raw[key] for key, field in fields.items() if raw and key in raw})
-    return usage if usage.has_values() else RequestUsage(unmeasured_requests=1)
+    """The turn's usage as the CLI reported it, in pydantic-ai's convention: the
+    CLI's `input_tokens` are the uncached ones, so the cached reads and writes
+    are added to it (`input_tokens` is their inclusive parent bucket). A turn
+    whose result carried none is marked `unmeasured_requests`, so pydantic-ai
+    never fills in its own estimate for a number the owner would read."""
+    if raw:
+        cached = raw.get("cache_creation_input_tokens", 0) + raw.get("cache_read_input_tokens", 0)
+        usage = RequestUsage(input_tokens=raw.get("input_tokens", 0) + cached,
+                             output_tokens=raw.get("output_tokens", 0),
+                             cache_write_tokens=raw.get("cache_creation_input_tokens", 0),
+                             cache_read_tokens=raw.get("cache_read_input_tokens", 0))
+        if usage.has_values():
+            return usage
+    return RequestUsage(unmeasured_requests=1)
 
 
 @dataclass

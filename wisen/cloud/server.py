@@ -233,10 +233,13 @@ def create_app(
     async def health():
         models = None
         if mailbox.stage == "b":
-            from wisen.llm import agent_model_name, chat_model
+            from wisen import llm
 
+            synth = claude_cli.synth_model() if claude_cli.is_cli_model() else llm.get_model()
+            gardener, chat = llm.agent_model_name(), llm.chat_model()
             models = {"accounts": await asyncio.to_thread(lambda: len(mailbox.user_ids())),
-                      "gardener": agent_model_name(), "chat": chat_model()}
+                      "gardener": gardener, "chat": chat,
+                      "refused": llm.subscription_refused([synth, gardener, chat])}
         return {"ok": True, "push": vapid_public_key is not None, "telegram": mailbox.telegram is not None,
                 "stage": mailbox.stage,
                 "synthesis": ("claude-cli" if config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
@@ -523,8 +526,7 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
         # Names only: a key's value is never printed or logged.
         print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener on {llm.agent_model_name()}; chat on "
               f"{llm.chat_model()}; model keys set: {', '.join(keys) or 'none'}")
-        if llm.many_accounts():
-            print(f"wisen cloud: {len(mailbox.user_ids())} accounts: chat and the Gardener need an API model "
-                  "(WISEN_CHAT_MODEL, or WISEN_MODEL and its key); the Claude subscription is for a single account")
+        if problem := llm.subscription_refused([synth, llm.agent_model_name(), llm.chat_model()]):
+            print(f"wisen cloud: {problem}")
     return create_app(mailbox, vapid_public_key=public if sender else None,
                       secure_cookies=public_url.startswith("https://"), run_engines=run_engines)

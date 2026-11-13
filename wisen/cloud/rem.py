@@ -136,7 +136,10 @@ async def garden_day(mailbox, user: str, day: str) -> dict:
 
 
 async def resume_job(mailbox, ctx: JobContext, args: dict) -> dict:
-    store, run_id = ctx.engine.store, args["run_id"]
+    run_id = args["run_id"]
+    if problem := await asyncio.to_thread(model_problem):
+        return {"run_id": run_id, "resumed": False, "gardener": problem}
+    store = ctx.engine.store
     state = loop._rows(store, "SELECT state FROM gardener_runs WHERE user_id = ? AND id = ?", run_id)
     if not state or state[0]["state"] != "paused":
         return {"run_id": run_id, "resumed": False}

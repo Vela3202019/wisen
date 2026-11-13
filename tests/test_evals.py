@@ -290,6 +290,7 @@ def test_replay_cost_without_usage():
     the CLI's own count when it does report one."""
     from pydantic_ai.usage import RequestUsage
 
+    from tests.test_claude_cli import _no_config
     from wisen.gardener import loop
 
     def respond_with(usage):
@@ -307,12 +308,13 @@ def test_replay_cost_without_usage():
     judge._judge.cache_clear()
     try:
         lines = {}
-        for name, usage in (("none", RequestUsage(unmeasured_requests=1)),
-                            ("reported", RequestUsage(input_tokens=7, output_tokens=3))):
-            judge.as_model = lambda name, usage=usage: FunctionModel(respond_with(usage))
-            judge._judge.cache_clear()
-            report = asyncio.run(runner.compare([case], runner.Variant(), runner.Variant(), cap=2, k=2))
-            lines[name] = loop.eval_summary(report, cost)
+        with _no_config():
+            for name, usage in (("none", RequestUsage(unmeasured_requests=1)),
+                                ("reported", RequestUsage(input_tokens=7, output_tokens=3))):
+                judge.as_model = lambda name, usage=usage: FunctionModel(respond_with(usage))
+                judge._judge.cache_clear()
+                report = asyncio.run(runner.compare([case], runner.Variant(), runner.Variant(), cap=2, k=2))
+                lines[name] = loop.eval_summary(report, cost)
     finally:
         judge.as_model, runner.run_replay = real
         judge._judge.cache_clear()

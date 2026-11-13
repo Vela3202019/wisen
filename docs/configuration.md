@@ -22,9 +22,11 @@ The three that matter:
   environment (the Agent SDK merges its environment over yours), so a key in
   your shell never moves it to API billing. It is your own subscription, on
   your own server or machine, over your own history: a stage-B server whose
-  mailbox holds more than one account gets an API model for chat and the
-  Gardener instead. Anthropic does not let third-party products offer
-  claude.ai login unless it has approved them ([Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)).
+  mailbox holds more than one account refuses it for chat, the Gardener and
+  synthesis (even when configured explicitly, `claude-sdk:` in `model` or
+  `claude-cli:` in `synth_model`) and needs API models instead. Anthropic does
+  not let third-party products offer claude.ai login unless it has approved
+  them ([Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)).
   An API key is the alternative. Any other pydantic-ai model string runs on
   that provider's key: `openai:*` needs `OPENAI_API_KEY`, `google:*` needs
   `GEMINI_API_KEY` or `GOOGLE_API_KEY`, `deepseek:*` needs `DEEPSEEK_API_KEY`,
