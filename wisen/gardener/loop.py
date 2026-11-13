@@ -224,7 +224,12 @@ def eval_summary(report: dict | None, cost: dict, missing: str = NO_CASES) -> st
         return missing + now
     cur, new = report["current"], report["proposed"]
     rule = {True: "yes", False: "no", None: "not enough cases to tell"}[report["meets_rule"]]
-    spent = f"{report['tokens']:,} tokens" + (f", ${report['cost_usd']:.2f}" if report["cost_usd"] is not None else "")
+    if report["tokens_unmeasured"]:
+        spent = (f"at least {report['tokens']:,} tokens, but the model reported no usage for "
+                 f"{report['tokens_unmeasured']} of {report['replays']} replays")
+    else:
+        spent = (f"{report['tokens']:,} tokens"
+                 + (f", ${report['cost_usd']:.2f}" if report["cost_usd"] is not None else ""))
     return (f"Replay on {report['cases']['eval']} eval and {report['cases']['clean']} clean-set cases: "
             f"pass rate {_pct(cur['pass_rate'])} → {_pct(new['pass_rate'])}; clean set "
             f"{_pct(cur['clean_pass_rate'])} → {_pct(new['clean_pass_rate'])}. Meets the accept rule "

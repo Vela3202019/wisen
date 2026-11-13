@@ -52,12 +52,13 @@ async def run_case(case: Case, variant: Variant | Path | None, k: int, model: st
                            project_files=variant.project_files))
     if replay.error:
         return {"case": case.id, "error": replay.error}
-    verdict, judge_tokens = await judge_with_usage(case, replay, k, model)
+    verdict, judge_tokens, judge_unmeasured = await judge_with_usage(case, replay, k, model)
     return {
         "case": case.id,
         "passed": not verdict.repeated,
         "evidence": verdict.evidence,
         "tokens": replay.tokens + judge_tokens,
+        "tokens_unmeasured": judge_unmeasured,
         "cost_usd": replay.cost_usd,
     }
 
@@ -75,12 +76,13 @@ async def compare(cases: list[Case], current: Variant, proposed: Variant, *, cap
     """Replay up to `cap` confirmed eval cases and `cap` clean-set cases under
     the current and the proposed config. The accept rule (`meets_rule`): the
     eval pass rate rises and the clean-set pass rate does not drop. None when
-    there is nothing to judge it on."""
+    there is nothing to judge it on. `tokens_unmeasured` counts the replays
+    whose judge reported no usage, so `tokens` is a lower bound for those."""
     confirmed = [c for c in cases if c.status == "confirmed" and c.split == "eval" and c.behavior_check]
     picked = {"eval": [c for c in confirmed if c.kind == "correction"][:cap],
               "clean": [c for c in confirmed if c.kind == "clean"][:cap]}
     report: dict = {"cases": {kind: len(cs) for kind, cs in picked.items()}, "replays": 0,
-                    "tokens": 0, "cost_usd": None}
+                    "tokens": 0, "tokens_unmeasured": 0, "cost_usd": None}
     for name, variant in (("current", current), ("proposed", proposed)):
         rates = {}
         for kind, kind_cases in picked.items():
@@ -88,6 +90,8 @@ async def compare(cases: list[Case], current: Variant, proposed: Variant, *, cap
             for r in results:
                 report["replays"] += 1
                 report["tokens"] += r.get("tokens") or 0
+                if r.get("tokens_unmeasured"):
+                    report["tokens_unmeasured"] += 1
                 if r.get("cost_usd") is not None:
                     report["cost_usd"] = round((report["cost_usd"] or 0) + r["cost_usd"], 4)
             rates[kind] = _rate(results)

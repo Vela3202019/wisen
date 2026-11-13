@@ -178,7 +178,9 @@ Model calls in stage B:
 - **Laptop:** the Observer, and raw-history search when you ask for it
   explicitly. These are the only calls that see raw text.
 - **Server:** the Synthesizer, the Gardener and reflection chat. They see
-  packets only. The server now holds a model API key.
+  packets only. The server runs them on the owner's Claude subscription (a
+  `claude` login for the Synthesizer, and the Claude Agent SDK for the
+  Gardener and chat), or on an API model and its key.
 
 Approved changes are still **applied on the laptop**. The Gardener on the
 server writes the proposal; the laptop's applier makes the branch.
@@ -237,10 +239,13 @@ the new packet types.
   conversation each turn. No dashboard UI calls it yet.
 - **Models.** Synthesis runs on `claude -p` on the owner's subscription by
   default (`WISEN_SYNTH_MODEL`, `claude-cli:sonnet`); `WISEN_SYNTH_MODEL=api`
-  is the fallback to the API model. The Gardener uses tools, so it runs on
-  `WISEN_MODEL` and its API key (moving it to `claude -p` is a follow-up).
-  Chat runs on DeepSeek (`WISEN_CHAT_MODEL`, `DEEPSEEK_API_KEY`; owner's
-  decision): the reflections it reads, already redacted, reach DeepSeek.
+  is the fallback to the API model. The Gardener and reflection chat use
+  tools, so they run on the owner's subscription through the Claude Agent SDK
+  (`claude-sdk:sonnet`, `wisen/claude_sdk.py`), or on `WISEN_MODEL` with its
+  API key; chat runs on DeepSeek when `WISEN_CHAT_MODEL` is set (owner's
+  decision), so the reflections it reads, already redacted, reach DeepSeek.
+  A server that serves other people must use an API key: these subscription
+  defaults apply only while the mailbox holds a single account (the owner).
 
 ### 3.3 What runs where
 
@@ -256,7 +261,7 @@ the new packet types.
 | Raw-history search | laptop | laptop | laptop |
 | Schedule, approval inbox, push, Telegram | laptop UI only, no push | server | server |
 | Job engine | laptop | laptop + server | laptop + server |
-| Model API key | laptop | laptop | laptop + server |
+| Model credential: API key, or the `claude` login | laptop | laptop | laptop + server |
 
 **Local-only mode stays first-class.** With no server configured, the laptop
 runs everything and you approve in the local dashboard or CLI. The server is
@@ -803,7 +808,8 @@ systemd: wisen.service          one process: `wisen cloud serve`, uvicorn, 1 wor
   ├─ Web Push sender (VAPID keys)
   ├─ Telegram bot (long polling)
   ├─ stage B only: Synthesizer (`claude -p`, API fallback), Gardener and
-  │                reflection chat (pydantic-ai, API key)
+  │                reflection chat (Claude Agent SDK on the subscription,
+  │                or an API key; a single account only)
   └─ /var/lib/wisen/wisen.db (SQLite, WAL)
 systemd: wisen-backup.timer     daily, Persistent=true → consistent SQLite snapshot, copied off the box
 ```
@@ -819,11 +825,12 @@ systemd: wisen-backup.timer     daily, Persistent=true → consistent SQLite sna
   root-owned `EnvironmentFile`. **No model key.** Device tokens and login
   sessions are random values stored only as hashes in the database, so there
   is no session secret.
-  Stage B adds the model provider key to the same file, for the Gardener and
-  chat. Synthesis runs on `claude -p` on the owner's subscription (open
-  question 9, decided), logged in for the service's user; the API model is
-  the fallback by config. One `claude -p` process peaked at about 236 MiB on
-  the box (measured 2026-10-28, before its model call: the box's login had
+  Stage B adds the model credential to the same file: the `claude` login of
+  the service's user, for the Synthesizer and (through the Claude Agent SDK)
+  for the Gardener and chat — or an API provider key instead. Synthesis runs
+  on `claude -p` on the owner's subscription (open question 9, decided); the
+  API model is its fallback by config. One `claude -p` process peaked at
+  about 236 MiB on the box (measured 2026-10-28, before its model call: the box's login had
   expired on 2026-09-15; a full call is re-measured once it is logged in
   again), so the units set `MemoryMax=800M` (deploy/README.md).
 - **Backups** hold packets and results only, never raw transcripts, so off-box
@@ -1032,6 +1039,6 @@ out is in [§3.2](#32-stage-b-nrem-on-the-laptop-rem-on-the-server).
    owner's own box, the owner's own use), measure the CLI's memory there, and
    keep the API-key path as the fallback. Synthesis runs on `claude -p` by
    default and on the API model with `WISEN_SYNTH_MODEL=api`; the Gardener
-   uses tools, so it stays on the API model, and chat runs on DeepSeek
-   (§3.2). Measured: about 236 MiB
-   per `claude -p` process (§8.1).
+   and chat use tools, so they reach the same login through the Claude Agent
+   SDK (nothing extra costs money), or run on an API model and its key (§3.2).
+   Measured: about 236 MiB per `claude -p` process (§8.1).

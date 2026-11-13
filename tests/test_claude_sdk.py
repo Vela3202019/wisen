@@ -20,9 +20,9 @@ from wisen import claude_sdk, llm
 from wisen.synthesis import claude_cli
 
 
-def _result(subtype="success", is_error=False, result=None) -> ResultMessage:
+def _result(subtype="success", is_error=False, result=None, usage=None) -> ResultMessage:
     return ResultMessage(subtype=subtype, duration_ms=1, duration_api_ms=1, is_error=is_error, num_turns=1,
-                         session_id="s", result=result)
+                         session_id="s", result=result, usage=usage)
 
 
 def _text_events(text: str) -> list[StreamEvent]:
@@ -56,8 +56,8 @@ def _tool_turn(name: str, args: dict, call_id: str = "toolu_1") -> list:
             _result("error_max_turns", is_error=True)]
 
 
-def _answer_turn(text: str) -> list:
-    return [AssistantMessage(content=[TextBlock(text=text)], model="m"), _result()]
+def _answer_turn(text: str, usage: dict | None = None) -> list:
+    return [AssistantMessage(content=[TextBlock(text=text)], model="m"), _result(usage=usage)]
 
 
 class _patched:
@@ -202,6 +202,35 @@ def test_a_key_in_the_shell_is_blanked_for_the_cli():
         assert agent.run_sync("hi").output == "ok"
     assert fake.calls[0][1].env["ANTHROPIC_API_KEY"] == "", fake.calls[0][1].env
     print("✓ bridge: a key in the shell is blanked for the CLI, so the turn runs on the subscription")
+
+
+def test_the_cli_reports_the_turns_usage():
+    """A turn's tokens are the CLI's own counts, not pydantic-ai's estimate:
+    the Gardener's replay cost is read from here."""
+    agent, _ = _agent()
+    usage = {"input_tokens": 1_200, "output_tokens": 34, "cache_creation_input_tokens": 7,
+             "cache_read_input_tokens": 900}
+    fake = FakeQuery(_answer_turn("ok", usage))
+    with _patched(fake):
+        result = agent.run_sync("hi")
+    assert result.output == "ok"
+    turns = result.usage
+    assert (turns.input_tokens, turns.output_tokens) == (1_200, 34), turns
+    assert (turns.cache_write_tokens, turns.cache_read_tokens) == (7, 900), turns
+    assert turns.unmeasured_requests == 0, turns
+    print("✓ bridge: a turn reports the CLI's own token usage, not an estimate")
+
+
+def test_a_turn_without_usage_is_unmeasured():
+    """The CLI can report no usage: the turn then says so, instead of passing
+    pydantic-ai's guess off as the turn's tokens."""
+    agent, _ = _agent()
+    fake = FakeQuery(_answer_turn("ok"))
+    with _patched(fake):
+        result = agent.run_sync("hi")
+    assert result.output == "ok"
+    assert result.usage.total_tokens == 0 and result.usage.unmeasured_requests == 1, result.usage
+    print("✓ bridge: a turn with no usage from the CLI is marked unmeasured, never estimated")
 
 
 def test_tools_keep_their_schema():

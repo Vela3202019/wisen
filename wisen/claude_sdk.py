@@ -21,11 +21,19 @@ ModelRetry, the Gardener's requires_approval deferral and its stored,
 resumable conversation all work as on an API model. The MCP handlers are
 stubs: the CLI calls them once before it stops at max_turns, and they do
 nothing. The conversation so far is sent as a transcript in the prompt.
+
+The CLI reports the turn's token usage in its result message. A non-streamed
+turn reports those counts to pydantic-ai instead of letting pydantic-ai
+estimate them, and a turn whose result carries none reports
+`unmeasured_requests`, so a count built from it stays an honest lower bound
+rather than a made-up number (the Gardener's replay judge, the one place a
+token count is shown, runs non-streamed).
 """
 import json
 import shutil
 from collections.abc import AsyncIterator
 from contextlib import aclosing
+from dataclasses import dataclass
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -52,6 +60,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.usage import RequestUsage
 
 from wisen import config
 from wisen.llm import SDK_PREFIX
@@ -134,7 +143,8 @@ def options(model: str, messages: list[ModelMessage], info: AgentInfo, stream: b
 
 async def _turn(model: str, messages: list[ModelMessage], info: AgentInfo, stream: bool) -> AsyncIterator:
     """One model turn: text (a str) and tool calls (ToolUseBlocks), in order.
-    Text comes as deltas when streaming, as whole blocks otherwise."""
+    Text comes as deltas when streaming, as whole blocks otherwise. The turn's
+    usage is its last item."""
     try:
         async with aclosing(query(prompt=transcript(messages), options=options(model, messages, info, stream))) as it:
             async for m in it:
@@ -152,9 +162,27 @@ async def _turn(model: str, messages: list[ModelMessage], info: AgentInfo, strea
                     # error_max_turns is the stop after a turn that called tools
                     if m.is_error and m.subtype != "error_max_turns":
                         raise RuntimeError(f"claude-sdk: {m.result or m.subtype}")
+                    yield _ReportedUsage(getattr(m, "usage", None))
                     return
     except ClaudeSDKError as e:
         raise RuntimeError(f"claude-sdk: {e}") from e
+
+
+def _request_usage(raw: dict | None) -> RequestUsage:
+    """The turn's usage as the CLI reported it. A turn whose result carried none
+    is marked `unmeasured_requests`, so pydantic-ai never fills in its own
+    estimate for a number the owner would read."""
+    fields = {"input_tokens": "input_tokens", "output_tokens": "output_tokens",
+              "cache_creation_input_tokens": "cache_write_tokens",
+              "cache_read_input_tokens": "cache_read_tokens"}
+    usage = RequestUsage(**{field: raw[key] for key, field in fields.items() if raw and key in raw})
+    return usage if usage.has_values() else RequestUsage(unmeasured_requests=1)
+
+
+@dataclass
+class _ReportedUsage:
+    """The turn's usage as the CLI's result message carried it, yielded last."""
+    raw: dict | None
 
 
 def _tool_name(b: ToolUseBlock) -> str:
@@ -167,21 +195,27 @@ def sdk_model(name: str) -> FunctionModel:
     model = name.removeprefix(SDK_PREFIX).strip()
 
     async def request(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        parts = []
+        parts, reported = [], None
         async for item in _turn(model, messages, info, stream=False):
-            parts.append(TextPart(item) if isinstance(item, str)
-                         else ToolCallPart(_tool_name(item), item.input, tool_call_id=item.id))
-        return ModelResponse(parts=parts)
+            if isinstance(item, _ReportedUsage):
+                reported = item.raw
+            else:
+                parts.append(TextPart(item) if isinstance(item, str)
+                             else ToolCallPart(_tool_name(item), item.input, tool_call_id=item.id))
+        return ModelResponse(parts=parts, usage=_request_usage(reported))
 
     async def request_stream(messages: list[ModelMessage], info: AgentInfo):
         calls = 0
         empty = True
         async for item in _turn(model, messages, info, stream=True):
-            empty = False
+            if isinstance(item, _ReportedUsage):
+                continue
             if isinstance(item, str):
+                empty = False
                 yield item
             else:
                 calls += 1
+                empty = False
                 yield {calls: DeltaToolCall(name=_tool_name(item), json_args=json.dumps(item.input),
                                             tool_call_id=item.id)}
         if empty:

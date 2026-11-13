@@ -40,8 +40,9 @@ def _judge(kind: str, model: str) -> Agent:
                  instructions=_CLEAN_PROMPT if kind == "clean" else _JUDGE_PROMPT)
 
 
-async def judge_once(case: Case, replay: ReplayResult, model: str | None = None) -> tuple[Verdict, int]:
-    """One judgment on `model` (default: the eval model) and the tokens it spent."""
+async def judge_once(case: Case, replay: ReplayResult, model: str | None = None) -> tuple[Verdict, int, int]:
+    """One judgment on `model` (default: the eval model), the tokens it spent,
+    and how many tokens were not measured (the CLI reported no usage)."""
     model = model or eval_model()
     ground = ("User's next message in the original, smooth session" if case.kind == "clean"
               else "Original correction (ground truth)")
@@ -51,7 +52,7 @@ async def judge_once(case: Case, replay: ReplayResult, model: str | None = None)
         f"## Replay final message\n{replay.final_text}\n\n"
         f"## Replay diff\n{replay.diff or '(no file changes)'}"
     )
-    return result.output, result.usage.total_tokens
+    return result.output, result.usage.total_tokens, result.usage.unmeasured_requests
 
 
 async def judge(case: Case, replay: ReplayResult, k: int = 3, model: str | None = None) -> Verdict:
@@ -60,13 +61,16 @@ async def judge(case: Case, replay: ReplayResult, k: int = 3, model: str | None 
 
 
 async def judge_with_usage(case: Case, replay: ReplayResult, k: int = 3,
-                           model: str | None = None) -> tuple[Verdict, int]:
-    """`judge`, and the tokens all k judgments spent together. `model`: the
-    Gardener's replay judges on its own model; `wisen eval` on the eval model."""
+                           model: str | None = None) -> tuple[Verdict, int, int]:
+    """`judge`, the tokens all k judgments spent together, and how many of the k
+    reported none: with those, the token count is only a lower bound. `model`:
+    the Gardener's replay judges on its own model; `wisen eval` on the eval
+    model."""
     model = model or eval_model()
     runs = await asyncio.gather(*(judge_once(case, replay, model) for _ in range(k)))
-    verdicts = [v for v, _ in runs]
+    verdicts = [v for v, _, _ in runs]
     repeated_votes = sum(v.repeated for v in verdicts)
     majority = repeated_votes > k / 2
     evidence = next((v.evidence for v in verdicts if v.repeated == majority), "")
-    return Verdict(repeated=majority, evidence=evidence), sum(t for _, t in runs)
+    return (Verdict(repeated=majority, evidence=evidence), sum(t for _, t, _ in runs),
+            sum(u for _, _, u in runs))

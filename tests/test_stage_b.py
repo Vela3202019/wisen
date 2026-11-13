@@ -20,7 +20,8 @@ every model is a fake.
   - a failed run that runs again takes in notes sent since; notes sent while
     the server synthesizes make the run go round again
   - the server's Gardener never drafts a redaction placeholder into a file
-  - reflection chat on the server reads reflections only, on DeepSeek
+  - reflection chat on the server reads reflections only: DeepSeek when
+    `WISEN_CHAT_MODEL` is set, else the owner's subscription (one account)
 
 No network or model needed. Run: python3 -m tests.test_stage_b
 """
@@ -681,22 +682,25 @@ def check_chat_model():
     subscription. The laptop's chat keeps WISEN_MODEL."""
     from pydantic_ai.models.openai import OpenAIChatModel
 
+    from tests.test_claude_cli import _no_config
+
     saved = {k: os.environ.get(k) for k in ("WISEN_CHAT_MODEL", "DEEPSEEK_API_KEY")}
     try:
-        for k in saved:
-            os.environ.pop(k, None)
-        assert chat._make_agent(raw_history=False).model.model_name == "claude-sdk:sonnet"
-        os.environ["WISEN_CHAT_MODEL"] = "deepseek-v4-flash"
-        try:
-            chat._make_agent(raw_history=False)
-            raise AssertionError("the server's chat built without DEEPSEEK_API_KEY")
-        except RuntimeError as e:
-            assert "DEEPSEEK_API_KEY" in str(e), e
-        os.environ["DEEPSEEK_API_KEY"] = "fake-deepseek-key"
-        model = chat._make_agent(raw_history=False).model
-        assert isinstance(model, OpenAIChatModel) and model.system == "deepseek", model
-        assert model.model_name == "deepseek-v4-flash" and "deepseek.com" in model.base_url, model.base_url
-        assert getattr(chat._make_agent(raw_history=True).model, "system", None) != "deepseek"
+        with _no_config():
+            for k in saved:
+                os.environ.pop(k, None)
+            assert chat._make_agent(raw_history=False).model.model_name == "claude-sdk:sonnet"
+            os.environ["WISEN_CHAT_MODEL"] = "deepseek-v4-flash"
+            try:
+                chat._make_agent(raw_history=False)
+                raise AssertionError("the server's chat built without DEEPSEEK_API_KEY")
+            except RuntimeError as e:
+                assert "DEEPSEEK_API_KEY" in str(e), e
+            os.environ["DEEPSEEK_API_KEY"] = "fake-deepseek-key"
+            model = chat._make_agent(raw_history=False).model
+            assert isinstance(model, OpenAIChatModel) and model.system == "deepseek", model
+            assert model.model_name == "deepseek-v4-flash" and "deepseek.com" in model.base_url, model.base_url
+            assert getattr(chat._make_agent(raw_history=True).model, "system", None) != "deepseek"
     finally:
         for k, v in saved.items():
             if v is None:
@@ -737,27 +741,29 @@ async def check_multi_account_models():
     one account (the owner). A second account (`wisen cloud user`) takes it
     away: both resolve to an API model, the one line says what to set, and
     /health carries the count and the two models."""
+    from tests.test_claude_cli import _no_config
     from wisen import llm
 
     saved = {k: os.environ.get(k) for k in ("WISEN_MODEL", "WISEN_CHAT_MODEL", "OPENAI_API_KEY")}
     try:
-        for k in saved:
-            os.environ.pop(k, None)
-        mailbox = Mailbox(_TMP / "accounts.db", sender=None, stage="b")
-        mailbox.set_user(USER, PASSWORD)
-        llm.set_server_accounts(lambda: len(mailbox.user_ids()))
-        assert (chat.chat_model(), llm.agent_model_name()) == ("claude-sdk:sonnet", "claude-sdk:sonnet")
-        app = create_app(mailbox, secure_cookies=False, run_engines=False)
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
-            assert (await http.get("/health")).json()["llm"] == {
-                "accounts": 1, "gardener": "claude-sdk:sonnet", "chat": "claude-sdk:sonnet"}
-        mailbox.set_user("guest", "another long password")
-        assert (chat.chat_model(), llm.agent_model_name()) == (llm.DEFAULT_MODEL, llm.DEFAULT_MODEL)
-        line = llm.model_problem()
-        assert "need an API key for openai" in line and "more than one account" in line, line
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
-            assert (await http.get("/health")).json()["llm"] == {
-                "accounts": 2, "gardener": llm.DEFAULT_MODEL, "chat": llm.DEFAULT_MODEL}
+        with _no_config():
+            for k in saved:
+                os.environ.pop(k, None)
+            mailbox = Mailbox(_TMP / "accounts.db", sender=None, stage="b")
+            mailbox.set_user(USER, PASSWORD)
+            llm.set_server_accounts(lambda: len(mailbox.user_ids()))
+            assert (chat.chat_model(), llm.agent_model_name()) == ("claude-sdk:sonnet", "claude-sdk:sonnet")
+            app = create_app(mailbox, secure_cookies=False, run_engines=False)
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
+                assert (await http.get("/health")).json()["llm"] == {
+                    "accounts": 1, "gardener": "claude-sdk:sonnet", "chat": "claude-sdk:sonnet"}
+            mailbox.set_user("guest", "another long password")
+            assert (chat.chat_model(), llm.agent_model_name()) == (llm.DEFAULT_MODEL, llm.DEFAULT_MODEL)
+            line = llm.model_problem()
+            assert "need an API key for openai" in line and "more than one account" in line, line
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
+                assert (await http.get("/health")).json()["llm"] == {
+                    "accounts": 2, "gardener": llm.DEFAULT_MODEL, "chat": llm.DEFAULT_MODEL}
     finally:
         llm.set_server_accounts(None)
         for k, v in saved.items():
