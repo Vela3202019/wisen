@@ -720,18 +720,20 @@ def check_chat_model():
 def check_server_synthesis_path():
     """A stage-B server synthesizes on `claude -p` unless told otherwise; the
     API model is the fallback by config."""
+    from tests.test_claude_cli import _no_config
     from wisen import llm
     from wisen.cloud.server import from_env
 
     saved = {k: os.environ.get(k) for k in ("WISEN_CLOUD_STAGE", "WISEN_SYNTH_MODEL", "WISEN_CLOUD_DB")}
     try:
-        os.environ.update({"WISEN_CLOUD_STAGE": "b", "WISEN_CLOUD_DB": str(_TMP / "from-env.db")})
-        os.environ.pop("WISEN_SYNTH_MODEL", None)
-        from_env(run_engines=False)
-        assert os.environ["WISEN_SYNTH_MODEL"] == "claude-cli:sonnet"
-        os.environ["WISEN_SYNTH_MODEL"] = "api"
-        from_env(run_engines=False)
-        assert os.environ["WISEN_SYNTH_MODEL"] == "api"
+        with _no_config():
+            os.environ.update({"WISEN_CLOUD_STAGE": "b", "WISEN_CLOUD_DB": str(_TMP / "from-env.db")})
+            os.environ.pop("WISEN_SYNTH_MODEL", None)
+            from_env(run_engines=False)
+            assert os.environ["WISEN_SYNTH_MODEL"] == "claude-cli:sonnet"
+            os.environ["WISEN_SYNTH_MODEL"] = "api"
+            from_env(run_engines=False)
+            assert os.environ["WISEN_SYNTH_MODEL"] == "api"
     finally:
         llm.set_server_accounts(None)
         for k, v in saved.items():
