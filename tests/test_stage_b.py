@@ -678,18 +678,24 @@ async def check_chat():
 
 def check_chat_model():
     """The server's chat runs on DeepSeek, named by WISEN_CHAT_MODEL, with
-    DEEPSEEK_API_KEY; with WISEN_CHAT_MODEL unset, on the owner's Claude
-    subscription. The laptop's chat keeps WISEN_MODEL."""
+    DEEPSEEK_API_KEY; with WISEN_CHAT_MODEL unset, on the Gardener's model: a
+    configured API model and its key, else the owner's Claude subscription. The
+    laptop's chat keeps WISEN_MODEL."""
     from pydantic_ai.models.openai import OpenAIChatModel
 
     from tests.test_claude_cli import _no_config
 
-    saved = {k: os.environ.get(k) for k in ("WISEN_CHAT_MODEL", "DEEPSEEK_API_KEY")}
+    saved = {k: os.environ.get(k) for k in ("WISEN_CHAT_MODEL", "DEEPSEEK_API_KEY", "WISEN_MODEL",
+                                            "OPENAI_API_KEY")}
     try:
         with _no_config():
             for k in saved:
                 os.environ.pop(k, None)
             assert chat._make_agent(raw_history=False).model.model_name == "claude-sdk:sonnet"
+            os.environ.update({"WISEN_MODEL": "openai:gpt-5.6-terra", "OPENAI_API_KEY": "sk-openai-test"})
+            assert chat._make_agent(raw_history=False).model.model_name == "gpt-5.6-terra"
+            for k in ("WISEN_MODEL", "OPENAI_API_KEY"):
+                os.environ.pop(k, None)
             os.environ["WISEN_CHAT_MODEL"] = "deepseek-v4-flash"
             try:
                 chat._make_agent(raw_history=False)
@@ -708,7 +714,7 @@ def check_chat_model():
             else:
                 os.environ[k] = v
     print("✓ stage B: the server's chat runs on DeepSeek by WISEN_CHAT_MODEL and DEEPSEEK_API_KEY, "
-          "else on the subscription")
+          "else on the Gardener's model")
 
 
 def check_server_synthesis_path():
@@ -764,7 +770,7 @@ async def check_multi_account_models():
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
                 assert (await http.get("/health")).json()["llm"] == {
                     "accounts": 1, "gardener": "claude-sdk:sonnet", "chat": "claude-sdk:sonnet",
-                    "refused": None}
+                    "chat_from": "the Gardener's model", "refused": None}
             mailbox.set_user("guest", "another long password")
             assert (chat.chat_model(), llm.agent_model_name()) == (llm.DEFAULT_MODEL, llm.DEFAULT_MODEL)
             line = llm.model_problem()
@@ -779,7 +785,15 @@ async def check_multi_account_models():
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
                 health = (await http.get("/health")).json()
             assert health["llm"] == {"accounts": 2, "gardener": "claude-sdk:sonnet",
-                                     "chat": "claude-sdk:sonnet", "refused": refused}, health
+                                     "chat": "claude-sdk:sonnet", "chat_from": "the Gardener's model",
+                                     "refused": refused}, health
+            # WISEN_CHAT_MODEL names chat alone, and the guard lets that model be.
+            os.environ["WISEN_CHAT_MODEL"] = "deepseek-v4-flash"
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
+                assert (await http.get("/health")).json()["llm"] == {
+                    "accounts": 2, "gardener": "claude-sdk:sonnet", "chat": "deepseek:deepseek-v4-flash",
+                    "chat_from": "WISEN_CHAT_MODEL", "refused": refused}, refused
+            os.environ.pop("WISEN_CHAT_MODEL", None)
             os.environ.pop("WISEN_MODEL", None)
             # One account runs the same subscription config.
             single = Mailbox(_TMP / "one-account.db", sender=None, stage="b")

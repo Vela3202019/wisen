@@ -201,14 +201,15 @@ same logged-in CLI, with `ANTHROPIC_API_KEY` blanked. Anthropic does not let
 third-party products offer claude.ai login unless it has approved them ([Agent
 SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)). An API key is the alternative: `WISEN_MODEL` and its
 key for the Gardener, DeepSeek for chat (`WISEN_CHAT_MODEL`), and
-`WISEN_SYNTH_MODEL=api` for synthesis.
+`WISEN_SYNTH_MODEL=api` for synthesis. Chat runs on `WISEN_CHAT_MODEL` when it
+is set, and otherwise on the Gardener's own model.
 
 What each job needs:
 
 | Job        | Runs on                                        | Needs                                         |
 |------------|------------------------------------------------|-----------------------------------------------|
 | Synthesis  | `claude -p` (`WISEN_SYNTH_MODEL`)              | the CLI logged in for the service's user (step 2) |
-| Chat       | the subscription, or DeepSeek if `WISEN_CHAT_MODEL` is set | the same login (single account only), or `DEEPSEEK_API_KEY` |
+| Chat       | DeepSeek if `WISEN_CHAT_MODEL` is set, else the Gardener's model | `DEEPSEEK_API_KEY`, or whatever the Gardener needs |
 | Gardener   | the subscription, or `WISEN_MODEL` if set      | the same login (single account only), or that provider's API key |
 
 1. Upgrade the server first (see above), then add to `/etc/wisen/wisen.env`:
@@ -262,13 +263,13 @@ the service's cgroup next to the server (~130 MB), so both units set
 **Chat.** `POST /api/chat` (logged in, stage B only) answers questions from
 the server's reflections and streams the answer as server-sent events. It is
 stateless: the caller sends the conversation each turn, and nothing is
-stored. By default it runs on your subscription, so the reflection text it
-answers from (already redacted by the egress gate on the laptop) and the
-questions asked reach Anthropic under your own Claude account. With
-`WISEN_CHAT_MODEL` set it runs on DeepSeek instead and they reach DeepSeek's
-servers. Without a usable model (a logged-out CLI, or `WISEN_CHAT_MODEL`
-without `DEEPSEEK_API_KEY`), chat answers with one line and synthesis is not
-affected.
+stored. It runs on the Gardener's model, so the reflection text it answers
+from (already redacted by the egress gate on the laptop) and the questions
+asked reach Anthropic under your own Claude account when that model is the
+subscription. With `WISEN_CHAT_MODEL` set it runs on DeepSeek instead and they
+reach DeepSeek's servers. Without a usable model (a logged-out CLI, or
+`WISEN_CHAT_MODEL` without `DEEPSEEK_API_KEY`), chat answers with one line and
+synthesis is not affected.
 
 ## Checks on the box (step 4)
 

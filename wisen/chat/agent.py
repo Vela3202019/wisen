@@ -12,9 +12,10 @@ Designed to be called via POST /chat (SSE streaming).
 
 On a stage-B server (wisen/cloud) the same agent answers from reflections
 only (`raw_history=False`), on DeepSeek (WISEN_CHAT_MODEL) or, with that
-unset, the owner's Claude subscription (see llm.py): the
-two search tools read the laptop's raw history and configs, which never
-reach the server.
+unset, on the Gardener's model (see llm.py): the configured model and its key,
+else the owner's Claude subscription — which a server serving more than one
+account never uses. The two search tools read the laptop's raw history and
+configs, which never reach the server.
 
 `answer` is the one-shot form for a question asked in Telegram (a device job
 from the server, answered on the laptop): reflection tools only, unless the

@@ -95,11 +95,15 @@ def test_as_model():
 
 
 def test_server_chat_model():
-    with _no_config(), _env(WISEN_CHAT_MODEL=None):
+    with _no_config(), _env(WISEN_CHAT_MODEL=None, WISEN_MODEL=None, OPENAI_API_KEY=None):
         assert llm.chat_model() == "claude-sdk:sonnet"
+        assert llm.chat_model() == llm.agent_model_name()
+    with _no_config(), _env(WISEN_CHAT_MODEL=None, WISEN_MODEL="openai:gpt-5.6-terra",
+                            OPENAI_API_KEY="sk-openai-test"):
+        assert llm.chat_model() == "openai:gpt-5.6-terra"   # a configured API model wins
     with _no_config(), _env(WISEN_CHAT_MODEL="deepseek-v4-flash"):
         assert llm.chat_model() == "deepseek:deepseek-v4-flash"
-    print("✓ model: the server's chat is DeepSeek by WISEN_CHAT_MODEL, else the subscription")
+    print("✓ model: the server's chat is DeepSeek by WISEN_CHAT_MODEL, else the Gardener's model")
 
 
 def test_model_problem_for_the_subscription():

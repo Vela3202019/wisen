@@ -242,8 +242,9 @@ the new packet types.
   is the fallback to the API model. The Gardener and reflection chat use
   tools, so they run on the owner's subscription through the Claude Agent SDK
   (`claude-sdk:sonnet`, `wisen/claude_sdk.py`), or on `WISEN_MODEL` with its
-  API key; chat runs on DeepSeek when `WISEN_CHAT_MODEL` is set (owner's
-  decision), so the reflections it reads, already redacted, reach DeepSeek.
+  API key; chat runs on the Gardener's model, or on DeepSeek when
+  `WISEN_CHAT_MODEL` is set (owner's decision), so the reflections it reads,
+  already redacted, reach DeepSeek.
   A server that serves other people must use an API key: these subscription
   paths apply only while the mailbox holds a single account (the owner), and
   explicit configuration does not override that — with more accounts chat, the

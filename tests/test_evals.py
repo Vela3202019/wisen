@@ -290,7 +290,7 @@ def test_replay_cost_without_usage():
     the CLI's own count when it does report one."""
     from pydantic_ai.usage import RequestUsage
 
-    from tests.test_claude_cli import _no_config
+    from tests.test_claude_cli import _env, _no_config
     from wisen.gardener import loop
 
     def respond_with(usage):
@@ -308,7 +308,7 @@ def test_replay_cost_without_usage():
     judge._judge.cache_clear()
     try:
         lines = {}
-        with _no_config():
+        with _no_config(), _env(WISEN_MODEL=None):
             for name, usage in (("none", RequestUsage(unmeasured_requests=1)),
                                 ("reported", RequestUsage(input_tokens=7, output_tokens=3))):
                 judge.as_model = lambda name, usage=usage: FunctionModel(respond_with(usage))

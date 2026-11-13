@@ -12,7 +12,9 @@ The three that matter:
   SDK path blanks it), so a key in your shell never moves it to API billing.
   Prefer an API key? Set `"api"` to run it on `model`, which must then be an
   API model.
-- **`model`** (`WISEN_MODEL`): the chat and Gardener model. Unset, they run on
+- **`model`** (`WISEN_MODEL`): the chat and Gardener model (a stage-B
+  server's chat uses `WISEN_CHAT_MODEL` when that is set, and otherwise this
+  one). Unset, they run on
   your Claude Pro/Max subscription (`claude-sdk:sonnet`) unless
   `OPENAI_API_KEY` is set, which makes the default `openai:gpt-5.6-terra`.
   `claude-sdk:<model>` (for example `claude-sdk:opus`) picks the subscription

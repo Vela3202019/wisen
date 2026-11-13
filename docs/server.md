@@ -43,7 +43,8 @@ first** (an older server refuses the new packets):
   the subscription (even when configured explicitly) and needs API models.
   An API key is the alternative: `WISEN_MODEL` with its provider's
   key for the Gardener, DeepSeek for chat (`WISEN_CHAT_MODEL`,
-  `DEEPSEEK_API_KEY`), and `WISEN_SYNTH_MODEL=api` to put synthesis on the
+  `DEEPSEEK_API_KEY`) — chat otherwise uses the Gardener's model — and
+  `WISEN_SYNTH_MODEL=api` to put synthesis on the
   API model too. See
   [deploy/README.md](../deploy/README.md#stage-b-the-server-reflects).
 - **Each laptop:** `[cloud] stage = "b"` in `~/.wisen/config.toml` (or

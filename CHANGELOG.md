@@ -15,10 +15,12 @@ All notable changes to wisen are recorded here. The format follows
   on the API model. They skip with one line only when neither a key nor a
   logged-in `claude` CLI is available, and the Gardener's replay judges each
   draft on the same model, so a subscription alone also covers it. A stage-B
-  server's chat runs on the subscription when `WISEN_CHAT_MODEL` is unset,
-  but only while its mailbox holds a single account: with more, chat, the
-  Gardener and synthesis refuse `claude-sdk:`/`claude-cli:` even when they
-  are configured, and need API models.
+  server's chat uses `WISEN_CHAT_MODEL` when it is set, and otherwise the
+  Gardener's model (a configured API model and its key, else the
+  subscription), but only while its mailbox holds a single account: with
+  more, chat, the Gardener and synthesis refuse
+  `claude-sdk:`/`claude-cli:` even when they are configured, and need API
+  models.
 
 ## [0.2.1] - 2026-11-12
 

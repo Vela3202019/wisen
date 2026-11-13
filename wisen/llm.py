@@ -21,12 +21,12 @@ configured and OPENAI_API_KEY is unset; WISEN_MODEL=claude-sdk:<model> picks it
 explicitly. Evals stay on this API model.
 
 A stage-B server's chat (wisen/cloud) runs on DeepSeek when WISEN_CHAT_MODEL
-names the DeepSeek model (DEEPSEEK_API_KEY is its key), and on the
-subscription when it is unset — but only while the server holds a single
-account (the owner). With more, one person's subscription must never answer
-for other people, so chat, the Gardener and synthesis refuse a subscription
-model even when it is configured explicitly (`subscription_refused`), and
-need API models.
+names the DeepSeek model (DEEPSEEK_API_KEY is its key); unset, it runs on the
+same model as the Gardener (`agent_model_name`). The subscription is only for
+a server that holds a single account (the owner). With more, one person's
+subscription must never answer for other people, so chat, the Gardener and
+synthesis refuse a subscription model even when it is configured explicitly
+(`subscription_refused`), and need API models.
 
 Without a usable model — no key for an API model, or the `claude` CLI missing
 or logged out for the subscription — the Gardener and chat skip with one line
@@ -171,10 +171,8 @@ def as_model(name: str):
 
 def chat_model() -> str:
     """The stage-B server's chat model: DeepSeek, named by WISEN_CHAT_MODEL;
-    unset, the Claude subscription for a single-account server, and the default
-    API model for a server that serves more than one account (which
-    `subscription_refused` then holds to an API model)."""
+    unset, the Gardener's own model (`agent_model_name`): the configured model
+    and its key, else the Claude subscription — which a server with more than
+    one account never runs."""
     name = config.get("model", "chat_model", "WISEN_CHAT_MODEL")
-    if name:
-        return f"deepseek:{name}"
-    return get_model() if many_accounts() else DEFAULT_SDK_MODEL
+    return f"deepseek:{name}" if name else agent_model_name()
