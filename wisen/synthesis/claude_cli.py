@@ -6,7 +6,8 @@ per-token API billing — subscription auth only works inside the CLI, not throu
 pydantic-ai (see llm.py). This is the default (WISEN_SYNTH_MODEL=claude-cli:sonnet;
 requires the `claude` CLI installed and logged in); WISEN_SYNTH_MODEL=api runs
 synthesis on [model].model instead. Only synthesis reads this var; chat and the
-Gardener use tools, which `claude -p` does not serve, so they stay on [model].model.
+Gardener use tools, which `claude -p` does not serve: they reach the subscription
+through the Claude Agent SDK instead (wisen/claude_sdk.py).
 
 `claude -p` is an agent, not a single-shot structured-output API: run inside the project
 it loads MCP servers/skills/tools and wanders instead of answering. So we run it in a

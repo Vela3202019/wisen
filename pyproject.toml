@@ -25,6 +25,7 @@ classifiers = [
     "Topic :: Software Development",
 ]
 dependencies = [
+    "claude-agent-sdk>=0.2.180",
     "httpx>=0.27",
     "pydantic>=2.12",
     "pydantic-ai[google,openai,anthropic]>=2.57.0",

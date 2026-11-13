@@ -16,6 +16,7 @@ from pathlib import Path
 
 from wisen.evals.cases import Case, load_cases
 from wisen.evals.replay import run_replay
+from wisen.llm import eval_model
 
 REPORTS_DIR = Path(__file__).parent / "reports"
 
@@ -36,10 +37,12 @@ class Variant:
     project_files: dict[str, str] = field(default_factory=dict)
 
 
-async def run_case(case: Case, variant: Variant | Path | None, k: int) -> dict:
+async def run_case(case: Case, variant: Variant | Path | None, k: int, model: str | None = None) -> dict:
     """Replay one case under one config and judge it: {case, passed, evidence,
     tokens, cost_usd}, or {case, error}. This is the interface `compare` and
-    `run_suite` call; a test passes a fake with the same shape."""
+    `run_suite` call; a test passes a fake with the same shape. `model`: what
+    the judge runs on (default: the eval model; the Gardener's replay passes
+    the Gardener's own)."""
     from wisen.evals.judge import judge_with_usage  # builds a model agent
 
     if not isinstance(variant, Variant):
@@ -49,12 +52,13 @@ async def run_case(case: Case, variant: Variant | Path | None, k: int) -> dict:
                            project_files=variant.project_files))
     if replay.error:
         return {"case": case.id, "error": replay.error}
-    verdict, judge_tokens = await judge_with_usage(case, replay, k)
+    verdict, judge_tokens, judge_unmeasured = await judge_with_usage(case, replay, k, model)
     return {
         "case": case.id,
         "passed": not verdict.repeated,
         "evidence": verdict.evidence,
         "tokens": replay.tokens + judge_tokens,
+        "tokens_unmeasured": judge_unmeasured,
         "cost_usd": replay.cost_usd,
     }
 
@@ -72,12 +76,13 @@ async def compare(cases: list[Case], current: Variant, proposed: Variant, *, cap
     """Replay up to `cap` confirmed eval cases and `cap` clean-set cases under
     the current and the proposed config. The accept rule (`meets_rule`): the
     eval pass rate rises and the clean-set pass rate does not drop. None when
-    there is nothing to judge it on."""
+    there is nothing to judge it on. `tokens_unmeasured` counts the replays
+    whose judge reported no usage, so `tokens` is a lower bound for those."""
     confirmed = [c for c in cases if c.status == "confirmed" and c.split == "eval" and c.behavior_check]
     picked = {"eval": [c for c in confirmed if c.kind == "correction"][:cap],
               "clean": [c for c in confirmed if c.kind == "clean"][:cap]}
     report: dict = {"cases": {kind: len(cs) for kind, cs in picked.items()}, "replays": 0,
-                    "tokens": 0, "cost_usd": None}
+                    "tokens": 0, "tokens_unmeasured": 0, "cost_usd": None}
     for name, variant in (("current", current), ("proposed", proposed)):
         rates = {}
         for kind, kind_cases in picked.items():
@@ -85,6 +90,8 @@ async def compare(cases: list[Case], current: Variant, proposed: Variant, *, cap
             for r in results:
                 report["replays"] += 1
                 report["tokens"] += r.get("tokens") or 0
+                if r.get("tokens_unmeasured"):
+                    report["tokens_unmeasured"] += 1
                 if r.get("cost_usd") is not None:
                     report["cost_usd"] = round((report["cost_usd"] or 0) + r["cost_usd"], 4)
             rates[kind] = _rate(results)
@@ -101,6 +108,9 @@ async def compare(cases: list[Case], current: Variant, proposed: Variant, *, cap
 
 async def run_suite(claude_md_a: Path | None, claude_md_b: Path | None = None,
                     k: int = 3, limit: int | None = None) -> dict:
+    """The suite per config, judged on the eval model: refused up front when the
+    configured model is the subscription's, before any replay runs."""
+    api_model = eval_model()
     cases = _runnable(load_cases())
     if limit:
         cases = cases[:limit]
@@ -113,7 +123,7 @@ async def run_suite(claude_md_a: Path | None, claude_md_b: Path | None = None,
     if claude_md_b is not None:
         variants["b"] = claude_md_b
     for name, claude_md in variants.items():
-        results = [await run_case(c, claude_md, k) for c in cases]
+        results = [await run_case(c, claude_md, k, api_model) for c in cases]
         report["configs"][name] = {
             "claude_md": str(claude_md) if claude_md else "(current)",
             "pass_rate": _rate(results),

@@ -1056,6 +1056,53 @@ async def check_replay_before_proposal() -> None:
     print("✓ replay: proposed vs current plus the clean set, capped per proposal, cost recorded, on the proposal")
 
 
+async def check_a_subscription_alone_gardens() -> None:
+    """No API key and no WISEN_MODEL: the Gardener drafts on the subscription and
+    the replay that runs before a proposal is recorded is judged on that same
+    model, so the day's drafts are stored (only the judge's model changed; the
+    replay itself still runs `claude -p`, faked here)."""
+    from tests.test_claude_cli import _env, _no_config
+    from wisen.evals import judge
+    from wisen.evals.replay import ReplayResult
+    from wisen.synthesis import claude_cli
+
+    real_replay = loop.replay_case
+    world("subscription")
+    store, engine, _, script = _setup("subscription")
+    cases = [Case(id="sub1", date=DAY, session_id="s", source_path="x", project_path=str(DEV / "demo"),
+                  detector="explicit-correction", context=[ContextTurn(role="user", content="run the tests")],
+                  correction="no", behavior_check="Did it guess the test command?", split="eval",
+                  status="confirmed", kind="correction")]
+    judged = []
+
+    def respond(messages: list, info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {"repeated": False, "evidence": "x"})])
+
+    real = (loop.load_cases, loop.replay_case, loop.gardener_model, judge.as_model, runner.run_replay,
+            claude_cli.cli_problem)
+    loop.load_cases = lambda: cases
+    loop.replay_case = real_replay            # the real one: it goes through the judge
+    judge.as_model = lambda name: judged.append(name) or FunctionModel(respond)
+    runner.run_replay = lambda *a, **kw: ReplayResult(final_text="done", diff="", tokens=7)
+    claude_cli.cli_problem = lambda: None     # the CLI is logged in
+    judge._judge.cache_clear()
+    first_run(script)
+    try:
+        with _no_config(), _env(WISEN_MODEL=None, OPENAI_API_KEY=None):
+            result = await garden(store, engine, DAY)
+    finally:
+        (loop.load_cases, loop.replay_case, loop.gardener_model, judge.as_model, runner.run_replay,
+         claude_cli.cli_problem) = real
+        judge._judge.cache_clear()
+    assert result["proposals"] == 2, result
+    assert judged and set(judged) == {"claude-sdk:sonnet"}, judged
+    made = by_target(await Proposals(store).list(states=("proposed",)))
+    assert set(made) == {"demo:CLAUDE.md", "home:.claude/CLAUDE.md"}, made
+    for p in made.values():
+        assert p.payload["replay"] and "pass rate" in p.payload["eval_summary"], p.payload["eval_summary"]
+    print("✓ gardener: with no key, the subscription drafts, is replayed and judged on itself, and the drafts are stored")
+
+
 # ── paired with a server: the batch push, the git states, the measure timer ───
 
 async def check_with_server() -> None:
@@ -1145,6 +1192,7 @@ async def main():
     check_run_from_subdirectory()
     check_verdicts()
     await check_replay_before_proposal()
+    await check_a_subscription_alone_gardens()
     store, engine, clock, script = _setup("laptop")
     made = await check_propose_and_batch(store, engine, clock, script)
     await check_apply_exactly_once(store, engine, clock, made)

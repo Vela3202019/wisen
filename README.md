@@ -40,26 +40,31 @@ read. You approve each fix, and later sessions show whether it helped.
 ## Quickstart
 
 You need Python 3.11+. **Already have a Claude Pro/Max subscription? The
-daily reflection runs on it at no extra cost**, through the Claude Code CLI:
-`claude` installed and logged in. wisen leaves `ANTHROPIC_API_KEY` out of the
-CLI's environment, so a key in your shell never moves it to API billing.
-Prefer an API key? Set `synth_model = "api"` (see
-[Configuration](docs/configuration.md)).
+daily reflection, chat and the Gardener's proposals all run on it at no extra
+cost.** You need the `claude` CLI installed and logged in. The reflection uses
+the Claude Code CLI. Chat and the Gardener use tools, so they go through the
+[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), which
+drives the same logged-in CLI. It is your own subscription, on your own server
+or machine, over your own history. A key in your shell never moves any of it to
+API billing: synthesis leaves `ANTHROPIC_API_KEY` out of the CLI's environment,
+and the Agent SDK path blanks it (it merges its environment over yours).
+Anthropic does not let third-party products offer claude.ai login unless it has
+approved them ([Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)). If that rules it out for you, an
+API key is the alternative.
 
-Chat and the Gardener's proposals use tools, which the Claude Code CLI does
-not serve, so they need one API key. The default model is
-`openai:gpt-5.6-terra`, so `OPENAI_API_KEY`; any pydantic-ai provider works.
-Without that key `wisen synthesize` still saves the day's reflection and skips
-the Gardener with one line saying which key to set, and chat answers the same
-way. Once the key is set, `wisen gardener run <date>` runs that day's Gardener
-(the day's reflection is already saved, so nothing is synthesized again). The
-Gardener and chat on your subscription are coming next.
+Prefer an API key? Set `synth_model = "api"` for the reflection, and
+`OPENAI_API_KEY` (the default model is `openai:gpt-5.6-terra`) or another
+`WISEN_MODEL` with its key for chat and the Gardener; any pydantic-ai provider
+works (see [Configuration](docs/configuration.md)). With neither a key nor a
+logged-in CLI, `wisen synthesize` stops with one line naming the fix, and chat
+and the Gardener skip with one line saying what to set. Once that is fixed,
+`wisen gardener run <date>` runs that day's Gardener (the day's reflection is
+already saved, so nothing is synthesized again).
 
 ```bash
 git clone https://github.com/Vela3202019/wisen && cd wisen
 pip install -e ".[server]"
-claude auth status                      # logged in? the reflection runs on your subscription
-export OPENAI_API_KEY=sk-...            # chat and proposals; or put it in a repo-root .env
+claude auth status                      # logged in? reflection, chat and proposals run on your subscription
 wisen synthesize                        # reflect on yesterday (one real LLM call)
 wisen serve                             # API on :8000: reflections and chat
 ```
@@ -82,8 +87,9 @@ Every command and install extra is in [docs/commands.md](docs/commands.md).
 - **Your own server, optional.** The dashboard on your phone, push
   notifications, an approval inbox and a Telegram bot. It never sees a
   transcript ([docs/server.md](docs/server.md)).
-- **Any model, or your subscription.** Any pydantic-ai model string; synthesis
-  can also run on a Claude Pro/Max subscription through the Claude Code CLI.
+- **Any model, or your subscription.** Any pydantic-ai model string, or your
+  Claude Pro/Max subscription for the reflection, chat and the Gardener (through
+  the Claude Code CLI and the Claude Agent SDK).
 - **No database server.** One SQLite file (`~/.wisen/wisen.db`), created on
   first use.
 
@@ -159,8 +165,9 @@ A real reflection, abridged:
 - **Goes to the model provider you pick:** excerpts of the day's sessions
   (each turn cut to 400 characters, and a turn can include tool output), up to 20 config
   files, commit messages, and chat search results. Synthesis defaults to
-  `claude-cli:…`, which sends them to Anthropic under your own Claude account;
-  `synth_model = "api"` sends them to `model`'s provider instead. Voice sends
+  `claude-cli:…`, and chat and the Gardener to `claude-sdk:…` when no API key
+  is set. Both send this to Anthropic under your own Claude account.
+  `synth_model = "api"` and an API `model` send it to that provider instead. Voice sends
   your speech to Google's Gemini.
 - **Goes to your own server, if you pair one:** derived results, which can
   quote short pieces of your sessions; in stage B also the Observer's notes

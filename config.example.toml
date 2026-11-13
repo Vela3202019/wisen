@@ -8,19 +8,25 @@
 # (`claude auth status`). wisen leaves ANTHROPIC_API_KEY out of the CLI's
 # environment, so a key in your shell never moves it to API billing.
 # synth_model = "claude-cli:sonnet"   # the default; or claude-cli:opus
-# Prefer an API key? Synthesize on the chat model below instead:
+# Prefer an API key? Synthesize on the API chat model below instead (`model`
+# must then be an API model, not claude-sdk:*):
 # synth_model = "api"
 
-# pydantic-ai model string for chat and the Gardener (WISEN_MODEL). These use
-# tools, which the Claude Code CLI does not serve, so they need an API key:
+# The model for chat and the Gardener (WISEN_MODEL). Unset, they run on your
+# Claude subscription through the Claude Agent SDK (claude-sdk:sonnet), which
+# drives the same logged-in `claude` CLI. If OPENAI_API_KEY is set, the
+# default is openai:gpt-5.6-terra instead. It is your own subscription, on your
+# own server or machine, over your own history. Anthropic's policy on claude.ai
+# login in Agent SDK products: https://code.claude.com/docs/en/agent-sdk/overview
+# An API key is the alternative: a pydantic-ai model string plus its key.
 # openai:* needs OPENAI_API_KEY, deepseek:* needs DEEPSEEK_API_KEY,
 # google:* needs GEMINI_API_KEY (or GOOGLE_API_KEY),
 # anthropic:* needs ANTHROPIC_API_KEY.
-# Without it the synthesis still saves its reflection; the Gardener and chat
-# skip with one line naming the key (running them on the subscription is next).
-# Any other pydantic-ai provider works the same way. Examples:
-#   deepseek:deepseek-v4-flash · google:gemini-2.5-flash · anthropic:claude-sonnet-5
-model = "openai:gpt-5.6-terra"
+# With neither that key nor a logged-in CLI, the synthesis still saves its
+# reflection, and the Gardener and chat skip with one line saying what to set.
+# Examples:
+#   claude-sdk:opus · deepseek:deepseek-v4-flash · google:gemini-2.5-flash · anthropic:claude-sonnet-5
+# model = "claude-sdk:sonnet"
 
 [storage]
 sqlite_path = "~/.wisen/wisen.db"           # (WISEN_DB_PATH) created on first use

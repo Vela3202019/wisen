@@ -31,7 +31,7 @@ from wisen.connectors.claude_code import (
 )
 from wisen.evals.cases import Case, ContextTurn, Detector, assign_split
 from wisen.ingestion.normalizer import truncate_content
-from wisen.llm import get_model
+from wisen.llm import eval_model
 
 TOOL_REJECTION_MARKER = "The user doesn't want to proceed with this tool use"
 INTERRUPTION_MARKER = "[Request interrupted by user"
@@ -262,7 +262,7 @@ Be specific to this case; never generic."""
 @cache
 def _enricher() -> Agent:
     # Built on first use: importing the miner (the metrics do) needs no model key.
-    return Agent(get_model(), output_type=Enrichment, instructions=_ENRICH_PROMPT)
+    return Agent(eval_model(), output_type=Enrichment, instructions=_ENRICH_PROMPT)
 
 
 async def enrich(case: Case) -> Case:

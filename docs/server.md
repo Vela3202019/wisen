@@ -35,12 +35,17 @@ Synthesizer and the Gardener to the server, so the reflection is ready when
 you wake up, even with the lid closed. Turn it on at both ends, **server
 first** (an older server refuses the new packets):
 
-- **Server:** `WISEN_CLOUD_STAGE=b`. Synthesis then runs on `claude -p` on
-  your Claude subscription (log the CLI in for the service's user), the
-  Gardener on `WISEN_MODEL` with that provider's API key in the server's
-  environment file, and chat on DeepSeek (`WISEN_CHAT_MODEL`,
-  `DEEPSEEK_API_KEY`); `WISEN_SYNTH_MODEL=api` puts synthesis on the API
-  model too. See
+- **Server:** `WISEN_CLOUD_STAGE=b`. Synthesis, the Gardener and chat then
+  run on your own Claude subscription, on your own server, over your own
+  history. Log the CLI in for the service's user. Synthesis uses `claude -p`,
+  and the Gardener and chat use the Claude Agent SDK on the same login, while
+  the mailbox holds a single account: a server with more refuses all three on
+  the subscription (even when configured explicitly) and needs API models.
+  An API key is the alternative: `WISEN_MODEL` with its provider's
+  key for the Gardener, DeepSeek for chat (`WISEN_CHAT_MODEL`,
+  `DEEPSEEK_API_KEY`) — chat otherwise uses the Gardener's model — and
+  `WISEN_SYNTH_MODEL=api` to put synthesis on the
+  API model too. See
   [deploy/README.md](../deploy/README.md#stage-b-the-server-reflects).
 - **Each laptop:** `[cloud] stage = "b"` in `~/.wisen/config.toml` (or
   `WISEN_CLOUD_STAGE=b`) and restart `wisen worker`. This is the laptop's

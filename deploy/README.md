@@ -184,30 +184,44 @@ waits up to 30 minutes, then synthesizes the day from every laptop's notes
 as one reflection, runs the Gardener, and sends one push. Approved changes are
 still applied by the laptop whose file they change.
 
-Synthesis runs on `claude -p`, on the owner's Claude subscription (the
-owner's own box, for the owner's own use; a server that serves other people
-must use an API key). The Gardener uses tools, which `claude -p` does not
-serve, so for now it runs on `WISEN_MODEL` and its API key. Reflection chat
-runs on DeepSeek, through pydantic-ai's DeepSeek provider. `WISEN_SYNTH_MODEL=api`
-moves synthesis to the API model too: that is the fallback, by config.
+By default every job runs on your own subscription, on your own server or
+machine, over your own history: the owner's Claude subscription, on the
+owner's own box, for the owner's own use. A server that serves other people
+must use an API key. wisen holds every per-user job to that, and explicit
+config does not override it: with a single account the jobs default to the
+subscription; adding a second one (`wisen cloud user`) refuses
+`claude-sdk:`/`claude-cli:` for chat, the Gardener and synthesis **even when
+`/etc/wisen/wisen.env` names them**. Then chat and the Gardener need an API
+model — `WISEN_CHAT_MODEL` (DeepSeek), or `WISEN_MODEL` and its key — and
+synthesis `WISEN_SYNTH_MODEL=api`; the start-up line and `/health` say so
+(the account count, the models, and any refusal). Synthesis runs on
+`claude -p`. The Gardener and chat use
+tools, so they run through the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), which drives the
+same logged-in CLI, with `ANTHROPIC_API_KEY` blanked. Anthropic does not let
+third-party products offer claude.ai login unless it has approved them ([Agent
+SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)). An API key is the alternative: `WISEN_MODEL` and its
+key for the Gardener, DeepSeek for chat (`WISEN_CHAT_MODEL`), and
+`WISEN_SYNTH_MODEL=api` for synthesis. Chat runs on `WISEN_CHAT_MODEL` when it
+is set, and otherwise on the Gardener's own model.
 
 What each job needs:
 
-| Job        | Runs on                         | Needs                                         |
-|------------|---------------------------------|-----------------------------------------------|
-| Synthesis  | `claude -p` (`WISEN_SYNTH_MODEL`) | the CLI logged in for the service's user (step 2) |
-| Chat       | DeepSeek (`WISEN_CHAT_MODEL`)    | `DEEPSEEK_API_KEY`                            |
-| Gardener   | `WISEN_MODEL`                   | that provider's API key                       |
+| Job        | Runs on                                        | Needs                                         |
+|------------|------------------------------------------------|-----------------------------------------------|
+| Synthesis  | `claude -p` (`WISEN_SYNTH_MODEL`)              | the CLI logged in for the service's user (step 2) |
+| Chat       | DeepSeek if `WISEN_CHAT_MODEL` is set, else the Gardener's model | `DEEPSEEK_API_KEY`, or whatever the Gardener needs |
+| Gardener   | the subscription, or `WISEN_MODEL` if set      | the same login (single account only), or that provider's API key |
 
 1. Upgrade the server first (see above), then add to `/etc/wisen/wisen.env`:
 
    ```bash
    WISEN_CLOUD_STAGE=b
-   WISEN_MODEL=anthropic:claude-sonnet-5   # the Gardener; any pydantic-ai model string
-   ANTHROPIC_API_KEY=…                     # the key for that provider
-   WISEN_CHAT_MODEL=deepseek-v4-flash      # chat: the DeepSeek model name; no default
-   DEEPSEEK_API_KEY=…                      # chat's key; no default
-   # WISEN_SYNTH_MODEL=claude-cli:sonnet   # the default in stage B; "api" falls back to WISEN_MODEL
+   # That is all for the subscription. To use API keys instead:
+   # WISEN_MODEL=anthropic:claude-sonnet-5   # the Gardener; any pydantic-ai model string
+   # ANTHROPIC_API_KEY=…                     # the key for that provider
+   # WISEN_CHAT_MODEL=deepseek-v4-flash      # chat on DeepSeek: the model name
+   # DEEPSEEK_API_KEY=…                      # chat's key
+   # WISEN_SYNTH_MODEL=claude-cli:sonnet     # the default in stage B; "api" falls back to WISEN_MODEL
    ```
 
    The keys live only in the env file; wisen never prints or logs them, nor
@@ -227,9 +241,11 @@ What each job needs:
    - A missing or logged-out CLI fails the day's synthesis job at once, in
      one line naming the problem (`… is not installed` / `… is not logged
      in`), instead of retrying it; install the CLI, run `claude auth login`
-     as the service's user, or set `WISEN_SYNTH_MODEL=api`.
-3. Restart the service. `curl https://<host>/health` shows `"stage": "b"`,
-   `"synthesis": "claude-cli"` and `"model_key": true`.
+     as the service's user, or set `WISEN_SYNTH_MODEL=api`. The Gardener
+     skips with one line, and chat answers with one line.
+3. Restart the service. `curl https://<host>/health` shows `"stage": "b"`
+   and `"synthesis": "claude-cli"`, and `"model_key": true` only if you set an
+   API key. The start-up line names the Gardener's and chat's models.
 4. On each laptop: `[cloud] stage = "b"` in `~/.wisen/config.toml` (or
    `WISEN_CLOUD_STAGE=b` in the worker's environment), then restart
    `wisen worker`. A laptop left on stage A refuses the server's requests for
@@ -247,10 +263,13 @@ the service's cgroup next to the server (~130 MB), so both units set
 **Chat.** `POST /api/chat` (logged in, stage B only) answers questions from
 the server's reflections and streams the answer as server-sent events. It is
 stateless: the caller sends the conversation each turn, and nothing is
-stored. It runs on DeepSeek, so the reflection text it answers from (already
-redacted by the egress gate on the laptop) and the questions asked reach
-DeepSeek's servers. Without `WISEN_CHAT_MODEL` or `DEEPSEEK_API_KEY`, chat
-answers with an error; synthesis and the Gardener are not affected.
+stored. It runs on the Gardener's model, so the reflection text it answers
+from (already redacted by the egress gate on the laptop) and the questions
+asked reach Anthropic under your own Claude account when that model is the
+subscription. With `WISEN_CHAT_MODEL` set it runs on DeepSeek instead and they
+reach DeepSeek's servers. Without a usable model (a logged-out CLI, or
+`WISEN_CHAT_MODEL` without `DEEPSEEK_API_KEY`), chat answers with one line and
+synthesis is not affected.
 
 ## Checks on the box (step 4)
 

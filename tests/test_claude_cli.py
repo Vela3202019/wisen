@@ -320,6 +320,57 @@ def test_chat_skips_without_a_key():
     print("✓ chat: with no API key a turn is answered with the one line naming the key")
 
 
+def test_api_synthesis_needs_an_api_model():
+    """synth_model = "api" means the API model, so a subscription model string
+    there is one line, not `Unknown model: claude-sdk:sonnet` from pydantic-ai.
+    Dropping it (the default claude-cli:sonnet) still runs the subscription."""
+    from wisen.ingestion.pipeline import IngestResult
+    from wisen.synthesis import agent, claude_cli
+
+    with _env(WISEN_SYNTH_MODEL="api", WISEN_MODEL="claude-sdk:sonnet"):
+        assert not claude_cli.is_cli_model()
+        try:
+            asyncio.run(agent.observe(IngestResult(), "2026-07-01", None, "claude-sdk:sonnet"))
+            raise AssertionError("synth_model = api ran on the subscription")
+        except PermanentFailure as e:
+            assert 'synth_model = "api" needs an API model' in str(e), e
+            assert "claude-sdk:sonnet" in str(e) and "drop synth_model" in str(e), e
+    print("✓ synthesis: synth_model = api refuses a subscription model, in one line")
+
+
+def test_many_accounts_refuse_the_subscription():
+    """One person's Claude subscription must never serve other people: with more
+    than one account the subscription is refused for chat, the Gardener and
+    synthesis even when the config asks for it; a single account runs it."""
+    from wisen import llm
+    from wisen.ingestion.pipeline import IngestResult
+    from wisen.synthesis import agent
+
+    with _no_config(), _env(WISEN_MODEL="claude-sdk:sonnet", WISEN_SYNTH_MODEL="claude-cli:sonnet"):
+        llm.set_server_accounts(lambda: 2)
+        try:
+            line = llm.model_problem()
+            assert "must not serve others" in line and "WISEN_SYNTH_MODEL=api" in line, line
+            assert llm.subscription_refused([llm.DEFAULT_MODEL, "deepseek:deepseek-v4-flash"]) is None
+            try:
+                asyncio.run(agent.observe(IngestResult(), "2026-07-01", None, llm.get_model()))
+                raise AssertionError("synthesis ran on the subscription for two accounts")
+            except PermanentFailure as e:
+                assert str(e) == line, e
+        finally:
+            llm.set_server_accounts(lambda: 1)
+        real_probe, real_run = claude_cli.cli_problem, agent.run_structured
+        claude_cli.cli_problem = lambda: None
+        agent.run_structured = lambda *args: DayObservation.model_validate(_valid_observation())
+        try:
+            assert llm.agent_model_name() == "claude-sdk:sonnet" and llm.model_problem() is None
+            assert asyncio.run(agent.observe(IngestResult(), "2026-07-01", None, llm.get_model())).topics_raw
+        finally:
+            claude_cli.cli_problem, agent.run_structured = real_probe, real_run
+            llm.set_server_accounts(None)
+    print("✓ accounts: two accounts refuse the subscription for chat, the Gardener and synthesis; one runs it")
+
+
 def test_google_key_is_accepted():
     """Either Google key the provider takes counts as set: with GOOGLE_API_KEY
     alone, chat, the Gardener and /health must not report google as keyless."""
@@ -435,6 +486,8 @@ if __name__ == "__main__":
     test_permanent_cli_failure_fails_the_job_at_once()
     test_health_reports_claude_cli()
     test_chat_skips_without_a_key()
+    test_api_synthesis_needs_an_api_model()
+    test_many_accounts_refuse_the_subscription()
     test_google_key_is_accepted()
     test_gardener_skips_without_a_key()
     test_gardener_runs_again_once_the_key_is_set()

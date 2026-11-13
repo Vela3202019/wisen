@@ -189,20 +189,18 @@ async def health():
     import asyncio
     import sqlite3
 
-    from wisen.llm import get_model, model_key_set
+    from wisen.llm import SDK_PREFIX, agent_model_name, get_model, model_key_set
 
     status = {"storage": False}
     try:
         status["storage"] = await asyncio.wait_for(get_store().ping(), timeout=2.0)
     except (TimeoutError, OSError, sqlite3.Error):
         pass  # store unreachable, status already False
-    model = get_model()
+    model = agent_model_name()   # chat and the Gardener
     status["model"] = model
     status["llm_key"] = model_key_set(model)
-    # Synthesis on the Claude subscription needs the `claude` CLI, not a key.
-    if claude_cli.is_cli_model():
-        status["synth_model"] = claude_cli.synth_model()
+    # The Claude subscription needs the `claude` CLI, not a key.
+    if claude_cli.is_cli_model() or model.startswith(SDK_PREFIX):
         status["claude_cli"] = await asyncio.to_thread(claude_cli.cli_problem) or "ok"
-    else:
-        status["synth_model"] = model
+    status["synth_model"] = claude_cli.synth_model() if claude_cli.is_cli_model() else get_model()
     return status

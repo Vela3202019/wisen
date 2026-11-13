@@ -16,9 +16,10 @@ Applying an approved change stays on the laptop that sent the file.
 Synthesis runs on `claude -p` on the owner's subscription by default
 (WISEN_SYNTH_MODEL, set by `wisen cloud serve` in stage B;
 wisen/synthesis/claude_cli.py), or on the API model with WISEN_SYNTH_MODEL=api.
-The Gardener needs the API model (WISEN_MODEL and its key, in the service's
-environment file): it uses tools, which `claude -p` does not serve. Chat runs
-on DeepSeek (WISEN_CHAT_MODEL; wisen/chat/agent.py).
+The Gardener runs on the owner's subscription too, through the Claude Agent
+SDK (wisen/claude_sdk.py), unless WISEN_MODEL names an API model and its key is
+set. Chat runs on DeepSeek when WISEN_CHAT_MODEL is set, else on the
+subscription (wisen/chat/agent.py).
 
 Imported only when a stage-B job runs, so a stage-A server loads no model code.
 """
@@ -122,7 +123,7 @@ async def garden_day(mailbox, user: str, day: str) -> dict:
         return {"proposals": 0}
     if len(await loop.recent_reflections(store, day)) < 2:
         return {"proposals": 0, "gardener": "only one reflection so far"}
-    if problem := model_problem():
+    if problem := await asyncio.to_thread(model_problem):
         return {"proposals": 0, "gardener": problem}
     try:
         run = await loop.propose(store, day, await asyncio.to_thread(mailbox.snapshot, user))
@@ -135,7 +136,10 @@ async def garden_day(mailbox, user: str, day: str) -> dict:
 
 
 async def resume_job(mailbox, ctx: JobContext, args: dict) -> dict:
-    store, run_id = ctx.engine.store, args["run_id"]
+    run_id = args["run_id"]
+    if problem := await asyncio.to_thread(model_problem):
+        return {"run_id": run_id, "resumed": False, "gardener": problem}
+    store = ctx.engine.store
     state = loop._rows(store, "SELECT state FROM gardener_runs WHERE user_id = ? AND id = ?", run_id)
     if not state or state[0]["state"] != "paused":
         return {"run_id": run_id, "resumed": False}
