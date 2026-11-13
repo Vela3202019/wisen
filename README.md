@@ -45,8 +45,9 @@ cost.** You need the `claude` CLI installed and logged in. The reflection uses
 the Claude Code CLI. Chat and the Gardener use tools, so they go through the
 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), which
 drives the same logged-in CLI. It is your own subscription, on your own server
-or machine, over your own history. wisen leaves `ANTHROPIC_API_KEY` out of the
-CLI's environment, so a key in your shell never moves any of it to API billing.
+or machine, over your own history. A key in your shell never moves any of it to
+API billing: synthesis leaves `ANTHROPIC_API_KEY` out of the CLI's environment,
+and the Agent SDK path blanks it (it merges its environment over yours).
 Anthropic does not let third-party products offer claude.ai login unless it has
 approved them ([Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)). If that rules it out for you, an
 API key is the alternative.

@@ -13,8 +13,11 @@ All notable changes to wisen are recorded here. The format follows
   `OPENAI_API_KEY` is unset, so a subscription alone covers the reflection,
   chat and the Gardener. A configured API model works as before. Evals stay
   on the API model. They skip with one line only when neither a key nor a
-  logged-in `claude` CLI is available. A stage-B server's chat runs on the
-  subscription when `WISEN_CHAT_MODEL` is unset.
+  logged-in `claude` CLI is available, and the Gardener's replay judges each
+  draft on the same model, so a subscription alone also covers it. A stage-B
+  server's chat runs on the subscription when `WISEN_CHAT_MODEL` is unset,
+  but only while its mailbox holds a single account: with more, chat and the
+  Gardener need an API model.
 
 ## [0.2.1] - 2026-11-12
 

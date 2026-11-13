@@ -710,6 +710,7 @@ def check_chat_model():
 def check_server_synthesis_path():
     """A stage-B server synthesizes on `claude -p` unless told otherwise; the
     API model is the fallback by config."""
+    from wisen import llm
     from wisen.cloud.server import from_env
 
     saved = {k: os.environ.get(k) for k in ("WISEN_CLOUD_STAGE", "WISEN_SYNTH_MODEL", "WISEN_CLOUD_DB")}
@@ -722,12 +723,49 @@ def check_server_synthesis_path():
         from_env(run_engines=False)
         assert os.environ["WISEN_SYNTH_MODEL"] == "api"
     finally:
+        llm.set_server_accounts(None)
         for k, v in saved.items():
             if v is None:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
     print("✓ stage B: the server synthesizes on claude -p by default; WISEN_SYNTH_MODEL=api falls back")
+
+
+async def check_multi_account_models():
+    """The subscription default for chat and the Gardener is for a server with
+    one account (the owner). A second account (`wisen cloud user`) takes it
+    away: both resolve to an API model, the one line says what to set, and
+    /health carries the count and the two models."""
+    from wisen import llm
+
+    saved = {k: os.environ.get(k) for k in ("WISEN_MODEL", "WISEN_CHAT_MODEL", "OPENAI_API_KEY")}
+    try:
+        for k in saved:
+            os.environ.pop(k, None)
+        mailbox = Mailbox(_TMP / "accounts.db", sender=None, stage="b")
+        mailbox.set_user(USER, PASSWORD)
+        llm.set_server_accounts(lambda: len(mailbox.user_ids()))
+        assert (chat.chat_model(), llm.agent_model_name()) == ("claude-sdk:sonnet", "claude-sdk:sonnet")
+        app = create_app(mailbox, secure_cookies=False, run_engines=False)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
+            assert (await http.get("/health")).json()["llm"] == {
+                "accounts": 1, "gardener": "claude-sdk:sonnet", "chat": "claude-sdk:sonnet"}
+        mailbox.set_user("guest", "another long password")
+        assert (chat.chat_model(), llm.agent_model_name()) == (llm.DEFAULT_MODEL, llm.DEFAULT_MODEL)
+        line = llm.model_problem()
+        assert "need an API key for openai" in line and "more than one account" in line, line
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as http:
+            assert (await http.get("/health")).json()["llm"] == {
+                "accounts": 2, "gardener": llm.DEFAULT_MODEL, "chat": llm.DEFAULT_MODEL}
+    finally:
+        llm.set_server_accounts(None)
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    print("✓ stage B: the subscription default needs a single-account mailbox; a second account needs an API model")
 
 
 async def main():
@@ -741,6 +779,7 @@ async def main():
     await check_stage_a_keeps_out()
     await check_chat()
     check_chat_model()
+    await check_multi_account_models()
     check_server_synthesis_path()
     print("\nall stage B tests passed")
 

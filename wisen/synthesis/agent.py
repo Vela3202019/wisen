@@ -13,7 +13,8 @@ from pydantic_ai import Agent
 from wisen.connectors.agent_configs import AgentConfig
 from wisen.ingestion.normalizer import NormalizedSession
 from wisen.ingestion.pipeline import IngestResult
-from wisen.llm import get_model
+from wisen.jobs import PermanentFailure
+from wisen.llm import get_model, is_subscription
 from wisen.store import get_store
 from wisen.synthesis.claude_cli import is_cli_model, run_structured
 from wisen.synthesis.prompt import OBSERVER_PROMPT, SYNTHESIZER_PROMPT
@@ -140,9 +141,14 @@ async def _generate(
     system_prompt: str, user_prompt: str, output_type: type[BaseModel], model: str
 ) -> BaseModel:
     """One structured generation — via `claude -p` on the subscription when
-    WISEN_SYNTH_MODEL=claude-cli:*, otherwise via pydantic-ai."""
+    WISEN_SYNTH_MODEL=claude-cli:*, otherwise via pydantic-ai, which needs an
+    API model."""
     if is_cli_model():
         return await asyncio.to_thread(run_structured, system_prompt, user_prompt, output_type)
+    if is_subscription(model):
+        raise PermanentFailure(
+            f'synth_model = "api" needs an API model, but WISEN_MODEL is {model}; '
+            'set an API model or drop synth_model = "api" to use the subscription')
     agent = Agent(model=model, output_type=output_type, system_prompt=system_prompt, retries=2)
     return (await agent.run(user_prompt)).output
 

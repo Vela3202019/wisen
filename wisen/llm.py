@@ -22,13 +22,16 @@ explicitly. Evals stay on this API model.
 
 A stage-B server's chat (wisen/cloud) runs on DeepSeek when WISEN_CHAT_MODEL
 names the DeepSeek model (DEEPSEEK_API_KEY is its key), and on the
-subscription when it is unset.
+subscription when it is unset — but only while the server holds a single
+account (the owner). With more, chat and the Gardener need an API model, since
+one person's subscription must never answer for other people.
 
 Without a usable model — no key for an API model, or the `claude` CLI missing
 or logged out for the subscription — the Gardener and chat skip with one line
 (`model_problem`) instead of failing.
 """
 import os
+from collections.abc import Callable
 
 from dotenv import load_dotenv
 
@@ -38,6 +41,7 @@ load_dotenv()
 
 DEFAULT_MODEL = "openai:gpt-5.6-terra"
 SDK_PREFIX = "claude-sdk:"
+CLI_PREFIX = "claude-cli:"   # synthesis through `claude -p` (synthesis/claude_cli.py)
 # `sonnet` is Claude Code's alias for its latest Sonnet.
 DEFAULT_SDK_MODEL = "claude-sdk:sonnet"
 
@@ -53,6 +57,29 @@ MODEL_KEY_ENV = {
 def model_key_set(model: str) -> bool:
     """Whether a key this model's provider accepts is set."""
     return any(os.getenv(key) for key in MODEL_KEY_ENV.get(model.split(":", 1)[0], ()))
+
+
+def is_subscription(model: str) -> bool:
+    """Whether `model` runs on the developer's own Claude subscription — through
+    the Agent SDK (chat, the Gardener) or the CLI (synthesis) — rather than on a
+    provider API key."""
+    return model.startswith((SDK_PREFIX, CLI_PREFIX))
+
+
+_served_accounts: Callable[[], int] | None = None
+
+
+def set_server_accounts(count: Callable[[], int] | None) -> None:
+    """How many accounts this process serves: `wisen cloud serve` passes its
+    mailbox's user count, and every other entry point leaves it unset (its own).
+    More than one turns the subscription default off: one person's subscription
+    must never answer for other people."""
+    global _served_accounts
+    _served_accounts = count
+
+
+def many_accounts() -> bool:
+    return _served_accounts is not None and _served_accounts() > 1
 
 
 def model_problem(model: str | None = None) -> str | None:
@@ -78,6 +105,9 @@ def model_problem(model: str | None = None) -> str | None:
     keys = MODEL_KEY_ENV.get(provider)
     if keys is None:
         return None
+    if many_accounts():
+        return (f"Gardener and chat need an API key for {provider}: set {' or '.join(keys)} "
+                "(this server serves more than one account, so it cannot use your Claude subscription)")
     return (f"Gardener and chat need an API key for {provider}: set {' or '.join(keys)} "
             f"(or another WISEN_MODEL; {DEFAULT_SDK_MODEL} runs them on your Claude subscription) to enable them")
 
@@ -90,11 +120,22 @@ def get_model() -> str:
     return model
 
 
+def eval_model() -> str:
+    """The model evals run on: the configured model, which they need to be an
+    API model. `wisen eval` and its miner judge on a key, never on the
+    subscription (the Gardener's replay passes its own model instead)."""
+    model = get_model()
+    if is_subscription(model):
+        raise SystemExit(f"evals need an API model, but WISEN_MODEL is {model}; "
+                         "set an API model and its key (for example OPENAI_API_KEY)")
+    return model
+
+
 def agent_model_name() -> str:
     """The model chat and the Gardener run on: the configured model; with none
     configured, the default API model when its key is set, else the Claude
-    subscription."""
-    if config.get("model", "model", "WISEN_MODEL") or model_key_set(DEFAULT_MODEL):
+    subscription — which a server with more than one account never gets."""
+    if config.get("model", "model", "WISEN_MODEL") or model_key_set(DEFAULT_MODEL) or many_accounts():
         return get_model()
     return DEFAULT_SDK_MODEL
 
@@ -111,6 +152,9 @@ def as_model(name: str):
 
 def chat_model() -> str:
     """The stage-B server's chat model: DeepSeek, named by WISEN_CHAT_MODEL;
-    unset, the Claude subscription."""
+    unset, the Claude subscription for a single-account server, and the default
+    API model for a server that serves more than one account."""
     name = config.get("model", "chat_model", "WISEN_CHAT_MODEL")
-    return f"deepseek:{name}" if name else DEFAULT_SDK_MODEL
+    if name:
+        return f"deepseek:{name}"
+    return get_model() if many_accounts() else DEFAULT_SDK_MODEL

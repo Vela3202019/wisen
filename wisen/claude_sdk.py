@@ -4,8 +4,10 @@ Claude Agent SDK (WISEN_MODEL=claude-sdk:sonnet; the default when no model is
 configured and OPENAI_API_KEY is unset — see llm.py).
 
 The SDK drives the `claude` CLI the developer is logged in to, so it runs on
-their subscription login, never on ANTHROPIC_API_KEY (blanked in the CLI's
-environment, as synthesis does). Anthropic's policy on subscription login in
+their subscription login, never on ANTHROPIC_API_KEY: the SDK merges `env`
+over os.environ, so the empty value here blanks a key from the shell (synthesis
+removes the key from the CLI's environment instead). Anthropic's policy on
+subscription login in
 Agent SDK products: https://code.claude.com/docs/en/agent-sdk/overview — here
 it is the developer's own subscription, on their own machine or server, over
 their own history; an API key is the alternative.
@@ -125,7 +127,7 @@ def options(model: str, messages: list[ModelMessage], info: AgentInfo, stream: b
         max_turns=1,
         cwd=cwd,                        # the Claude Code connector skips it: wisen never reflects on its own runs
         cli_path=shutil.which("claude"),   # the CLI the login check asks (claude_cli.cli_problem)
-        env={"ANTHROPIC_API_KEY": ""},  # set, the CLI would bill the API instead of the subscription
+        env={"ANTHROPIC_API_KEY": ""},  # the SDK merges env over os.environ: this blanks the shell's key
         include_partial_messages=stream,
     )
 

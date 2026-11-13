@@ -165,7 +165,7 @@ def answer_agent(raw_search: bool) -> Agent:
 
 async def answer(question: str, *, raw_search: bool) -> str:
     """Answer one question, anchored on the latest reflection like a new chat."""
-    if problem := model_problem():
+    if problem := await asyncio.to_thread(model_problem):
         return problem
     db = get_store()
     latest = next(iter(await db.list_reflections(limit=1)), None)
@@ -337,7 +337,7 @@ async def stream_chat(
     if not messages or messages[-1]["role"] != "user":
         raise ValueError("Last message must be role=user")
 
-    if problem := model_problem(chat_model() if not raw_history else agent_model_name()):
+    if problem := await asyncio.to_thread(model_problem, chat_model() if not raw_history else agent_model_name()):
         yield {"type": "token", "data": problem}
         return
 

@@ -8,9 +8,10 @@ The three that matter:
   token spend. Defaults to `"claude-cli:sonnet"`: your Claude Pro/Max
   subscription via the Claude Code CLI, at no extra cost (`claude` must be
   installed and logged in; `curl localhost:8000/health` shows `claude_cli`).
-  wisen leaves `ANTHROPIC_API_KEY` out of the CLI's environment, so a key in
-  your shell never moves it to API billing. Prefer an API key? Set `"api"` to
-  run it on `model`.
+  wisen leaves `ANTHROPIC_API_KEY` out of the CLI's environment (and the Agent
+  SDK path blanks it), so a key in your shell never moves it to API billing.
+  Prefer an API key? Set `"api"` to run it on `model`, which must then be an
+  API model.
 - **`model`** (`WISEN_MODEL`): the chat and Gardener model. Unset, they run on
   your Claude Pro/Max subscription (`claude-sdk:sonnet`) unless
   `OPENAI_API_KEY` is set, which makes the default `openai:gpt-5.6-terra`.
@@ -18,8 +19,11 @@ The three that matter:
   explicitly. They use tools, so they go through the [Claude Agent
   SDK](https://code.claude.com/docs/en/agent-sdk/overview), which drives the same logged-in `claude` CLI as synthesis
   (`/health` shows `claude_cli`). `ANTHROPIC_API_KEY` is blanked in its
-  environment. It is your own subscription, on your own server or machine,
-  over your own history. Anthropic does not let third-party products offer
+  environment (the Agent SDK merges its environment over yours), so a key in
+  your shell never moves it to API billing. It is your own subscription, on
+  your own server or machine, over your own history: a stage-B server whose
+  mailbox holds more than one account gets an API model for chat and the
+  Gardener instead. Anthropic does not let third-party products offer
   claude.ai login unless it has approved them ([Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)).
   An API key is the alternative. Any other pydantic-ai model string runs on
   that provider's key: `openai:*` needs `OPENAI_API_KEY`, `google:*` needs

@@ -123,7 +123,7 @@ async def garden_day(mailbox, user: str, day: str) -> dict:
         return {"proposals": 0}
     if len(await loop.recent_reflections(store, day)) < 2:
         return {"proposals": 0, "gardener": "only one reflection so far"}
-    if problem := model_problem():
+    if problem := await asyncio.to_thread(model_problem):
         return {"proposals": 0, "gardener": problem}
     try:
         run = await loop.propose(store, day, await asyncio.to_thread(mailbox.snapshot, user))

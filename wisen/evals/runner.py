@@ -16,6 +16,7 @@ from pathlib import Path
 
 from wisen.evals.cases import Case, load_cases
 from wisen.evals.replay import run_replay
+from wisen.llm import eval_model
 
 REPORTS_DIR = Path(__file__).parent / "reports"
 
@@ -36,10 +37,12 @@ class Variant:
     project_files: dict[str, str] = field(default_factory=dict)
 
 
-async def run_case(case: Case, variant: Variant | Path | None, k: int) -> dict:
+async def run_case(case: Case, variant: Variant | Path | None, k: int, model: str | None = None) -> dict:
     """Replay one case under one config and judge it: {case, passed, evidence,
     tokens, cost_usd}, or {case, error}. This is the interface `compare` and
-    `run_suite` call; a test passes a fake with the same shape."""
+    `run_suite` call; a test passes a fake with the same shape. `model`: what
+    the judge runs on (default: the eval model; the Gardener's replay passes
+    the Gardener's own)."""
     from wisen.evals.judge import judge_with_usage  # builds a model agent
 
     if not isinstance(variant, Variant):
@@ -49,7 +52,7 @@ async def run_case(case: Case, variant: Variant | Path | None, k: int) -> dict:
                            project_files=variant.project_files))
     if replay.error:
         return {"case": case.id, "error": replay.error}
-    verdict, judge_tokens = await judge_with_usage(case, replay, k)
+    verdict, judge_tokens = await judge_with_usage(case, replay, k, model)
     return {
         "case": case.id,
         "passed": not verdict.repeated,
@@ -101,6 +104,9 @@ async def compare(cases: list[Case], current: Variant, proposed: Variant, *, cap
 
 async def run_suite(claude_md_a: Path | None, claude_md_b: Path | None = None,
                     k: int = 3, limit: int | None = None) -> dict:
+    """The suite per config, judged on the eval model: refused up front when the
+    configured model is the subscription's, before any replay runs."""
+    api_model = eval_model()
     cases = _runnable(load_cases())
     if limit:
         cases = cases[:limit]
@@ -113,7 +119,7 @@ async def run_suite(claude_md_a: Path | None, claude_md_b: Path | None = None,
     if claude_md_b is not None:
         variants["b"] = claude_md_b
     for name, claude_md in variants.items():
-        results = [await run_case(c, claude_md, k) for c in cases]
+        results = [await run_case(c, claude_md, k, api_model) for c in cases]
         report["configs"][name] = {
             "claude_md": str(claude_md) if claude_md else "(current)",
             "pass_rate": _rate(results),

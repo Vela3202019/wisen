@@ -38,10 +38,12 @@ first** (an older server refuses the new packets):
 - **Server:** `WISEN_CLOUD_STAGE=b`. Synthesis, the Gardener and chat then
   run on your own Claude subscription, on your own server, over your own
   history. Log the CLI in for the service's user. Synthesis uses `claude -p`,
-  and the Gardener and chat use the Claude Agent SDK on the same login. An
-  API key is the alternative: `WISEN_MODEL` with its provider's key for the
-  Gardener, DeepSeek for chat (`WISEN_CHAT_MODEL`, `DEEPSEEK_API_KEY`), and
-  `WISEN_SYNTH_MODEL=api` to put synthesis on the API model too. See
+  and the Gardener and chat use the Claude Agent SDK on the same login, while
+  the mailbox holds a single account (a server with more needs an API model
+  for both). An API key is the alternative: `WISEN_MODEL` with its provider's
+  key for the Gardener, DeepSeek for chat (`WISEN_CHAT_MODEL`,
+  `DEEPSEEK_API_KEY`), and `WISEN_SYNTH_MODEL=api` to put synthesis on the
+  API model too. See
   [deploy/README.md](../deploy/README.md#stage-b-the-server-reflects).
 - **Each laptop:** `[cloud] stage = "b"` in `~/.wisen/config.toml` (or
   `WISEN_CLOUD_STAGE=b`) and restart `wisen worker`. This is the laptop's

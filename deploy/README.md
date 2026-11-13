@@ -187,7 +187,12 @@ still applied by the laptop whose file they change.
 By default every job runs on your own subscription, on your own server or
 machine, over your own history: the owner's Claude subscription, on the
 owner's own box, for the owner's own use. A server that serves other people
-must use an API key. Synthesis runs on `claude -p`. The Gardener and chat use
+must use an API key. wisen holds chat and the Gardener to that: the
+subscription default applies only while the mailbox holds a single account.
+Adding a second one (`wisen cloud user`) means chat and the Gardener need an
+API model — `WISEN_CHAT_MODEL` (DeepSeek), or `WISEN_MODEL` and its key — and
+the start-up line and `/health` say so (with the account count and both
+models). Synthesis runs on `claude -p`. The Gardener and chat use
 tools, so they run through the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), which drives the
 same logged-in CLI, with `ANTHROPIC_API_KEY` blanked. Anthropic does not let
 third-party products offer claude.ai login unless it has approved them ([Agent
@@ -200,8 +205,8 @@ What each job needs:
 | Job        | Runs on                                        | Needs                                         |
 |------------|------------------------------------------------|-----------------------------------------------|
 | Synthesis  | `claude -p` (`WISEN_SYNTH_MODEL`)              | the CLI logged in for the service's user (step 2) |
-| Chat       | the subscription, or DeepSeek if `WISEN_CHAT_MODEL` is set | the same login, or `DEEPSEEK_API_KEY`  |
-| Gardener   | the subscription, or `WISEN_MODEL` if set      | the same login, or that provider's API key    |
+| Chat       | the subscription, or DeepSeek if `WISEN_CHAT_MODEL` is set | the same login (single account only), or `DEEPSEEK_API_KEY` |
+| Gardener   | the subscription, or `WISEN_MODEL` if set      | the same login (single account only), or that provider's API key |
 
 1. Upgrade the server first (see above), then add to `/etc/wisen/wisen.env`:
 

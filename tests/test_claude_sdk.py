@@ -192,6 +192,18 @@ def test_tool_call_round_trip():
     print("✓ bridge: a tool call goes out through the SDK, runs in pydantic-ai, and its result comes back")
 
 
+def test_a_key_in_the_shell_is_blanked_for_the_cli():
+    """A developer with ANTHROPIC_API_KEY exported still runs on the
+    subscription: the SDK merges options.env over os.environ, so the blanked key
+    wins over the shell's (an empty copy would leave the real one in place)."""
+    agent, _ = _agent()
+    fake = FakeQuery(_answer_turn("ok"))
+    with _env(ANTHROPIC_API_KEY="sk-ant-from-the-shell"), _patched(fake):
+        assert agent.run_sync("hi").output == "ok"
+    assert fake.calls[0][1].env["ANTHROPIC_API_KEY"] == "", fake.calls[0][1].env
+    print("✓ bridge: a key in the shell is blanked for the CLI, so the turn runs on the subscription")
+
+
 def test_tools_keep_their_schema():
     from pydantic_ai.tools import ToolDefinition
 

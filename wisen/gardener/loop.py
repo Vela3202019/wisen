@@ -38,7 +38,7 @@ from wisen.gardener.agent import Deps, Draft, build_agent, change_lines
 from wisen.gardener.git import GitError, one_file_diff
 from wisen.gardener.targets import Refused, SnapshotFiles, Target, resolve
 from wisen.jobs import JobContext, JobEngine, ts
-from wisen.llm import model_problem
+from wisen.llm import agent_model_name, as_model, model_problem
 from wisen.proposals import Proposals, expire_proposal_job
 from wisen.store import SqliteStore
 
@@ -50,13 +50,14 @@ TENDS = ("claude-md", "agents-md")   # reflection recommendation targets the Gar
 def gardener_model():
     """The model the Gardener runs on: the chat model (wisen/llm.py), an API
     model or the Claude subscription."""
-    from wisen.llm import agent_model_name, as_model
-
     return as_model(agent_model_name())
 
 
 # The replay runner's interface (wisen/evals/runner.py); a test swaps in a fake.
-replay_case: runner.RunCase = runner.run_case
+async def replay_case(case: Case, variant: runner.Variant, k: int) -> dict:
+    """The Gardener's replay, judged on the Gardener's own model too, so a
+    subscription alone covers the whole run (wisen/evals/judge.py)."""
+    return await runner.run_case(case, variant, k, model=agent_model_name())
 
 
 def replay_cap() -> int:
@@ -279,7 +280,7 @@ async def garden_job(ctx: JobContext, args: dict) -> dict:
     # alone can propose nothing: no model run.
     if len(await recent_reflections(store, day)) < 2:
         return {"date": day, "proposals": 0, "skipped": "only one reflection so far"}
-    if problem := model_problem():
+    if problem := await asyncio.to_thread(model_problem):
         return {"date": day, "proposals": 0, "skipped": problem, "needs_key": True}
     run = await ctx.step("propose", lambda: propose(store, day), replay_safe=True, output=GardenerRun)
     replays = {}

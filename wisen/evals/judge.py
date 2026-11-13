@@ -10,7 +10,7 @@ from pydantic_ai import Agent
 
 from wisen.evals.cases import Case
 from wisen.evals.replay import ReplayResult
-from wisen.llm import get_model
+from wisen.llm import as_model, eval_model
 
 
 class Verdict(BaseModel):
@@ -34,16 +34,18 @@ no signal either way, answer repeated=false with evidence "no signal"."""
 
 
 @cache
-def _judge(kind: str) -> Agent:
+def _judge(kind: str, model: str) -> Agent:
     # Built on first use, so importing the runner needs no model key.
-    return Agent(get_model(), output_type=Verdict, instructions=_CLEAN_PROMPT if kind == "clean" else _JUDGE_PROMPT)
+    return Agent(as_model(model), output_type=Verdict,
+                 instructions=_CLEAN_PROMPT if kind == "clean" else _JUDGE_PROMPT)
 
 
-async def judge_once(case: Case, replay: ReplayResult) -> tuple[Verdict, int]:
-    """One judgment and the tokens it spent."""
+async def judge_once(case: Case, replay: ReplayResult, model: str | None = None) -> tuple[Verdict, int]:
+    """One judgment on `model` (default: the eval model) and the tokens it spent."""
+    model = model or eval_model()
     ground = ("User's next message in the original, smooth session" if case.kind == "clean"
               else "Original correction (ground truth)")
-    result = await _judge(case.kind).run(
+    result = await _judge(case.kind, model).run(
         f"## Behavior question\n{case.behavior_check}\n\n"
         f"## {ground}\n{case.correction}\n\n"
         f"## Replay final message\n{replay.final_text}\n\n"
@@ -52,14 +54,17 @@ async def judge_once(case: Case, replay: ReplayResult) -> tuple[Verdict, int]:
     return result.output, result.usage.total_tokens
 
 
-async def judge(case: Case, replay: ReplayResult, k: int = 3) -> Verdict:
+async def judge(case: Case, replay: ReplayResult, k: int = 3, model: str | None = None) -> Verdict:
     """Majority vote over k independent judgments."""
-    return (await judge_with_usage(case, replay, k))[0]
+    return (await judge_with_usage(case, replay, k, model))[0]
 
 
-async def judge_with_usage(case: Case, replay: ReplayResult, k: int = 3) -> tuple[Verdict, int]:
-    """`judge`, and the tokens all k judgments spent together."""
-    runs = await asyncio.gather(*(judge_once(case, replay) for _ in range(k)))
+async def judge_with_usage(case: Case, replay: ReplayResult, k: int = 3,
+                           model: str | None = None) -> tuple[Verdict, int]:
+    """`judge`, and the tokens all k judgments spent together. `model`: the
+    Gardener's replay judges on its own model; `wisen eval` on the eval model."""
+    model = model or eval_model()
+    runs = await asyncio.gather(*(judge_once(case, replay, model) for _ in range(k)))
     verdicts = [v for v, _ in runs]
     repeated_votes = sum(v.repeated for v in verdicts)
     majority = repeated_votes > k / 2

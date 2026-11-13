@@ -218,8 +218,9 @@ def test_judge_prompt_by_kind():
         seen.append(messages[-1])
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {"repeated": False, "evidence": "x"})])
 
-    real = judge.get_model
-    judge.get_model = lambda: FunctionModel(respond)
+    real = judge.eval_model, judge.as_model
+    judge.eval_model = lambda: "openai:test"
+    judge.as_model = lambda name: FunctionModel(respond)
     judge._judge.cache_clear()
     try:
         replay = ReplayResult(final_text="done", diff="")
@@ -229,7 +230,7 @@ def test_judge_prompt_by_kind():
                         correction="now add a test for it", behavior_check="Did it break?", split="eval", kind=kind)
             asyncio.run(judge.judge_once(case, replay))
     finally:
-        judge.get_model = real
+        judge.eval_model, judge.as_model = real
         judge._judge.cache_clear()
     clean, correction = seen
     clean_prompt = clean.parts[0].content
@@ -239,6 +240,48 @@ def test_judge_prompt_by_kind():
     assert "corrected the agent" in correction.instructions
     assert "## Original correction (ground truth)\nnow add a test for it" in correction.parts[0].content
     print("✓ judge: a clean case is framed as the user's next message in a smooth session")
+
+
+def test_judge_model():
+    """`wisen eval` and the miner need an API model: with the subscription
+    configured they stop on one line before any replay. The Gardener's replay
+    passes its own model, so it judges on the subscription and records."""
+    from tests.test_claude_cli import _env, _no_config
+
+    seen = []
+
+    def respond(messages, info):
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {"repeated": False, "evidence": "x"})])
+
+    replay_result = ReplayResult(final_text="done", diff="")
+    real = judge.as_model, runner.run_replay
+    judge.as_model = lambda name: seen.append(name) or FunctionModel(respond)
+    runner.run_replay = lambda *a, **kw: ReplayResult(final_text="done", diff="")
+    judge._judge.cache_clear()
+    miner._enricher.cache_clear()
+    case = Case(id="m", date="2026-07-01", session_id="s", source_path="/x", project_path="/p",
+                detector="explicit-correction", context=[], correction="no",
+                behavior_check="Did it break?", split="eval", status="confirmed")
+
+    try:
+        with _no_config(), _env(WISEN_MODEL="claude-sdk:sonnet"):
+            for what, call in (("judge", lambda: asyncio.run(judge.judge_with_usage(case, replay_result))),
+                               ("suite", lambda: asyncio.run(runner.run_suite(None, limit=1))),
+                               ("miner", miner._enricher)):
+                try:
+                    call()
+                    raise AssertionError(f"{what} ran on the subscription")
+                except SystemExit as e:
+                    assert "evals need an API model" in str(e) and "claude-sdk:sonnet" in str(e), (what, e)
+            # The Gardener's replay: its own model, so the subscription is fine.
+            passed = asyncio.run(runner.run_case(case, runner.Variant(), 1, model="claude-sdk:sonnet"))
+    finally:
+        judge.as_model, runner.run_replay = real
+        miner._enricher.cache_clear()
+        judge._judge.cache_clear()
+    assert passed["passed"] is True, passed
+    assert seen and set(seen) == {"claude-sdk:sonnet"}, seen
+    print("✓ judge: evals stop on one line without an API model; the Gardener's replay judges on its own")
 
 
 def test_replay_error_result():
@@ -282,5 +325,6 @@ if __name__ == "__main__":
     test_build_prompt()
     test_clean_set()
     test_judge_prompt_by_kind()
+    test_judge_model()
     test_replay_error_result()
     print("\nall eval tests passed")

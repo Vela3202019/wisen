@@ -40,7 +40,10 @@ Environment (stage A holds no model key: it makes no model calls):
                             (WISEN_SYNTH_MODEL, default claude-cli:sonnet; "api" falls back to
                             WISEN_MODEL); the Gardener runs on the subscription through the
                             Agent SDK, or on WISEN_MODEL and its key; chat runs on DeepSeek
-                            (WISEN_CHAT_MODEL, DEEPSEEK_API_KEY), or unset, the subscription
+                            (WISEN_CHAT_MODEL, DEEPSEEK_API_KEY), or unset, the subscription.
+                            A mailbox with more than one account gets neither subscription
+                            default: it needs an API model for chat and the Gardener. /health
+                            reports the account count and the two models.
   WISEN_CLOUD_PUBLIC_URL    e.g. https://wisen.example.org; https makes the
                             session cookie Secure, and it is the VAPID contact
   WISEN_VAPID_PRIVATE_KEY   from `wisen cloud vapid-keys`; both unset = no push
@@ -228,10 +231,17 @@ def create_app(
 
     @app.get("/health")
     async def health():
+        models = None
+        if mailbox.stage == "b":
+            from wisen.llm import agent_model_name, chat_model
+
+            models = {"accounts": await asyncio.to_thread(lambda: len(mailbox.user_ids())),
+                      "gardener": agent_model_name(), "chat": chat_model()}
         return {"ok": True, "push": vapid_public_key is not None, "telegram": mailbox.telegram is not None,
                 "stage": mailbox.stage,
                 "synthesis": ("claude-cli" if config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
                               .startswith("claude-cli:") else "api") if mailbox.stage == "b" else None,
+                "llm": models,
                 "model_key": any(os.environ.get(k) for k in MODEL_KEYS)}
 
     # ── browser session ───────────────────────────────────────────────────────
@@ -495,15 +505,6 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
     if stage == "a" and keys:
         print(f"wisen cloud: warning: a model API key is set ({', '.join(keys)});"
               " the stage-A server makes no model calls and should not hold one")
-    if stage == "b":
-        if not config.get("model", "synth_model", "WISEN_SYNTH_MODEL", ""):
-            os.environ["WISEN_SYNTH_MODEL"] = claude_cli.DEFAULT_SYNTH_MODEL
-        synth = config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
-        from wisen.llm import agent_model_name, chat_model
-
-        # Names only: a key's value is never printed or logged.
-        print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener on {agent_model_name()}; chat on "
-              f"{chat_model()}; model keys set: {', '.join(keys) or 'none'}")
     token = os.environ.get("WISEN_TELEGRAM_BOT_TOKEN")
     if not token:
         print("wisen cloud: no WISEN_TELEGRAM_BOT_TOKEN; the Telegram bot is off")
@@ -512,5 +513,18 @@ def from_env(db: Path | None = None, *, run_engines: bool = True) -> FastAPI:
     db = db or Path(os.environ.get("WISEN_CLOUD_DB", "~/.wisen/cloud/wisen.db")).expanduser()
     mailbox = Mailbox(db, sender=sender, stage=stage, telegram=TelegramApi(token) if token else None,
                       public_url=public_url)
+    if stage == "b":
+        from wisen import llm
+
+        llm.set_server_accounts(lambda: len(mailbox.user_ids()))
+        if not config.get("model", "synth_model", "WISEN_SYNTH_MODEL", ""):
+            os.environ["WISEN_SYNTH_MODEL"] = claude_cli.DEFAULT_SYNTH_MODEL
+        synth = config.get("model", "synth_model", "WISEN_SYNTH_MODEL", "")
+        # Names only: a key's value is never printed or logged.
+        print(f"wisen cloud: stage B: synthesis on {synth}; the Gardener on {llm.agent_model_name()}; chat on "
+              f"{llm.chat_model()}; model keys set: {', '.join(keys) or 'none'}")
+        if llm.many_accounts():
+            print(f"wisen cloud: {len(mailbox.user_ids())} accounts: chat and the Gardener need an API model "
+                  "(WISEN_CHAT_MODEL, or WISEN_MODEL and its key); the Claude subscription is for a single account")
     return create_app(mailbox, vapid_public_key=public if sender else None,
                       secure_cookies=public_url.startswith("https://"), run_engines=run_engines)

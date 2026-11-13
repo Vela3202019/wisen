@@ -61,6 +61,9 @@ def _review(case_id: str, confirm: bool) -> None:
 async def _replay(case_id: str, claude_md: Path | None, k: int) -> None:
     from wisen.evals.judge import judge
     from wisen.evals.replay import run_replay
+    from wisen.llm import eval_model
+
+    model = eval_model()
     path = case_path(case_id)
     if not path.exists():
         raise SystemExit(f"no case {case_id}")
@@ -71,7 +74,7 @@ async def _replay(case_id: str, claude_md: Path | None, k: int) -> None:
     replay = await asyncio.to_thread(run_replay, case, claude_md)
     if replay.error:
         raise SystemExit(f"replay error: {replay.error}")
-    verdict = await judge(case, replay, k)
+    verdict = await judge(case, replay, k, model)
     print(f"check:    {case.behavior_check}")
     print(f"repeated: {verdict.repeated}  →  {'FAIL' if verdict.repeated else 'PASS'}")
     print(f"evidence: {verdict.evidence}")

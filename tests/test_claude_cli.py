@@ -320,6 +320,24 @@ def test_chat_skips_without_a_key():
     print("✓ chat: with no API key a turn is answered with the one line naming the key")
 
 
+def test_api_synthesis_needs_an_api_model():
+    """synth_model = "api" means the API model, so a subscription model string
+    there is one line, not `Unknown model: claude-sdk:sonnet` from pydantic-ai.
+    Dropping it (the default claude-cli:sonnet) still runs the subscription."""
+    from wisen.ingestion.pipeline import IngestResult
+    from wisen.synthesis import agent, claude_cli
+
+    with _env(WISEN_SYNTH_MODEL="api", WISEN_MODEL="claude-sdk:sonnet"):
+        assert not claude_cli.is_cli_model()
+        try:
+            asyncio.run(agent.observe(IngestResult(), "2026-07-01", None, "claude-sdk:sonnet"))
+            raise AssertionError("synth_model = api ran on the subscription")
+        except PermanentFailure as e:
+            assert 'synth_model = "api" needs an API model' in str(e), e
+            assert "claude-sdk:sonnet" in str(e) and "drop synth_model" in str(e), e
+    print("✓ synthesis: synth_model = api refuses a subscription model, in one line")
+
+
 def test_google_key_is_accepted():
     """Either Google key the provider takes counts as set: with GOOGLE_API_KEY
     alone, chat, the Gardener and /health must not report google as keyless."""
@@ -435,6 +453,7 @@ if __name__ == "__main__":
     test_permanent_cli_failure_fails_the_job_at_once()
     test_health_reports_claude_cli()
     test_chat_skips_without_a_key()
+    test_api_synthesis_needs_an_api_model()
     test_google_key_is_accepted()
     test_gardener_skips_without_a_key()
     test_gardener_runs_again_once_the_key_is_set()
