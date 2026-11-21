@@ -14,6 +14,11 @@ All notable changes to wisen are recorded here. The format follows
   reflection's and the Gardener's models can run (and the fix when they
   cannot), and the command to run next.
 
+### Fixed
+
+- Installing no longer warns that `pydantic-ai` has no `openai` or
+  `anthropic` extra: the package already includes those providers.
+
 ### Changed
 
 - `wisen synthesize` with no date uses the latest day with sessions in the
