@@ -6,6 +6,11 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+
+- The README starts with `uvx wisen demo` and a three-command quickstart; the
+  walkthrough is published on GitHub Pages instead of a file to download.
+
 ### Changed
 
 - Chat and the Gardener run on your Claude Pro/Max subscription through the

@@ -10,13 +10,11 @@ fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
 
 <img src="docs/assets/wisen-flow.gif" width="760" alt="wisen demo: a day's reflection surfaces a correction you made four times, the Gardener proposes one CLAUDE.md change, you approve it, and it becomes a branch you merge">
 
-<sub>[Full walkthrough](docs/walkthrough.html) (a standalone HTML page: download it and open it in a browser)</sub>
+<sub>[Full walkthrough](https://vela3202019.github.io/wisen/)</sub>
 
 ```bash
-pipx install wisen && wisen synthesize
+uvx wisen demo          # a sample day in one second: no model call, nothing read from your machine
 ```
-
-<sub>Not on PyPI yet: the package lands with the first release. Until then, install from source as in the [Quickstart](#quickstart).</sub>
 
 [![CI](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml/badge.svg)](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Built with pydantic-ai](https://img.shields.io/badge/built%20with-pydantic--ai-E92063.svg)](https://ai.pydantic.dev)
 
@@ -39,37 +37,23 @@ read. You approve each fix, and later sessions show whether it helped.
 
 ## Quickstart
 
-You need Python 3.11+. **Already have a Claude Pro/Max subscription? The
-daily reflection, chat and the Gardener's proposals all run on it at no extra
-cost.** You need the `claude` CLI installed and logged in. The reflection uses
-the Claude Code CLI. Chat and the Gardener use tools, so they go through the
-[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview), which
-drives the same logged-in CLI. It is your own subscription, on your own server
-or machine, over your own history. A key in your shell never moves any of it to
-API billing: synthesis leaves `ANTHROPIC_API_KEY` out of the CLI's environment,
-and the Agent SDK path blanks it (it merges its environment over yours).
-Anthropic does not let third-party products offer claude.ai login unless it has
-approved them ([Agent SDK policy](https://code.claude.com/docs/en/agent-sdk/overview)). If that rules it out for you, an
-API key is the alternative.
-
-Prefer an API key? Set `synth_model = "api"` for the reflection, and
-`OPENAI_API_KEY` (the default model is `openai:gpt-5.6-terra`) or another
-`WISEN_MODEL` with its key for chat and the Gardener; any pydantic-ai provider
-works (see [Configuration](docs/configuration.md)). With neither a key nor a
-logged-in CLI, `wisen synthesize` stops with one line naming the fix, and chat
-and the Gardener skip with one line saying what to set. Once that is fixed,
-`wisen gardener run <date>` runs that day's Gardener (the day's reflection is
-already saved, so nothing is synthesized again).
-
 ```bash
-git clone https://github.com/Vela3202019/wisen && cd wisen
-pip install -e ".[server]"
-claude auth status                      # logged in? reflection, chat and proposals run on your subscription
-wisen synthesize                        # reflect on yesterday (one real LLM call)
-wisen serve                             # API on :8000: reflections and chat
+uv tool install wisen          # or: pipx install wisen (Python 3.11+)
+wisen doctor                   # the sessions it finds per agent, and whether a model can run
+wisen synthesize               # yesterday's reflection, or your latest day with sessions
 ```
 
-Every command and install extra is in [docs/commands.md](docs/commands.md).
+The reflection, chat and the Gardener run on your Claude Pro/Max
+subscription at no extra cost when the [`claude`](https://claude.com/claude-code)
+CLI is installed and logged in. Prefer an API key? Set `WISEN_SYNTH_MODEL=api`
+and `WISEN_MODEL` (any pydantic-ai model, for example `openai:gpt-5.6-terra`
+with `OPENAI_API_KEY`). [Configuration](docs/configuration.md) covers both, and
+`wisen doctor` names the fix when neither is set up.
+
+Then `wisen serve` starts the API and chat on `:8000` (the `[server]` extra:
+`uv tool install "wisen[server]"`). Every command and extra is in
+[docs/commands.md](docs/commands.md); to hack on wisen, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Features
 
