@@ -28,6 +28,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -489,11 +490,14 @@ async def check_publish():
             # The served dashboard keeps an applied card on the main page,
             # with its pull request's link or, for a personal file, its local
             # branch; the change log holds neither until it is merged.
-            pages = render_dashboard((await browser.get("/")).text, (await inbox()).json())
-            main, log = pages["approvals"], pages["tab-log"]
-            assert f'id="proposal-{repo.id}"' in main and f'href="{PR}"' in main, main
-            assert f'id="proposal-{home.id}"' in main and f"wisen/gardener/{home.id}" in main, main
-            assert f"proposal-{repo.id}" not in log and f"proposal-{home.id}" not in log, log
+            if shutil.which("node") is None:
+                print("  (skipped the dashboard render check: it needs node)")
+            else:
+                pages = render_dashboard((await browser.get("/")).text, (await inbox()).json())
+                main, log = pages["approvals"], pages["tab-log"]
+                assert f'id="proposal-{repo.id}"' in main and f'href="{PR}"' in main, main
+                assert f'id="proposal-{home.id}"' in main and f"wisen/gardener/{home.id}" in main, main
+                assert f"proposal-{repo.id}" not in log and f"proposal-{home.id}" not in log, log
     print("✓ cloud: Push & create PR queues one device job, records the laptop's link, and shows a failure by class")
 
 

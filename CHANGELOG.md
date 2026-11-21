@@ -6,6 +6,11 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Installing no longer warns that `pydantic-ai` has no `openai` or
+  `anthropic` extra: the package already includes those providers.
+
 ### Changed
 
 - Chat and the Gardener run on your Claude Pro/Max subscription through the
