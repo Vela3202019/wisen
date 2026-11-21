@@ -19,6 +19,11 @@ All notable changes to wisen are recorded here. The format follows
 - Installing no longer warns that `pydantic-ai` has no `openai` or
   `anthropic` extra: the package already includes those providers.
 
+### Documentation
+
+- The README starts with `uvx wisen demo` and a three-command quickstart; the
+  walkthrough is published on GitHub Pages instead of a file to download.
+
 ### Changed
 
 - `wisen synthesize` with no date uses the latest day with sessions in the
