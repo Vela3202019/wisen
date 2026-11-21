@@ -71,6 +71,22 @@ async def ingest_sessions(date: str) -> IngestResult:
     return result
 
 
+async def session_days() -> tuple[dict[str, dict[str, int]], list[str]]:
+    """Every day with agent sessions in local history, as date -> source ->
+    session count, plus connector errors. Sessions are counted and dropped as
+    they are read, so a long history is not held in memory."""
+    days: dict[str, dict[str, int]] = {}
+    errors: list[str] = []
+    for source_name, gen in _local_connectors(None):
+        try:
+            async for session in gen:
+                by_source = days.setdefault(session.date, {})
+                by_source[session.source] = by_source.get(session.source, 0) + 1
+        except (OSError, ValueError) as e:
+            errors.append(f"{source_name}: {e}")
+    return days, errors
+
+
 async def ingest_all(date: str | None = None) -> IngestResult:
     result = IngestResult()
     today = date or datetime.now(UTC).date().isoformat()

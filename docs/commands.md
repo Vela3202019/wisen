@@ -3,7 +3,10 @@
 ## Commands
 
 ```bash
+wisen demo                      # a sample reflection and Gardener proposal: no model call, no history read
+wisen doctor                    # sessions found per agent, whether the models can run, the next command
 wisen synthesize [YYYY-MM-DD]   # ingest sessions + write one day's reflection, then the Gardener batch
+                                #   (no date: yesterday, or the latest day with sessions in the past 14 days)
                                 #   (--force: run a day that has no sessions or is already reflected on)
 wisen serve                     # POST /synthesize, GET /reflections, POST /chat (SSE)
 wisen export [dir]              # dump reflections to JSON files

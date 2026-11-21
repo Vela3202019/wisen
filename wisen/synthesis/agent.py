@@ -159,7 +159,10 @@ async def _generate(
 
 async def observe(result: IngestResult, date: str, yesterday_doc: dict | None, model: str) -> DayObservation:
     """Stage 1: Observer."""
-    print("  [Stage 1] Observer reading sessions + configs + yesterday's reflection...")
+    counts = result.summary()["by_source"]
+    found = ", ".join(f"{n} {source}" for source, n in sorted(counts.items())) or "no sessions"
+    print(f"  [Stage 1] Observer reading {found}, {len(result.configs)} config files "
+          "(usually a minute or two)...")
     observer_context = _build_observer_context(result, date, yesterday_doc)
     observation = await _generate(
         OBSERVER_PROMPT,

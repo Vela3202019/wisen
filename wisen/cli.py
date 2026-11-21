@@ -1,8 +1,10 @@
 """
 wisen command-line interface.
 
-  wisen synthesize [YYYY-MM-DD] [--force]   ingest + synthesize one day (default: yesterday);
-                                  skipped when the day has no sessions or its reflection
+  wisen demo                      a sample reflection and Gardener proposal (no model, no history)
+  wisen doctor                    agent sessions found, model readiness, the command to run next
+  wisen synthesize [YYYY-MM-DD] [--force]   ingest + synthesize one day (default: yesterday, or
+                                  the latest day with sessions in the past two weeks); skipped when the day has no sessions or its reflection
                                   already covers them, unless --force
   wisen serve [--host] [--port]   run the API server (needs the [server] extra)
   wisen export [dir]              dump reflections from the local store to JSON files
@@ -28,18 +30,45 @@ from pathlib import Path
 
 from wisen import __version__, config
 
+LOOKBACK_DAYS = 14
 
-async def _synthesize(date: str, force: bool) -> None:
+
+async def _default_day() -> str | None:
+    """Yesterday, or when yesterday has no sessions the latest day in the past
+    two weeks that has some; None when none has."""
+    from wisen.ingestion.pipeline import session_days
+
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
+    days, _ = await session_days()
+    oldest = (yesterday - timedelta(days=LOOKBACK_DAYS)).isoformat()
+    recent = [d for d in days if oldest <= d <= yesterday.isoformat()]
+    if yesterday.isoformat() in recent or not recent:
+        return yesterday.isoformat() if recent else None
+    latest = max(recent)
+    print(f"no sessions yesterday ({yesterday.isoformat()}); using {latest}, the latest day with sessions")
+    return latest
+
+
+async def _synthesize(date: str | None, force: bool) -> None:
     from wisen.synthesis.job import Skipped, garden_day, synthesize_day
 
-    print(f"[{datetime.now(UTC).isoformat()}] synthesizing {date}")
+    if date is None and force:
+        date = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
+    elif date is None:
+        date = await _default_day()
+        if date is None:
+            raise SystemExit(f"no agent sessions in the past {LOOKBACK_DAYS} days under {config.root()}: "
+                             "`wisen doctor` shows what wisen looked for, `wisen demo` a sample day")
+    started = datetime.now(UTC)
+    print(f"[{started.isoformat()}] synthesizing {date}")
     job = await synthesize_day(date, force=force)
     if isinstance(job, Skipped):
         print(f"skipped {date}: {job.reason} (wisen synthesize {date} --force runs it anyway)")
         return
     if job.state != "succeeded":
         raise SystemExit(f"synthesis failed: {job.error}")
-    print(f"done — reflection saved for {date}")
+    took = int((datetime.now(UTC) - started).total_seconds())
+    print(f"done in {took // 60}m{took % 60:02d}s — reflection saved for {date}")
     garden = await garden_day(date)
     if garden.state != "succeeded":
         print(f"gardener failed: {garden.error}", file=sys.stderr)
@@ -251,8 +280,12 @@ def main() -> None:
     p.add_argument("--version", action="version", version=f"wisen {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    sub.add_parser("demo", help="a sample reflection and Gardener proposal: no model call, no history read")
+    sub.add_parser("doctor", help="agent sessions found, whether the models can run, and what to run next")
+
     sy = sub.add_parser("synthesize", help="ingest + synthesize one day")
-    sy.add_argument("date", nargs="?", help="YYYY-MM-DD (default: yesterday)")
+    sy.add_argument("date", nargs="?", help="YYYY-MM-DD (default: yesterday, or the latest day with sessions "
+                                            "in the past 14 days)")
     sy.add_argument("--force", action="store_true",
                     help="run even if the day has no sessions or its reflection already covers them")
 
@@ -329,9 +362,14 @@ def main() -> None:
 
     args = p.parse_args()
 
-    if args.cmd == "synthesize":
-        date = args.date or (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
-        asyncio.run(_synthesize(date, args.force))
+    if args.cmd == "demo":
+        from wisen.demo import main as demo_main
+        demo_main()
+    elif args.cmd == "doctor":
+        from wisen.doctor import main as doctor_main
+        raise SystemExit(doctor_main())
+    elif args.cmd == "synthesize":
+        asyncio.run(_synthesize(args.date, args.force))
     elif args.cmd == "serve":
         _serve(args.host, args.port, args.reload)
     elif args.cmd == "export":

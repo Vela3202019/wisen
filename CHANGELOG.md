@@ -6,7 +6,20 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `wisen demo` prints a sample reflection and Gardener proposal in a second,
+  with no model call and nothing read from your machine.
+- `wisen doctor` lists the agent sessions wisen finds per source, whether the
+  reflection's and the Gardener's models can run (and the fix when they
+  cannot), and the command to run next.
+
 ### Changed
+
+- `wisen synthesize` with no date uses the latest day with sessions in the
+  past 14 days when yesterday has none, instead of skipping, and says so.
+  With none at all it points at `wisen doctor` and `wisen demo`. It now
+  prints how many sessions it reads per source and how long the run took.
 
 - Chat and the Gardener run on your Claude Pro/Max subscription through the
   Claude Agent SDK (`claude-sdk:sonnet`) when no model is configured and
