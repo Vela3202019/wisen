@@ -16,13 +16,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Check tag matches pyproject version
+      - name: Check tag matches every version
         run: |
           version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           if [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match pyproject version v$version"
             exit 1
           fi
+          python - "$version" <<'PY'
+          import json, re, sys
+          version = sys.argv[1]
+          found = {
+              "wisen/__init__.py": re.search(r'__version__ = "(.+)"', open("wisen/__init__.py").read())[1],
+              "plugin/.claude-plugin/plugin.json": json.load(open("plugin/.claude-plugin/plugin.json"))["version"],
+              ".claude-plugin/marketplace.json": json.load(open(".claude-plugin/marketplace.json"))["plugins"][0]["version"],
+          }
+          bad = {path: v for path, v in found.items() if v != version}
+          for path, v in bad.items():
+              print(f"::error::{path} has version {v}, pyproject has {version}")
+          sys.exit(1 if bad else 0)
+          PY
       - name: Build sdist and wheel
         run: |
           python -m pip install --upgrade build twine

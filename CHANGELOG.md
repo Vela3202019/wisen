@@ -6,6 +6,8 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-20
+
 ### Added
 
 - `wisen demo` prints a sample reflection and Gardener proposal in a second,
@@ -30,7 +32,6 @@ All notable changes to wisen are recorded here. The format follows
   past 14 days when yesterday has none, instead of skipping, and says so.
   With none at all it points at `wisen doctor` and `wisen demo`. It now
   prints how many sessions it reads per source and how long the run took.
-
 - Chat and the Gardener run on your Claude Pro/Max subscription through the
   Claude Agent SDK (`claude-sdk:sonnet`) when no model is configured and
   `OPENAI_API_KEY` is unset, so a subscription alone covers the reflection,
@@ -45,7 +46,9 @@ All notable changes to wisen are recorded here. The format follows
   `claude-sdk:`/`claude-cli:` even when they are configured, and need API
   models.
 
-## [0.2.1] - 2026-11-12
+## 0.2.1 - 2026-11-12
+
+Never tagged or published to PyPI; its changes first ship in 0.3.0.
 
 ### Changed
 
@@ -107,7 +110,7 @@ First release.
   `claude -p`.
 - `wisen` CLI: `synthesize`, `serve`, `export`, `eval`, `egress` and more.
 
-[Unreleased]: https://github.com/Vela3202019/wisen/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/Vela3202019/wisen/compare/v0.2.0...v0.2.1
+[Unreleased]: https://github.com/Vela3202019/wisen/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Vela3202019/wisen/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Vela3202019/wisen/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Vela3202019/wisen/releases/tag/v0.1.0

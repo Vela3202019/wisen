@@ -34,7 +34,9 @@ limit deployment to tags matching `v*`.
 ## Each release
 
 ```bash
-# 1. bump the version in pyproject.toml and wisen/__init__.py, e.g. 0.2.0 -> 0.3.0, and merge that to main
+# 1. bump the version in pyproject.toml, wisen/__init__.py, plugin/.claude-plugin/plugin.json
+#    and .claude-plugin/marketplace.json, e.g. 0.2.0 -> 0.3.0 (the release fails unless all four match
+#    the tag), and merge that to main
 git checkout main && git pull
 # 2. tag the merged commit and push the tag
 git tag v0.2.0

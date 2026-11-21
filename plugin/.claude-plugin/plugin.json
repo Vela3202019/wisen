@@ -1,6 +1,6 @@
 {
   "name": "wisen",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "description": "Continuous learning for your Claude Code sessions: pending Gardener proposals at session start, approve them in chat, run a reflection on demand.",
   "author": {
     "name": "Vela Gao",
