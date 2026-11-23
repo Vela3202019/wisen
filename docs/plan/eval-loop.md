@@ -1,5 +1,9 @@
 # Eval Loop: measuring whether wisen recommendations actually improve the harness
 
+For frozen manifests, paired replay, promotion, calibration and recurring runs, use
+the [current replay eval protocol](../replay-eval.md). This document records the
+initial design; its single-run scoring and proposed automatic acceptance are superseded.
+
 **Goal.** Close the loop wisen currently leaves open: it observes friction and
 recommends config changes, but never measures whether an applied change reduced friction.
 This plan adds ground truth (mined correction cases), a counterfactual replay eval, and a
