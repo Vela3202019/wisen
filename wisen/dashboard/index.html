@@ -135,12 +135,12 @@
   .proposal pre .del { color:var(--misaligned); }
   .proposal textarea { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border);
                        border-radius:8px; padding:8px; font:inherit; font-size:14px; min-height:40px; }
-  .proposal .buttons { display:flex; gap:8px; margin-top:8px; }
+  .proposal .buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
   .proposal .approve { background:#238636 !important; border-color:#238636 !important; color:#fff !important; }
   .proposal .reject { color:var(--misaligned) !important; }
   .proposal .state { font-size:12px; padding:2px 10px; border-radius:10px; background:var(--border); }
   .proposal .state.applied, .proposal .state.approved { background:#1f4d2a; color:var(--aligned); }
-  .proposal code { font-size:12px; }
+  .proposal code { font-size:12px; overflow-wrap:anywhere; }
   .proposal a { color:var(--aligned); word-break:break-all; }
   .proposal .error { color:var(--misaligned); font-size:13px; margin:6px 0; }
   .proposal .publish { background:#1f6feb !important; border-color:#1f6feb !important; color:#fff !important; }
