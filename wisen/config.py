@@ -9,10 +9,7 @@ import tomllib
 from functools import lru_cache
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-# Before any connector reads root(): their history paths are fixed at import.
-load_dotenv()
+from dotenv import dotenv_values, find_dotenv
 
 CONFIG_PATH = Path.home() / ".wisen" / "config.toml"
 
@@ -28,8 +25,15 @@ def _config() -> dict:
         return {}
 
 
+@lru_cache(maxsize=1)
+def _dotenv() -> dict:
+    """`.env` values, read without touching os.environ: connectors fix their
+    history paths at import, before anything calls load_dotenv()."""
+    return dotenv_values(find_dotenv())
+
+
 def get(section: str, key: str, env_var: str, default: str = "") -> str:
-    env = os.getenv(env_var, "").strip()
+    env = (os.getenv(env_var) or _dotenv().get(env_var) or "").strip()
     if env:
         return env
     return str(_config().get(section, {}).get(key, "")).strip() or default
