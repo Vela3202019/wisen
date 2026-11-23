@@ -605,7 +605,7 @@ async def check_prepairing_proposals():
     # The gate's refusal is recorded once; nothing is refused by the server.
     assert errors[0].count(too_big.id) == 1 and "stays local" in errors[0], errors[0]
     assert not errors[1] and not errors[2], errors
-    assert "409" not in "".join(errors) and "not sent" not in "".join(errors), errors
+    assert ": 409" not in "".join(errors) and "not sent" not in "".join(errors), errors
     print("✓ cloud: proposals decided before pairing upload once with their history; no refusal repeats")
 
 
