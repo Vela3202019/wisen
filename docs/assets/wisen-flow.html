@@ -1,26 +1,27 @@
 <!doctype html>
-<!-- Source for wisen-flow.gif (the README demo, 1000x620, 9s at 20 fps).
+<!-- Source for wisen-flow.gif (the README demo, 1000x620, 9s at 20 fps; Inter and JetBrains Mono from Google Fonts).
      Re-render from the repo root:
        mkdir -p /tmp/wf && rm -f /tmp/wf/*.png
        for i in $(seq 0 179); do t=$(python3 -c "print($i/20)");
-         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu \
+         google-chrome --headless --disable-gpu \
            --hide-scrollbars --force-device-scale-factor=1 --window-size=1000,620 \
-           --virtual-time-budget=2000 --screenshot=/tmp/wf/$i.png \
+           --virtual-time-budget=5000 --screenshot=/tmp/wf/$i.png \
            "file://$PWD/docs/assets/wisen-flow.html?t=$t"; done
-       /opt/homebrew/bin/ffmpeg -y -framerate 20 -i /tmp/wf/%d.png \
+       ffmpeg -y -framerate 20 -i /tmp/wf/%d.png \
          -vf "split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3" \
          /tmp/wf/flow.gif
-       /opt/homebrew/bin/gifsicle -O3 --lossy=60 --colors 128 -o docs/assets/wisen-flow.gif /tmp/wf/flow.gif
+       gifsicle -O3 --lossy=60 --colors 128 -o docs/assets/wisen-flow.gif /tmp/wf/flow.gif
      `?t=<seconds>` freezes every CSS animation at that time, so each frame is deterministic. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>wisen: one corrected habit, one branch</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=block">
 <style>
   html, body { margin: 0; width: 1000px; height: 620px; overflow: hidden; }
   body {
     background: #0d1117; color: #e6edf3;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     box-sizing: border-box; padding: 26px 40px 22px;
     display: flex; flex-direction: column;
   }
@@ -67,7 +68,7 @@
   .a2 { animation: draw .3s linear 4.9s both; }
 
   .card.two { animation: fadeUp .5s ease-out 1.9s both; }
-  .diff { margin-top: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 18px; line-height: 1.5; }
+  .diff { margin-top: 10px; font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 18px; line-height: 1.5; }
   .diff .add { color: #3fb950; background: rgba(63, 185, 80, .1); border-radius: 4px; padding: 0 4px; }
   .diff div { opacity: 0; }
   .diff .d1 { animation: fadeIn .3s ease-out 2.2s both; }
@@ -100,7 +101,7 @@
 
   .card.three { animation: fadeUp .5s ease-out 5.25s both, glow 2.6s ease-in-out 5.9s both; }
   .branch {
-    margin-top: 9px; font-family: ui-monospace, Menlo, monospace; font-size: 19px;
+    margin-top: 9px; font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 19px;
     color: #3fb950; letter-spacing: -.2px;
   }
 
@@ -108,7 +109,7 @@
     margin-top: auto; display: flex; align-items: center; gap: 10px;
     font-size: 14px; color: #8b949e;
   }
-  footer code { font-family: ui-monospace, Menlo, monospace; color: #c9d1d9; font-size: 13.5px; }
+  footer code { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; color: #c9d1d9; font-size: 13.5px; }
   footer .dot { color: #30363d; }
 </style>
 </head>
@@ -122,7 +123,7 @@
   <div class="steps">
     <section class="card one">
       <div class="kicker">Today's reflection</div>
-      <div class="quote">You told Claude Code <em>four times this week</em>:
+      <div class="quote">You told Claude Code <em>40 times this week</em>:
         stop writing summary comments.</div>
     </section>
 

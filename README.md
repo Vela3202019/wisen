@@ -10,7 +10,7 @@
 wisen reads your sessions and turns the corrections that keep coming back into
 fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
 
-<img src="docs/assets/wisen-flow.gif" width="760" alt="wisen demo: a day's reflection surfaces a correction you made four times, the Gardener proposes one CLAUDE.md change, you approve it, and it becomes a branch you merge">
+<img src="docs/assets/wisen-flow.gif" width="760" alt="wisen demo: a day's reflection surfaces a correction you made 40 times, the Gardener proposes one CLAUDE.md change, you approve it, and it becomes a branch you merge">
 
 <sub>[Full walkthrough](https://vela3202019.github.io/wisen/)</sub>
 
