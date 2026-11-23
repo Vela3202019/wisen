@@ -9,7 +9,7 @@ pip install -e ".[server,dev]"                   # editable install; `wisen` CLI
 wisen serve --reload                             # API on :8000 (or: uvicorn wisen.main:app --reload)
 ```
 
-Tests live in `tests/` and run as scripts from the repo root: `python3 -m tests.test_search` (also `test_ingest`, `test_sources`, `test_synthesis`, `test_evals`).
+Tests live in `tests/` and run as scripts from the repo root: `python3 -m tests.test_search` (also `test_ingest`, `test_sources`, `test_synthesis`, `test_evals`). The egress canary belongs in that default set: if it is missing, adding it is part of the privacy change, and a change may only claim the privacy guarantee still holds once the canary has actually been run — a green unit test for the code you touched is not enough.
 
 ## Model config
 
