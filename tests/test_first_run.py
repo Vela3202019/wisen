@@ -22,6 +22,8 @@ import sys
 from datetime import UTC, datetime
 from unittest.mock import Mock, patch
 
+from google.auth.exceptions import DefaultCredentialsError
+
 from wisen import cli, demo, doctor
 from wisen.ingestion.pipeline import session_days
 
@@ -63,6 +65,18 @@ async def main():
     assert ready, report
     assert "✓ reflection       openai:gpt-4o" in report and "✓ chat, Gardener   openai:gpt-4o" in report, report
     print("✓ first run: wisen doctor checks API models and reports missing provider packages")
+
+    model = "google-cloud:gemini-2.5-flash"
+    credentials_error = "Application Default Credentials are not available"
+    with (
+        patch.dict(os.environ, WISEN_SYNTH_MODEL="api", WISEN_MODEL=model),
+        patch.object(doctor, "infer_model", side_effect=DefaultCredentialsError(credentials_error)),
+    ):
+        report, ready = await doctor.report()
+    assert not ready, report
+    assert f"✗ reflection       {model}" in report and f"✗ chat, Gardener   {model}" in report, report
+    assert report.count(credentials_error) == 2, report
+    assert "Traceback" not in report, report
 
     uvicorn = Mock()
     with patch.dict(sys.modules, fastapi=None, uvicorn=uvicorn), patch.object(sys, "argv", ["wisen", "serve"]):

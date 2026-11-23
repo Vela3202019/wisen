@@ -6,7 +6,6 @@ no model call.
 """
 import asyncio
 
-from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import infer_model
 
 from wisen import __version__, config, llm
@@ -19,8 +18,8 @@ SOURCES = ("claude-code", "codex", "cursor", "gemini-cli", "opencode", "pi", "ex
 def _api_model_problem(model: str) -> str | None:
     try:
         infer_model(model)
-    except (ImportError, UserError) as error:
-        return str(error)
+    except Exception as error:  # noqa: BLE001
+        return str(error) or type(error).__name__
     return None
 
 
