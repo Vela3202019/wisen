@@ -4,6 +4,8 @@
 
 # wisen
 
+*makes your coding agents wiser every day*
+
 **You've corrected your coding agent on the same thing four times this week.
 wisen reads your sessions and turns the corrections that keep coming back into
 fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
@@ -34,6 +36,9 @@ tool calls, the occasional flow state. Then it all evaporates. wisen reads
 those sessions where your agents already keep them, writes one *reflection*
 for the day, and proposes small fixes to the instruction files your agents
 read. You approve each fix, and later sessions show whether it helped.
+
+One of my own days: 213 turns, 150 of them rephrasing something I had already
+said. I never counted. wisen did.
 
 ## Quickstart
 
