@@ -560,11 +560,16 @@ async def check_close_cards():
             pages = render_dashboard(html, cards)
             assert f'id="proposal-{applied.id}"' not in pages["approvals"]
             assert f'href="{PR}"' in pages["tab-log"] and "Reopen card" in pages["tab-log"]
-            assert f'data-id="{pending.id}" open ontoggle' in pages["approvals"]
-            assert f'data-id="{publishing.id}"  ontoggle' in pages["approvals"]
-            folded = render_dashboard(html, cards, folds={pending.id: False, publishing.id: True})
-            assert f'data-id="{pending.id}"  ontoggle' in folded["approvals"]
-            assert f'data-id="{publishing.id}" open ontoggle' in folded["approvals"]
+            assert f'data-fold-key="{pending.id}:proposed" open ontoggle' in pages["approvals"]
+            assert f'data-fold-key="{publishing.id}:applied"  ontoggle' in pages["approvals"]
+            folded = render_dashboard(html, cards, folds={f"{pending.id}:proposed": False,
+                                                         f"{publishing.id}:applied": True})
+            assert f'data-fold-key="{pending.id}:proposed"  ontoggle' in folded["approvals"]
+            assert f'data-fold-key="{publishing.id}:applied" open ontoggle' in folded["approvals"]
+            # A pending card's default-open toggle must not carry into its
+            # later applied stage, which starts collapsed.
+            transitioned = render_dashboard(html, cards, folds={f"{publishing.id}:proposed": True})
+            assert f'data-fold-key="{publishing.id}:applied"  ontoggle' in transitioned["approvals"]
         assert (await browser.post(close_url, json={"closed": False})).status_code == 200
         assert (await browser.post(close_url, json={"closed": False})).status_code == 200
         # Publish and close are mutually exclusive even when two tabs race.

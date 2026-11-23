@@ -532,12 +532,13 @@ const proposalFolds = (() => {
   catch (_) { return {}; }
 })();
 function rememberProposal(card) {
-  proposalFolds[card.dataset.id] = card.open;
+  proposalFolds[card.dataset.foldKey] = card.open;
   try { sessionStorage.setItem("wisen:proposal-folds", JSON.stringify(proposalFolds)); } catch (_) {}
 }
 function proposalCard(p, state, meta, body, open = false) {
-  const expanded = proposalFolds[p.id] ?? open;
-  return `<details class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}" ${expanded ? "open" : ""} ontoggle="rememberProposal(this)">
+  const foldKey = `${p.id}:${state}`;
+  const expanded = proposalFolds[foldKey] ?? open;
+  return `<details class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}" data-fold-key="${esc(foldKey)}" ${expanded ? "open" : ""} ontoggle="rememberProposal(this)">
     <summary><span class="state ${esc(state)}">${esc(state)}</span><span class="target">${esc(p.target)}</span>
       <div class="meta">${meta}</div></summary>
     ${body}
