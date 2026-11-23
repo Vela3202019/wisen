@@ -18,7 +18,7 @@ import asyncio
 import json
 import uuid
 from contextlib import closing
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -99,7 +99,8 @@ def past_outcomes(store: SqliteStore, limit: int = 50) -> list[dict]:
     """Past proposals in every state, newest first, with their content, the
     owner's decision note, when they were merged, and the measured verdict."""
     return [{**dict(r), "payload": json.loads(r["payload"])} for r in _rows(store, """
-        SELECT p.id, p.target, p.state, p.payload, p.created_at, d.decision, d.note, m.verdict, m.reason,
+        SELECT p.id, p.target, p.state, p.payload, p.created_at, d.decision, d.note,
+               NULLIF(m.verdict, 'pending') AS verdict, m.reason,
                (SELECT at FROM proposal_events e WHERE e.proposal_id = p.id AND e.to_state = 'merged') AS merged_at
         FROM proposals p
         LEFT JOIN proposal_decisions d ON d.proposal_id = p.id
@@ -173,9 +174,9 @@ def _variants(t: Target, d: Draft) -> tuple[runner.Variant, runner.Variant] | No
         if not t.path.startswith(".claude/"):
             return None  # the replay runs Claude Code, which reads only ~/.claude from home
         rel = t.path.removeprefix(".claude/")
-        files = lambda text: {rel: text} if text is not None else {}
+        files = lambda text: {rel: text}
         return runner.Variant(config_files=files(d.current)), runner.Variant(config_files=files(d.proposed))
-    files = lambda text: {t.path: text} if text is not None else {}
+    files = lambda text: {t.path: text}
     return runner.Variant(project_files=files(d.current)), runner.Variant(project_files=files(d.proposed))
 
 
@@ -233,7 +234,7 @@ def eval_summary(report: dict | None, cost: dict, missing: str = NO_CASES) -> st
     return (f"Replay on {report['cases']['eval']} eval and {report['cases']['clean']} clean-set cases: "
             f"pass rate {_pct(cur['pass_rate'])} → {_pct(new['pass_rate'])}; clean set "
             f"{_pct(cur['clean_pass_rate'])} → {_pct(new['clean_pass_rate'])}. Meets the accept rule "
-            f"(pass rate rises, clean set holds): {rule}. Replay cost: {spent}.{now}")
+            f"(paired improvement and clean-set non-regression): {rule}. Replay cost: {spent}.{now}")
 
 
 def record_run(store: SqliteStore, proposals: Proposals, run: GardenerRun, replays: dict, day: str,
@@ -437,7 +438,9 @@ def record_measure(store: SqliteStore, proposals: Proposals, proposal_id: str, t
     with store.transaction() as conn:
         conn.execute(
             "INSERT INTO proposal_measures (proposal_id, user_id, verdict, reason, result, at) "
-            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (proposal_id) DO NOTHING",
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (proposal_id) DO UPDATE SET "
+            "verdict=excluded.verdict, reason=excluded.reason, result=excluded.result, at=excluded.at "
+            "WHERE proposal_measures.verdict = 'pending'",
             (proposal_id, store.user_id, result["verdict"], result["reason"], json.dumps(result), ts(now)),
         )
         proposals.transition_in(conn, proposal_id, "measuring", "revert_proposed" if worse else "kept",
@@ -460,10 +463,16 @@ async def measure_job(ctx: JobContext, args: dict) -> dict:
         await ctx.step("start", lambda: proposals.transition(
             proposal_id, "merged", "measuring", request_id=f"measuring:{proposal_id}", actor="measure"),
             replay_safe=True)
-    merged = await asyncio.to_thread(applier.merged_at, store, proposal_id)
+    from wisen.evals.exposure import field_evidence
+
+    merge = await asyncio.to_thread(applier.git_row, store, proposal_id)
+    merged = datetime.fromisoformat(merge["merged_at"])
     reflections = await store.list_reflections()
     result = await ctx.step("field-check", lambda: asyncio.to_thread(
         verification.field_check, claude_dir(), reflections, merged), replay_safe=True, output=dict)
+    did = await ctx.step("field-exposure", lambda: asyncio.to_thread(
+        field_evidence, store, proposal_id, claude_dir(), merged), replay_safe=True, output=dict)
+    result = {**result, "observational": True, "merge_time_source": merge["merge_time_source"], "exposure_did": did}
     revert = None
     if result["verdict"] == "worse":
         when = f"{int(ctx.engine.clock().timestamp())} +0000"

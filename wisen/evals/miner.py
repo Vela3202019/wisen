@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import cache
+from hashlib import sha256
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -30,7 +31,7 @@ from wisen.connectors.claude_code import (
     _parse_jsonl,
 )
 from wisen.evals.cases import Case, ContextTurn, Detector, assign_split
-from wisen.ingestion.normalizer import truncate_content
+from wisen.ingestion.normalizer import NormalizedSession, truncate_content
 from wisen.llm import eval_model
 
 TOOL_REJECTION_MARKER = "The user doesn't want to proceed with this tool use"
@@ -137,6 +138,27 @@ def _detect(text: str, rejection: str, prev_user_ts: datetime | None,
             and (ts - prev_user_ts).total_seconds() < _RAPID_CORRECTION_SECONDS):
         return "rephrase-storm", truncate_content(text, 500)
     return None
+
+
+def detector_version() -> str:
+    inputs = (_CORRECTION_RE.pattern, _CORRECTION_RE.flags, _HARNESS_RE.pattern,
+              TOOL_REJECTION_MARKER, INTERRUPTION_MARKER, _RAPID_CORRECTION_SECONDS)
+    return "miner-v1:" + sha256(repr(inputs).encode()).hexdigest()[:16]
+
+
+def normalized_predictions(session: NormalizedSession) -> Iterator[tuple[int, Detector | None]]:
+    """Run the miner rules on normalized turns for cross-connector calibration."""
+    previous = None
+    for i, turn in enumerate(session.turns):
+        if turn.role != "user" or _HARNESS_RE.match(turn.content) or turn.content.startswith("[permission-mode] "):
+            continue
+        rejection = turn.content if TOOL_REJECTION_MARKER in turn.content and "[tool_result]" in turn.content else ""
+        text = "\n".join(line for line in turn.content.splitlines() if not line.startswith("[tool_result]"))
+        if not text.strip() and not rejection:
+            continue
+        hit = _detect(text, rejection, previous, turn.timestamp)
+        previous = turn.timestamp
+        yield i, hit[0] if hit else None
 
 
 def _scan_session(session_id: str, events: list[dict], project_path: str,

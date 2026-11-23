@@ -211,6 +211,16 @@ MIGRATIONS = [
     """
     ALTER TABLE proposals ADD COLUMN pr_url TEXT;
     """,
+    """
+    ALTER TABLE proposal_measures ADD COLUMN replay_gate TEXT;
+    ALTER TABLE proposal_git ADD COLUMN merge_time_source TEXT NOT NULL DEFAULT 'detected';
+    CREATE TABLE rule_exposures (
+        user_id TEXT NOT NULL, proposal_id TEXT NOT NULL, session_id TEXT NOT NULL,
+        cohort TEXT NOT NULL, observed_at TEXT NOT NULL, exposed INTEGER,
+        detector TEXT NOT NULL,
+        PRIMARY KEY (user_id, proposal_id, session_id)
+    );
+    """,
 ]
 
 

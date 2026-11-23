@@ -1035,12 +1035,12 @@ async def check_replay_before_proposal() -> None:
     current = runner.Variant(project_files={"CLAUDE.md": CLAUDE_MD})
     proposed = runner.Variant(project_files={"CLAUDE.md": CLAUDE_MD + "Run tests: make test\n"})
     report = await runner.compare(cases, current, proposed, cap=2, run=fake)
-    assert len(calls) == 8 and report["cases"] == {"eval": 2, "clean": 2}, calls   # 2 + 2 cases x 2 configs
+    assert len(calls) == 40 and report["cases"] == {"eval": 2, "clean": 2}, calls  # 4 cases x 2 configs x 5 runs
     assert report["current"] == {"pass_rate": 0.0, "clean_pass_rate": 1.0}
     assert report["proposed"] == {"pass_rate": 1.0, "clean_pass_rate": 1.0}
-    assert report["meets_rule"] is True and report["tokens"] == 8_000 and report["cost_usd"] == 0.08
+    assert report["meets_rule"] is True and report["tokens"] == 40_000 and report["cost_usd"] == 0.40
     summary = loop.eval_summary(report, {"tokens_per_problem": 7000.0, "hitl_turns_per_pr": 4.0})
-    assert "pass rate 0% → 100%" in summary and "accept rule" in summary and "$0.08" in summary, summary
+    assert "pass rate 0% → 100%" in summary and "accept rule" in summary and "$0.40" in summary, summary
     assert "7,000 tokens per problem solved, 4 human-in-the-loop turns per PR" in summary, summary
     # In the Gardener: the draft's cases are those of its project; the fake stands in for the runner.
     for case in cases:
