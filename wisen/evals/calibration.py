@@ -234,7 +234,7 @@ async def sample_turns(labels: Labels, dates: list[str], dataset: str, *, n: int
                     "private": {"cluster": session.session_id},
                     "slices": {"connector": session.source},
                     "predictions": [
-                        ("miner", miner.detector_version(), heuristic or "none"),
+                        ("miner", miner.normalized_detector_version(), heuristic or "none"),
                         ("observer", observer_version, predictions.get(turn_id(session, i), "none")),
                     ],
                 }
@@ -242,7 +242,7 @@ async def sample_turns(labels: Labels, dates: list[str], dataset: str, *, n: int
     sample = hits + _stratified(negatives, ("connector",), max(0, n - len(hits)), seed)
     labels.add("turn", dataset, sample)
     return {"items": len(sample), "heuristic_hits": len(hits), "observer_version": observer_version,
-            "miner_version": miner.detector_version()}
+            "miner_version": miner.normalized_detector_version()}
 
 
 def _agreement(rows: list[dict], classes: tuple[str, ...]) -> dict:

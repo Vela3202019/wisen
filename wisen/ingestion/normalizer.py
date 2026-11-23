@@ -10,6 +10,8 @@ class Turn(BaseModel):
     timestamp: datetime
     has_tool_call: bool = False
     tool_names: list[str] = []
+    user_text: str | None = None
+    tool_rejected: bool = False
 
 
 class SessionMetadata(BaseModel):

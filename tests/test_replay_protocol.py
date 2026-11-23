@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from wisen.connectors.claude_code import _events_to_turns
 from wisen.evals import calibration, exposure, miner, protocol, replay, runner
 from wisen.evals.cases import Case, ContextTurn
 from wisen.evals.judge import prompt_version
@@ -274,6 +275,27 @@ def test_observer_turns_and_stratified_negatives(tmp_path, monkeypatch):
         assert calibration.calibration(rows, "turn")["overall"]["kappa"] == 1
     observation = asyncio.run(agent.observe(asyncio.run(load(None)), session.date, None, "fake"))
     assert "turn_corrections" not in observation_packet(observation, session.date)
+
+
+def test_normalized_miner_does_not_count_claude_tool_output_as_user_text():
+    def event(content, minutes):
+        return {"message": {"role": "user", "content": content},
+                "timestamp": (NOW + timedelta(minutes=minutes)).isoformat()}
+
+    turns = _events_to_turns([
+        event([{"type": "tool_result", "content": "command output\nNo, ignore this"}], 0),
+        event("Run the test suite", 0.5),
+        event([{"type": "tool_result", "content": f"command output\n{miner.TOOL_REJECTION_MARKER}"}], 2),
+        event([{"type": "tool_result", "content": "command output\nordinary output"},
+               {"type": "text", "text": "No, use the integration suite"}], 3),
+    ])
+    session = NormalizedSession(session_id="tool-test", source="claude-code", project_path="/demo",
+                                project_name="demo", date=NOW.date().isoformat(), started_at=NOW,
+                                ended_at=turns[-1].timestamp, turns=turns, metadata=compute_metadata(turns),
+                                raw_source_path="/local")
+    assert list(miner.normalized_predictions(session)) == [
+        (1, None), (2, "tool-rejection"), (3, "explicit-correction"),
+    ]
 
 
 def test_field_difference_in_differences_keeps_unknown_separate():

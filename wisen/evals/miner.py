@@ -26,15 +26,17 @@ from pydantic_ai import Agent
 
 from wisen.connectors.claude_code import (
     _CLAUDE_DIR,
+    TOOL_REJECTION_MARKER,
     _decode_project_path,
     _group_by_session,
     _parse_jsonl,
+    _plain_text,
+    _tool_rejection_text,
 )
 from wisen.evals.cases import Case, ContextTurn, Detector, assign_split
 from wisen.ingestion.normalizer import NormalizedSession, truncate_content
 from wisen.llm import eval_model
 
-TOOL_REJECTION_MARKER = "The user doesn't want to proceed with this tool use"
 INTERRUPTION_MARKER = "[Request interrupted by user"
 _CORRECTION_RE = re.compile(
     r"^(no\b|stop\b|wait\b|don'?t\b|revert\b|undo\b|that'?s not\b|not what i\b|wrong\b)",
@@ -88,36 +90,6 @@ def _usage(events: list[dict]) -> tuple[int, float | None]:
     return tokens, cost
 
 
-def _plain_text(content) -> str:
-    """User-authored text only — excludes tool_result blocks."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return ""
-
-
-def _tool_rejection_text(content) -> str:
-    """Return the rejection tool_result text if present, else ''."""
-    if not isinstance(content, list):
-        return ""
-    for b in content:
-        if not (isinstance(b, dict) and b.get("type") == "tool_result"):
-            continue
-        inner = b.get("content", "")
-        if isinstance(inner, list):
-            inner = "\n".join(
-                ib.get("text", "") for ib in inner
-                if isinstance(ib, dict) and ib.get("type") == "text"
-            )
-        if isinstance(inner, str) and TOOL_REJECTION_MARKER in inner:
-            return inner
-    return ""
-
-
 def _parse_ts(e: dict) -> datetime | None:
     try:
         return datetime.fromisoformat(e.get("timestamp", ""))
@@ -146,15 +118,23 @@ def detector_version() -> str:
     return "miner-v1:" + sha256(repr(inputs).encode()).hexdigest()[:16]
 
 
+def normalized_detector_version() -> str:
+    return f"{detector_version()}:normalized-v2"
+
+
 def normalized_predictions(session: NormalizedSession) -> Iterator[tuple[int, Detector | None]]:
     """Run the miner rules on normalized turns for cross-connector calibration."""
     previous = None
     for i, turn in enumerate(session.turns):
-        if turn.role != "user" or _HARNESS_RE.match(turn.content) or turn.content.startswith("[permission-mode] "):
+        if turn.role != "user" or turn.content.startswith("[permission-mode] "):
             continue
-        rejection = turn.content if TOOL_REJECTION_MARKER in turn.content and "[tool_result]" in turn.content else ""
-        text = "\n".join(line for line in turn.content.splitlines() if not line.startswith("[tool_result]"))
-        if not text.strip() and not rejection:
+        if turn.user_text is None:
+            rejection = turn.content if TOOL_REJECTION_MARKER in turn.content and "[tool_result]" in turn.content else ""
+            text = "\n".join(line for line in turn.content.splitlines() if not line.startswith("[tool_result]"))
+        else:
+            rejection = turn.content if turn.tool_rejected else ""
+            text = turn.user_text
+        if _HARNESS_RE.match(text) or (not text.strip() and not rejection):
             continue
         hit = _detect(text, rejection, previous, turn.timestamp)
         previous = turn.timestamp
