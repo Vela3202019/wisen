@@ -20,6 +20,12 @@ All notable changes to wisen are recorded here. The format follows
 
 - Installing no longer warns that `pydantic-ai` has no `openai` or
   `anthropic` extra: the package already includes those providers.
+- `WISEN_ROOT_DIR` set in `.env` now applies to every agent's history, not
+  only to sources read after the model settings load.
+- A JSON export whose top level is an array is skipped instead of aborting
+  the read.
+- `openai-chat:` and `openai-responses:` models report a missing
+  `OPENAI_API_KEY` instead of failing at the first call.
 
 ### Documentation
 
