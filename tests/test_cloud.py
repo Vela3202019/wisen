@@ -544,10 +544,16 @@ async def check_close_cards():
         assert (await browser.post(close_url, json={})).status_code == 200
         assert (await browser.post(close_url, json={})).status_code == 200
         assert (await proposals.get(applied.id), await proposals.history(applied.id)) == before
+        # The archive must remain reachable after it leaves the usual recent
+        # 50 proposals, otherwise there is no way back to its publish action.
+        server.clock.now += timedelta(seconds=1)
+        for _ in range(51):
+            await make(False)
         # Refresh/restart persistence and account isolation, including direct API calls.
         restarted = Server(server.db, server.clock)
         async with restarted.browser() as http:
             cards = (await http.get("/api/proposals")).json()
+            assert len(cards) == 55
             card = next(p for p in cards if p["id"] == applied.id)
             assert card["closed_at"] and card["pr_url"] == PR and card["state"] == "applied"
         server.mailbox.set_user("someone-else", PASSWORD)

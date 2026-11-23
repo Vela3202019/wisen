@@ -757,7 +757,9 @@ class Mailbox:
         docs = self.store(user_id)._list_reflections(1, day)
         return docs[0] if docs else None
 
-    async def inbox(self, user_id: str, limit: int = 50) -> list[Proposal]:
+    async def inbox(self, user_id: str, limit: int = -1) -> list[Proposal]:
+        # The dashboard's change log is also the only way to reopen a closed
+        # card. Do not silently drop history after 50 newer proposals.
         return await self.proposals(user_id).list(limit=limit)
 
     def inbox_details(self, user_id: str) -> dict[str, dict]:
