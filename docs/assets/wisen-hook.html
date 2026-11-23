@@ -1,0 +1,86 @@
+<!doctype html>
+<!-- Source for wisen-hook.gif (the launch-post GIF, 800x800, 8s at 15 fps): one scene change,
+     type big enough to read on a phone (Inter and JetBrains Mono, fetched from Google Fonts), "40 times" on screen within the first second.
+     Re-render from the repo root (any Chrome, ffmpeg; gifsicle is optional):
+       mkdir -p /tmp/wh && rm -f /tmp/wh/*.png
+       for i in $(seq 0 119); do t=$(python3 -c "print($i/15)");
+         google-chrome --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
+           --window-size=800,800 --virtual-time-budget=5000 --screenshot=/tmp/wh/$i.png \
+           "file://$PWD/docs/assets/wisen-hook.html?t=$t"; done
+       ffmpeg -y -framerate 15 -i /tmp/wh/%d.png \
+         -vf "split[a][b];[a]palettegen=max_colors=64:stats_mode=diff[p];[b][p]paletteuse=dither=none" /tmp/wh/hook.gif
+       gifsicle -O3 --colors 64 -o docs/assets/wisen-hook.gif /tmp/wh/hook.gif
+     `?t=<seconds>` freezes every CSS animation at that time, so each frame is deterministic. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>wisen: you told Claude Code 40 times this week</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=block">
+<style>
+  html, body { margin: 0; width: 800px; height: 800px; overflow: hidden; }
+  body {
+    background: #0d1117; color: #e6edf3; position: relative;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .scene { position: absolute; inset: 0; padding: 0 64px; box-sizing: border-box;
+           display: flex; flex-direction: column; justify-content: center; }
+  @keyframes in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @keyframes out { to { opacity: 0; } }
+  @keyframes pop { 0% { transform: scale(.6); opacity: 0; } 70% { transform: scale(1.08); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes press { 0%, 100% { transform: scale(1); } 50% { transform: scale(.94); } }
+  @keyframes approved { to { background: #238636; border-color: #3fb950; color: #fff; } }
+  @keyframes cursor { from { transform: translate(140px, 120px); } to { transform: translate(0, 0); } }
+
+  .one { animation: out .25s linear 3.2s both; }
+  .one .l1 { font-size: 56px; font-weight: 600; letter-spacing: -1px; animation: in .3s ease-out 0s both; }
+  .one .times { font-size: 150px; font-weight: 800; color: #f0883e; line-height: 1.05;
+                letter-spacing: -5px; transform-origin: left center; animation: pop .45s ease-out .35s both; }
+  .one .l3 { font-size: 56px; font-weight: 600; letter-spacing: -1px; animation: in .3s ease-out .35s both; }
+  .one .quote { margin-top: 40px; font-size: 40px; line-height: 1.3; color: #8b949e;
+                font-weight: 400; animation: in .35s ease-out 1.1s both; }
+
+  .two { opacity: 0; animation: in .3s ease-out 3.45s both; }
+  .file { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 34px; color: #8b949e; margin-bottom: 18px; }
+  .diff { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 38px; line-height: 1.35;
+          background: rgba(46,160,67,.18); border-left: 8px solid #3fb950; color: #aff5b4;
+          padding: 22px 26px; border-radius: 10px; animation: in .35s ease-out 3.9s both; }
+  .btnrow { margin-top: 56px; display: flex; align-items: center; gap: 28px; position: relative;
+            animation: in .3s ease-out 4.6s both; }
+  .btn { font-size: 32px; font-weight: 700; padding: 14px 36px; border-radius: 12px;
+         border: 3px solid #3fb950; color: #3fb950;
+         animation: press .25s ease-in-out 5.9s both, approved .01s linear 6.05s both; }
+  .done { white-space: nowrap; font-size: 34px; font-weight: 600; color: #3fb950; animation: in .3s ease-out 6.25s both; }
+  .ptr { position: absolute; left: 140px; top: 52px; width: 44px; height: 44px;
+         animation: cursor .9s ease-out 4.9s both; }
+</style>
+</head>
+<body>
+  <div class="scene one">
+    <div class="l1">You told Claude Code</div>
+    <div class="times">40 times</div>
+    <div class="l3">this week:</div>
+    <div class="quote">“Don't add summary comments above functions.”</div>
+  </div>
+  <div class="scene two">
+    <div class="file">CLAUDE.md</div>
+    <div class="diff">+ Don't add summary comments above functions.</div>
+    <div class="btnrow">
+      <div class="btn">Approve</div>
+      <div class="done">✓ approved</div>
+      <svg class="ptr" viewBox="0 0 24 24"><path d="M4 2l16 10-7 1.5L9.5 21z" fill="#fff" stroke="#0d1117" stroke-width="1.5"/></svg>
+    </div>
+  </div>
+<script>
+  const t = parseFloat(new URLSearchParams(location.search).get('t'));
+  if (!Number.isNaN(t)) {
+    const freeze = () => document.getAnimations().forEach(a => {
+      a.pause();
+      a.currentTime = t * 1000;
+    });
+    freeze();
+    addEventListener('load', freeze);
+    requestAnimationFrame(freeze);
+  }
+</script>
+</body>
+</html>

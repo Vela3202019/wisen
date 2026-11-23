@@ -1,14 +1,16 @@
 <div align="center">
 
-<img src="docs/assets/logo.svg" width="112" height="112" alt="wisen logo: a loose line sketching a range of hills">
+<img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/logo.svg" width="112" height="112" alt="wisen logo: a loose line sketching a range of hills">
 
 # wisen
+
+*makes your coding agents wiser every day*
 
 **You've corrected your coding agent on the same thing 40 times this week.
 wisen reads your sessions and turns the corrections that keep coming back into
 fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
 
-<img src="docs/assets/wisen-flow.gif" width="760" alt="wisen demo: a day's reflection surfaces a correction you made four times, the Gardener proposes one CLAUDE.md change, you approve it, and it becomes a branch you merge">
+<img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/wisen-flow.gif" width="760" alt="wisen demo: a day's reflection surfaces a correction you made 40 times, the Gardener proposes one CLAUDE.md change, you approve it, and it becomes a branch you merge">
 
 <sub>[Full walkthrough](https://vela3202019.github.io/wisen/)</sub>
 
@@ -16,14 +18,14 @@ fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
 uvx wisen demo          # a sample day in one second: no model call, nothing read from your machine
 ```
 
-[![CI](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml/badge.svg)](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml) [![Built with pydantic-ai](https://img.shields.io/badge/built%20with-pydantic--ai-E92063.svg)](https://ai.pydantic.dev)
+[![CI](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml/badge.svg)](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/Vela3202019/wisen/blob/main/LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://github.com/Vela3202019/wisen/blob/main/pyproject.toml) [![Built with pydantic-ai](https://img.shields.io/badge/built%20with-pydantic--ai-E92063.svg)](https://ai.pydantic.dev)
 
-<a href="https://claude.com/claude-code" title="Claude Code"><img src="docs/assets/agents/claude-code.svg" width="28" height="28" alt="Claude Code"></a>
-<a href="https://openai.com/codex/" title="Codex"><img src="docs/assets/agents/codex.svg" width="28" height="28" alt="Codex"></a>
-<a href="https://cursor.com" title="Cursor"><img src="docs/assets/agents/cursor.svg" width="28" height="28" alt="Cursor"></a>
-<a href="https://github.com/google-gemini/gemini-cli" title="Gemini CLI"><img src="docs/assets/agents/gemini-cli.svg" width="28" height="28" alt="Gemini CLI"></a>
-<a href="https://opencode.ai" title="opencode"><img src="docs/assets/agents/opencode.svg" width="28" height="28" alt="opencode"></a>
-<a href="https://pi.dev" title="Pi"><img src="docs/assets/agents/pi.svg" width="28" height="28" alt="Pi"></a>
+<a href="https://claude.com/claude-code" title="Claude Code"><img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/agents/claude-code.svg" width="28" height="28" alt="Claude Code"></a>
+<a href="https://openai.com/codex/" title="Codex"><img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/agents/codex.svg" width="28" height="28" alt="Codex"></a>
+<a href="https://cursor.com" title="Cursor"><img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/agents/cursor.svg" width="28" height="28" alt="Cursor"></a>
+<a href="https://github.com/google-gemini/gemini-cli" title="Gemini CLI"><img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/agents/gemini-cli.svg" width="28" height="28" alt="Gemini CLI"></a>
+<a href="https://opencode.ai" title="opencode"><img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/agents/opencode.svg" width="28" height="28" alt="opencode"></a>
+<a href="https://pi.dev" title="Pi"><img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/agents/pi.svg" width="28" height="28" alt="Pi"></a>
 
 </div>
 
@@ -34,6 +36,9 @@ tool calls, the occasional flow state. Then it all evaporates. wisen reads
 those sessions where your agents already keep them, writes one *reflection*
 for the day, and proposes small fixes to the instruction files your agents
 read. You approve each fix, and later sessions show whether it helped.
+
+One of my own days: 213 turns, 150 of them rephrasing something I had already
+said. I never counted. wisen did.
 
 ## Quickstart
 
@@ -48,13 +53,13 @@ subscription at no extra cost when the [`claude`](https://claude.com/claude-code
 CLI is installed and logged in (chat and the Gardener switch to OpenAI when
 `OPENAI_API_KEY` is set; `wisen doctor` shows which). Prefer an API key? Set `WISEN_SYNTH_MODEL=api`
 and `WISEN_MODEL` (any pydantic-ai model, for example `openai:gpt-5.6-terra`
-with `OPENAI_API_KEY`). [Configuration](docs/configuration.md) covers both, and
+with `OPENAI_API_KEY`). [Configuration](https://github.com/Vela3202019/wisen/blob/main/docs/configuration.md) covers both, and
 `wisen doctor` names the fix when neither is set up.
 
 Then `wisen serve` starts the API and chat on `:8000` (the `[server]` extra:
 `uv tool install "wisen[server]"`). Every command and extra is in
-[docs/commands.md](docs/commands.md); to hack on wisen, see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[docs/commands.md](https://github.com/Vela3202019/wisen/blob/main/docs/commands.md); to hack on wisen, see
+[CONTRIBUTING.md](https://github.com/Vela3202019/wisen/blob/main/CONTRIBUTING.md).
 
 ## Features
 
@@ -64,14 +69,14 @@ Then `wisen serve` starts the API and chat on `:8000` (the `[server]` extra:
   recommendations. Days with nothing new are skipped.
 - **Chat that investigates.** Ask "how was my week?" and it searches your
   reflections, transcripts and configs before answering
-  ([docs/chat.md](docs/chat.md)).
+  ([docs/chat.md](https://github.com/Vela3202019/wisen/blob/main/docs/chat.md)).
 - **The Gardener.** Proposes small changes to your `CLAUDE.md`, `AGENTS.md`
   and skill files. Each one is a git branch you approve and merge yourself
-  ([docs/gardener.md](docs/gardener.md)).
+  ([docs/gardener.md](https://github.com/Vela3202019/wisen/blob/main/docs/gardener.md)).
 - **Voice briefing.** Hear the morning reflection out loud (the `[voice]` extra).
 - **Your own server, optional.** The dashboard on your phone, push
   notifications, an approval inbox and a Telegram bot. It never sees a
-  transcript ([docs/server.md](docs/server.md)).
+  transcript ([docs/server.md](https://github.com/Vela3202019/wisen/blob/main/docs/server.md)).
 - **Any model, or your subscription.** Any pydantic-ai model string, or your
   Claude Pro/Max subscription for the reflection, chat and the Gardener (through
   the Claude Code CLI and the Claude Agent SDK).
@@ -116,7 +121,7 @@ at the repo root. `claude plugin validate .` checks both.
   before and after, and proposes a revert if things got worse.
 
 The full pipeline, with a diagram and a map of the code, is in
-[docs/how-it-works.md](docs/how-it-works.md).
+[docs/how-it-works.md](https://github.com/Vela3202019/wisen/blob/main/docs/how-it-works.md).
 
 A real reflection, abridged:
 
@@ -162,33 +167,33 @@ A real reflection, abridged:
   `wisen egress` shows what left today.
 
 The exact limits, every packet type, stage B, Telegram and the full list of
-network calls are in [docs/privacy.md](docs/privacy.md).
+network calls are in [docs/privacy.md](https://github.com/Vela3202019/wisen/blob/main/docs/privacy.md).
 
 ## Documentation
 
-- [Configuration](docs/configuration.md): models, API keys, paths
-- [Commands and extras](docs/commands.md)
-- [How it works](docs/how-it-works.md)
-- [Chat](docs/chat.md)
-- [The Gardener](docs/gardener.md)
-- [Your own server](docs/server.md), with setup details in [deploy/README.md](deploy/README.md)
-- [What leaves your machine](docs/privacy.md)
-- [Development](docs/development.md): project status, tests, upgrading from MongoDB
+- [Configuration](https://github.com/Vela3202019/wisen/blob/main/docs/configuration.md): models, API keys, paths
+- [Commands and extras](https://github.com/Vela3202019/wisen/blob/main/docs/commands.md)
+- [How it works](https://github.com/Vela3202019/wisen/blob/main/docs/how-it-works.md)
+- [Chat](https://github.com/Vela3202019/wisen/blob/main/docs/chat.md)
+- [The Gardener](https://github.com/Vela3202019/wisen/blob/main/docs/gardener.md)
+- [Your own server](https://github.com/Vela3202019/wisen/blob/main/docs/server.md), with setup details in [deploy/README.md](https://github.com/Vela3202019/wisen/blob/main/deploy/README.md)
+- [What leaves your machine](https://github.com/Vela3202019/wisen/blob/main/docs/privacy.md)
+- [Development](https://github.com/Vela3202019/wisen/blob/main/docs/development.md): project status, tests, upgrading from MongoDB
 
 ## Project status
 
 A personal project under active development; expect the schema and CLI to
-move. Plans live in [docs/plan/](docs/plan/).
+move. Plans live in [docs/plan/](https://github.com/Vela3202019/wisen/tree/main/docs/plan/).
 
 ## Contributing
 
 Dev setup, offline tests and a guide to adding a connector for a new agent
-are in [CONTRIBUTING.md](CONTRIBUTING.md). Connectors are small, so a first
+are in [CONTRIBUTING.md](https://github.com/Vela3202019/wisen/blob/main/CONTRIBUTING.md). Connectors are small, so a first
 contribution is too. Please follow the
-[Code of Conduct](CODE_OF_CONDUCT.md), report security problems as
-[SECURITY.md](SECURITY.md) describes, and see [CHANGELOG.md](CHANGELOG.md) for
+[Code of Conduct](https://github.com/Vela3202019/wisen/blob/main/CODE_OF_CONDUCT.md), report security problems as
+[SECURITY.md](https://github.com/Vela3202019/wisen/blob/main/SECURITY.md) describes, and see [CHANGELOG.md](https://github.com/Vela3202019/wisen/blob/main/CHANGELOG.md) for
 what changed in each release.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/Vela3202019/wisen/blob/main/LICENSE)
