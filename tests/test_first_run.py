@@ -60,6 +60,12 @@ async def main():
     assert not ready, report
     assert f"✗ reflection       {model}" in report and f"✗ chat, Gardener   {model}" in report, report
     assert 'pip install "pydantic-ai-slim[groq]"' in report, report
+    assert "`uv tool install wisen --with 'pydantic-ai-slim[groq]'`" in report, report
+    assert "`pipx inject wisen 'pydantic-ai-slim[groq]'`" in report, report
+    with patch.object(doctor, "infer_model", side_effect=ImportError("Missing provider dependency")):
+        problem = doctor._api_model_problem(model)
+    assert "`uv tool install wisen --with <package>`" in problem, problem
+    assert "`pipx inject wisen <package>`" in problem, problem
     with patch.dict(os.environ, WISEN_SYNTH_MODEL="api", WISEN_MODEL="openai:gpt-4o", OPENAI_API_KEY="test"):
         report, ready = await doctor.report()
     assert ready, report
@@ -77,6 +83,7 @@ async def main():
     assert f"✗ reflection       {model}" in report and f"✗ chat, Gardener   {model}" in report, report
     assert report.count(credentials_error) == 2, report
     assert "Traceback" not in report, report
+    assert "pipx inject" not in report, report
 
     uvicorn = Mock()
     with patch.dict(sys.modules, fastapi=None, uvicorn=uvicorn), patch.object(sys, "argv", ["wisen", "serve"]):

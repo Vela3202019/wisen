@@ -5,6 +5,8 @@ command to run next. Reads local history and asks `claude auth status`; makes
 no model call.
 """
 import asyncio
+import re
+import shlex
 
 from pydantic_ai.models import infer_model
 
@@ -13,11 +15,18 @@ from wisen.ingestion.pipeline import session_days
 from wisen.synthesis import claude_cli
 
 SOURCES = ("claude-code", "codex", "cursor", "gemini-cli", "opencode", "pi", "export")
+_PIP_PACKAGE = re.compile(r"""\bpip install (['"])([\w.-]+(?:\[[\w.,-]+\])?)\1""", re.ASCII)
 
 
 def _api_model_problem(model: str) -> str | None:
     try:
         infer_model(model)
+    except ImportError as error:
+        message = str(error) or type(error).__name__
+        match = _PIP_PACKAGE.search(message)
+        package = shlex.quote(match[2]) if match else "<package>"
+        return (f"{message}\n      For an isolated install, add the dependency to wisen's environment: "
+                f"`uv tool install wisen --with {package}` or `pipx inject wisen {package}`.")
     except Exception as error:  # noqa: BLE001
         return str(error) or type(error).__name__
     return None
