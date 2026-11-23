@@ -6,6 +6,11 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- New logo: a sprout, used in the README, the dashboard icons, the
+  walkthrough's favicon, the social preview and the README walkthrough GIF.
+
 ## [0.3.0] - 2026-11-20
 
 ### Added
