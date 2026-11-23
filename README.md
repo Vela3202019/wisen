@@ -50,7 +50,8 @@ wisen synthesize               # yesterday's reflection, or your latest day with
 
 The reflection, chat and the Gardener run on your Claude Pro/Max
 subscription at no extra cost when the [`claude`](https://claude.com/claude-code)
-CLI is installed and logged in. Prefer an API key? Set `WISEN_SYNTH_MODEL=api`
+CLI is installed and logged in (chat and the Gardener switch to OpenAI when
+`OPENAI_API_KEY` is set; `wisen doctor` shows which). Prefer an API key? Set `WISEN_SYNTH_MODEL=api`
 and `WISEN_MODEL` (any pydantic-ai model, for example `openai:gpt-5.6-terra`
 with `OPENAI_API_KEY`). [Configuration](docs/configuration.md) covers both, and
 `wisen doctor` names the fix when neither is set up.
