@@ -13,7 +13,8 @@ One reflection per day, synthesised from that day's agent sessions.
 wisen synthesize [YYYY-MM-DD]
 ```
 
-No date means yesterday. This makes real model calls and can take a minute or two;
+No date means yesterday, or the latest day with sessions when yesterday has none;
+the command prints the date it reflected on, so read that date below. This makes real model calls and can take a minute or two;
 tell the user before running it, and run it only once per date per conversation.
 
 ## Read
@@ -24,7 +25,7 @@ Reflections are exported with:
 wisen export <dir>
 ```
 
-Read `<dir>/<date>.json` and summarise in this order, each as one or two sentences:
+Read `<dir>/<date>.json` for the date `wisen synthesize` printed and summarise in this order, each as one or two sentences:
 
 1. your mood and the agent's mood (label plus summary)
 2. the alignment score

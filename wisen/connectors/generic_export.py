@@ -33,6 +33,8 @@ def _parse_json_export(path: Path) -> NormalizedSession | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    if not isinstance(data, dict):
+        return None
 
     source_label = data.get("source", path.stem)
     raw_turns = data.get("turns", data.get("messages", []))

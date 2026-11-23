@@ -40,7 +40,7 @@ async def _default_day() -> str | None:
 
     yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
     days, _ = await session_days()
-    oldest = (yesterday - timedelta(days=LOOKBACK_DAYS)).isoformat()
+    oldest = (yesterday - timedelta(days=LOOKBACK_DAYS - 1)).isoformat()
     recent = [d for d in days if oldest <= d <= yesterday.isoformat()]
     if yesterday.isoformat() in recent or not recent:
         return yesterday.isoformat() if recent else None

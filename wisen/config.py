@@ -9,6 +9,11 @@ import tomllib
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Before any connector reads root(): their history paths are fixed at import.
+load_dotenv()
+
 CONFIG_PATH = Path.home() / ".wisen" / "config.toml"
 
 

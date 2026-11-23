@@ -50,6 +50,8 @@ DEFAULT_SDK_MODEL = "claude-sdk:sonnet"
 # The keys each pydantic-ai provider's model accepts; any one of them is enough.
 MODEL_KEY_ENV = {
     "openai": ("OPENAI_API_KEY",),
+    "openai-chat": ("OPENAI_API_KEY",),
+    "openai-responses": ("OPENAI_API_KEY",),
     "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
     "deepseek": ("DEEPSEEK_API_KEY",),
     "anthropic": ("ANTHROPIC_API_KEY",),
