@@ -15,6 +15,7 @@ Browser (session cookie, after /login):
   POST /api/proposals/{id}/decision  {"decision", "note", "request_id"}
   POST /api/proposals/{id}/publish   no body; 202 {"status": "publishing"}: the laptop
                                    pushes the applied branch and opens its pull request
+  POST /api/proposals/{id}/close     {"closed": true|false}: archive or reopen a card only
   GET  /api/devices                paired devices
   POST /api/devices/{id}/revoke
   POST /api/pairing-codes          a one-time code for `wisen cloud pair`
@@ -113,6 +114,10 @@ class DecisionIn(_Body):
     decision: Literal["approved", "rejected"]
     note: Annotated[str, StringConstraints(max_length=2000)] | None = None
     request_id: Annotated[str, StringConstraints(min_length=8, max_length=100)]
+
+
+class CloseCardIn(_Body):
+    closed: bool = True
 
 
 class PushKeys(BaseModel):
@@ -327,6 +332,16 @@ def create_app(
         except NotPublishable as e:
             raise HTTPException(409, str(e)) from None
         return {"status": "publishing"}
+
+    @app.post("/api/proposals/{proposal_id}/close")
+    async def close_card(proposal_id: Id, body: CloseCardIn, user: User):
+        try:
+            await asyncio.to_thread(mailbox.close_card, user, proposal_id, body.closed)
+        except LookupError as e:
+            raise HTTPException(404, str(e)) from None
+        except NotPublishable as e:
+            raise HTTPException(409, str(e)) from None
+        return {"closed": body.closed}
 
     @app.get("/api/devices")
     async def devices(user: User):

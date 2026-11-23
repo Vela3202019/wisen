@@ -6,6 +6,12 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Dashboard proposal and pull-request cards fold, remembering their state in
+  the current tab. Close card moves unwanted publish cards to the change log,
+  with Reopen card to undo it; branches and GitHub pull requests stay untouched.
+
 ## [0.3.1] - 2026-11-23
 
 ### Changed
