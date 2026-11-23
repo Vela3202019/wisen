@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/logo.svg" width="112" height="112" alt="wisen logo: a loose line sketching a range of hills">
+<img src="https://raw.githubusercontent.com/Vela3202019/wisen/main/docs/assets/logo.svg" width="112" height="112" alt="wisen logo: a sprout with a small leaf and a larger one">
 
 # wisen
 

@@ -1,3 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="wisen: a loose line sketching a range of hills">
-  <path d="M12 94 C 18 90, 20 60, 30 58 C 39 56, 42 70, 50 68 C 60 66, 62 34, 77 34 C 91 34, 93 62, 102 64 C 109 66, 112 58, 117 60" fill="none" stroke="#3fb950" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="wisen: a sprout with yesterday's small leaf and today's larger one">
+  <path d="M60 114 V 66" fill="none" stroke="#3fb950" stroke-width="12" stroke-linecap="round"/>
+  <path d="M60 74 A 34 34 0 0 0 16 46 A 34 34 0 0 0 60 74 Z" fill="#238636"/>
+  <path d="M60 66 A 50 50 0 0 1 116 14 A 50 50 0 0 1 60 66 Z" fill="#3fb950"/>
 </svg>
