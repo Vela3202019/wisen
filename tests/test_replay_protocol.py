@@ -180,6 +180,22 @@ def test_freeze_gate_and_startup_exposure(tmp_path, monkeypatch):
     assert applier._merged(Repo(project), applier.git_row(store, "proposal"), "fake-url") == (True, expected, "github")
 
 
+def test_exposure_uses_linked_worktree_instructions(tmp_path):
+    store = SqliteStore(tmp_path / "wisen.db", "local")
+    project, linked = tmp_path / "repo", tmp_path / "linked"
+    head = _git_setup(project, "without rule")
+    before = _git(project, "rev-parse", "HEAD:CLAUDE.md")
+    _git(project, "worktree", "add", "--detach", str(linked), head)
+    (linked / "CLAUDE.md").write_text("with rule")
+    after = _git(linked, "hash-object", "CLAUDE.md")
+    _proposal(store, project, head, before, after)
+    for name, cwd in (("main", project), ("linked", linked)):
+        assert exposure.record_start(store, {"source": "startup", "cwd": str(cwd), "session_id": name}, NOW) == 1
+    with store.transaction() as conn:
+        rows = conn.execute("SELECT session_id, exposed FROM rule_exposures").fetchall()
+    assert dict(rows) == {"main": 0, "linked": 1}
+
+
 def test_freeze_and_promotion_reject_standalone_agents_file(tmp_path):
     store = SqliteStore(tmp_path / "wisen.db", "local")
     _proposal(store, tmp_path, SHA, "a", "b", path="docs/AGENTS.md")

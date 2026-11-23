@@ -19,8 +19,9 @@ def record_start(store: SqliteStore, payload: dict, at: datetime | None = None) 
     try:
         root = repo.out("rev-parse", "--show-toplevel")
         branch = repo.run("symbolic-ref", "--quiet", "HEAD", check=False).stdout.strip()
+        common_dir = Path(repo.out("rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
     except GitError:
-        root, branch = str(cwd), ""
+        root, branch, common_dir = str(cwd), "", None
     cohort = sha256(f"{root}:{branch}".encode()).hexdigest()[:24]
     now = (at or datetime.now(UTC)).isoformat()
     with closing(store._connect()) as conn:
@@ -32,29 +33,37 @@ def record_start(store: SqliteStore, payload: dict, at: datetime | None = None) 
 
     rows = []
     for proposal in proposals:
-        directory = Path(proposal["work_tree"]).resolve()
-        path = directory / proposal["path"]
-        if proposal["path"] not in ("CLAUDE.md", ".claude/CLAUDE.md"):
-            exposed = None
-        elif not proposal["git_dir"] and not cwd.is_relative_to(directory):
-            exposed = False
-        elif path.is_symlink() or not path.resolve().is_relative_to(directory):
-            exposed = None
-        else:
-            obj_repo = Repo(directory, Path(proposal["git_dir"]) if proposal["git_dir"] else None)
-            try:
-                blob = obj_repo.out("hash-object", "--no-filters", "--", str(path)) if path.exists() else None
-            except GitError:
-                exposed = None
-            else:
-                old, new = proposal["old_blob"], proposal["new_blob"]
-                # A later edit may retain the rule; a different blob does not prove non-exposure.
-                exposed = True if blob == new and new != old else False if blob == old else None
+        exposed = _rule_exposure(proposal, cwd, root, common_dir)
         rows.append((store.user_id, proposal["proposal_id"], payload["session_id"], cohort, now,
                      exposed, detector_version()))
     with store.transaction() as conn:
         conn.executemany("INSERT OR IGNORE INTO rule_exposures VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
     return len(rows)
+
+
+def _rule_exposure(proposal, cwd: Path, root: str, common_dir: Path | None) -> bool | None:
+    directory = Path(proposal["work_tree"]).resolve()
+    git_dir = Path(proposal["git_dir"]) if proposal["git_dir"] else None
+    if proposal["path"] not in ("CLAUDE.md", ".claude/CLAUDE.md"):
+        return None
+    try:
+        if git_dir is None and not cwd.is_relative_to(directory):
+            if common_dir is None:
+                return False
+            proposal_common = Repo(directory).out("rev-parse", "--path-format=absolute", "--git-common-dir")
+            if Path(proposal_common).resolve() != common_dir:
+                return False
+            directory = Path(root).resolve()
+        path = directory / proposal["path"]
+        if path.is_symlink() or not path.resolve().is_relative_to(directory):
+            return None
+        repo = Repo(directory, git_dir)
+        blob = repo.out("hash-object", "--no-filters", "--", str(path)) if path.exists() else None
+    except (GitError, OSError):
+        return None
+    old, new = proposal["old_blob"], proposal["new_blob"]
+    # A later edit may retain the rule; a different blob does not prove non-exposure.
+    return True if blob == new and new != old else False if blob == old else None
 
 
 def difference_in_differences(rows: list[dict], merged_at: datetime) -> dict:
