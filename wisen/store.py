@@ -6,16 +6,17 @@ holds the job engine's tables (wisen/jobs.py) and the proposal state machine's
 
 One SQLite file (WAL mode) at `[storage].sqlite_path` / WISEN_DB_PATH, default
 ~/.wisen/wisen.db. Every row carries a user id (`[storage].user_id` /
-WISEN_USER_ID, default "local") so nothing assumes a single user. Raw
-transcripts are never stored here.
+WISEN_USER_ID, default "local") so nothing assumes a single user. The store
+may contain private excerpts from transcripts for eval labeling.
 
 Timestamps are stored and returned as ISO-8601 UTC strings.
 """
 import asyncio
 import json
+import os
 import sqlite3
 from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -302,6 +303,14 @@ class SqliteStore:
         self.path = path
         self.user_id = user_id
         path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+        for suffix in ("-wal", "-shm", "-journal"):
+            with suppress(FileNotFoundError):
+                Path(f"{path}{suffix}").chmod(0o600)
         with closing(self._connect()) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             migrate(conn, "core", MIGRATIONS)

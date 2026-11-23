@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import subprocess
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -177,6 +178,19 @@ def test_freeze_gate_and_startup_exposure(tmp_path, monkeypatch):
     })
     expected = datetime(2026, 7, 10, 11, tzinfo=UTC)
     assert applier._merged(Repo(project), applier.git_row(store, "proposal"), "fake-url") == (True, expected, "github")
+
+
+def test_database_with_private_labels_is_owner_only(tmp_path):
+    path = tmp_path / "wisen.db"
+    store = SqliteStore(path, "local")
+    assert path.stat().st_mode & 0o777 == 0o600
+    with closing(store._connect()) as conn:
+        conn.execute("SELECT * FROM reflections").fetchall()
+        paths = [path, tmp_path / "wisen.db-wal", tmp_path / "wisen.db-shm"]
+        for existing in paths:
+            existing.chmod(0o644)
+        SqliteStore(path, "local")
+        assert all(p.stat().st_mode & 0o777 == 0o600 for p in paths)
 
 
 def test_blind_queue_agreement_and_failure_report(tmp_path):
