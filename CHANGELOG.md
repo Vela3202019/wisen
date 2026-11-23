@@ -6,10 +6,13 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-23
+
 ### Changed
 
 - New logo: a sprout, used in the README, the dashboard icons, the
   walkthrough's favicon, the social preview and the README walkthrough GIF.
+- The social preview keeps every agent name on one line.
 - The demo labels sample approval commands, and the quickstart shows how to read a saved reflection.
 
 ### Fixed
@@ -128,7 +131,8 @@ First release.
   `claude -p`.
 - `wisen` CLI: `synthesize`, `serve`, `export`, `eval`, `egress` and more.
 
-[Unreleased]: https://github.com/Vela3202019/wisen/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Vela3202019/wisen/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Vela3202019/wisen/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Vela3202019/wisen/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Vela3202019/wisen/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Vela3202019/wisen/releases/tag/v0.1.0
