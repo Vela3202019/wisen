@@ -120,6 +120,7 @@ def render() -> str:
         "",
         "3. You decide",
         "",
+        "  Example commands only; this demo does not create a proposal.",
         f"  wisen gardener approve {p['id']}",
         "      makes a git branch with the change; you merge it when you choose",
         f"  wisen gardener reject {p['id']} --note \"why\"",

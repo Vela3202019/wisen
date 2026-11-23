@@ -88,9 +88,10 @@ async def _export(out_dir: Path) -> None:
 
 def _serve(host: str, port: int, reload: bool) -> None:
     try:
+        import fastapi  # noqa: F401
         import uvicorn
     except ImportError:
-        raise SystemExit("wisen serve needs the server extra: pip install 'wisen[server]'")
+        raise SystemExit("wisen serve needs the server extra: pip install 'wisen[server]'") from None
     uvicorn.run("wisen.main:app", host=host, port=port, reload=reload)
 
 

@@ -6,6 +6,11 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+- `wisen serve` names the required extra instead of crashing when FastAPI is missing.
+- `wisen doctor` checks that configured API providers can load and reports missing dependencies.
+- The demo labels sample approval commands, and the quickstart shows how to read a saved reflection.
+- The Claude Code SessionStart hook works when the plugin path contains spaces.
+
 ## [0.3.0] - 2026-11-20
 
 ### Added

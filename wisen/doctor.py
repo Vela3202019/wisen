@@ -6,11 +6,29 @@ no model call.
 """
 import asyncio
 
+from pydantic_ai.exceptions import UserError
+from pydantic_ai.models import infer_model
+
 from wisen import __version__, config, llm
 from wisen.ingestion.pipeline import session_days
 from wisen.synthesis import claude_cli
 
 SOURCES = ("claude-code", "codex", "cursor", "gemini-cli", "opencode", "pi", "export")
+
+
+def _api_model_problem(model: str) -> str | None:
+    try:
+        infer_model(model)
+    except (ImportError, UserError) as error:
+        return str(error)
+    return None
+
+
+def _agent_model_problem(model: str) -> str | None:
+    problem = llm.model_problem(model)
+    if problem is not None or llm.is_subscription(model):
+        return problem
+    return _api_model_problem(model)
 
 
 def synthesis_problem() -> tuple[str, str | None]:
@@ -24,7 +42,7 @@ def synthesis_problem() -> tuple[str, str | None]:
     keys = llm.MODEL_KEY_ENV.get(model.split(":", 1)[0])
     if keys and not llm.model_key_set(model):
         return model, f"set {' or '.join(keys)} for {model}"
-    return model, None
+    return model, _api_model_problem(model)
 
 
 async def report() -> tuple[str, bool]:
@@ -45,7 +63,7 @@ async def report() -> tuple[str, bool]:
 
     synth, synth_problem = await asyncio.to_thread(synthesis_problem)
     agent = llm.agent_model_name()
-    agent_problem = await asyncio.to_thread(llm.model_problem, agent)
+    agent_problem = await asyncio.to_thread(_agent_model_problem, agent)
     lines += ["", "Models"]
     lines.append(f"  {'✓' if synth_problem is None else '✗'} reflection       {synth}")
     if synth_problem:

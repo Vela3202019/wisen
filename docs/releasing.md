@@ -7,13 +7,12 @@ Pushing a tag like `v0.3.0` runs `.github/workflows/release.yml`. It:
 3. publishes them to PyPI with trusted publishing (no API token is stored anywhere);
 4. creates a GitHub Release for the tag with auto-generated notes and the built files attached.
 
-## One-time setup (owner only)
+## Trusted publishing settings (owner only)
 
-Do both of these once, before the first release.
-
-**PyPI: add a pending trusted publisher.** The `wisen` project doesn't exist on PyPI
-yet, so register it as a *pending* publisher: sign in to PyPI, open
-<https://pypi.org/manage/account/publishing/>, and fill in:
+The [wisen project on PyPI](https://pypi.org/project/wisen/) already has a
+trusted publisher configured. If you need to verify or restore it, check the
+project's [publishing settings](https://pypi.org/manage/project/wisen/settings/publishing/)
+against these values:
 
 | Field | Value |
 | --- | --- |
@@ -23,13 +22,9 @@ yet, so register it as a *pending* publisher: sign in to PyPI, open
 | Workflow name | `release.yml` |
 | Environment name | `pypi` |
 
-The first successful release creates the project and turns the pending publisher
-into a normal one.
-
-**GitHub: create the `pypi` environment.** In the repo, go to
-Settings → Environments → New environment and name it `pypi`. Optionally add
-yourself as a required reviewer so every publish waits for your approval, and
-limit deployment to tags matching `v*`.
+The workflow uses the `pypi` environment under the repository's
+Settings → Environments. You can require a reviewer before publishing and
+restrict deployments to tags matching `v*`.
 
 ## Each release
 

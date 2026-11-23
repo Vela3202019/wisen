@@ -15,7 +15,7 @@ fixes to your `CLAUDE.md` and `AGENTS.md`, each one yours to approve.**
 <sub>[Full walkthrough](https://vela3202019.github.io/wisen/)</sub>
 
 ```bash
-uvx wisen demo          # a sample day in one second: no model call, nothing read from your machine
+uvx wisen demo          # a sample day in about a second after install; no model call or history read
 ```
 
 [![CI](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml/badge.svg)](https://github.com/Vela3202019/wisen/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/Vela3202019/wisen/blob/main/LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://github.com/Vela3202019/wisen/blob/main/pyproject.toml) [![Built with pydantic-ai](https://img.shields.io/badge/built%20with-pydantic--ai-E92063.svg)](https://ai.pydantic.dev)
@@ -44,17 +44,25 @@ said. I never counted. wisen did.
 
 ```bash
 uv tool install wisen          # or: pipx install wisen (Python 3.11+)
-wisen doctor                   # the sessions it finds per agent, and whether a model can run
-wisen synthesize               # yesterday's reflection, or your latest day with sessions
+wisen doctor                   # sessions found, model checks, and what to run next
 ```
+
+If `wisen` isn't on your PATH, run `uv tool update-shell` (or `pipx ensurepath`)
+and open a new terminal.
+
+Run the `wisen synthesize` command that `doctor` prints. Without a date,
+`wisen synthesize` tries yesterday, then the latest day with sessions in the
+past 14 days. To read the saved reflection, run `wisen export ./reflections`
+and open `./reflections/YYYY-MM-DD.json` for the date synthesis printed.
 
 The reflection, chat and the Gardener run on your Claude Pro/Max
 subscription at no extra cost when the [`claude`](https://claude.com/claude-code)
 CLI is installed and logged in (chat and the Gardener switch to OpenAI when
 `OPENAI_API_KEY` is set; `wisen doctor` shows which). Prefer an API key? Set `WISEN_SYNTH_MODEL=api`
-and `WISEN_MODEL` (any pydantic-ai model, for example `openai:gpt-5.6-terra`
-with `OPENAI_API_KEY`). [Configuration](https://github.com/Vela3202019/wisen/blob/main/docs/configuration.md) covers both, and
-`wisen doctor` names the fix when neither is set up.
+and `WISEN_MODEL` (for example `openai:gpt-5.6-terra` with `OPENAI_API_KEY`).
+Providers beyond OpenAI, Google, and Anthropic may need a pydantic-ai extra.
+[Configuration](https://github.com/Vela3202019/wisen/blob/main/docs/configuration.md) covers both routes, and
+`wisen doctor` reports missing dependencies or credentials.
 
 Then `wisen serve` starts the API and chat on `:8000` (the `[server]` extra:
 `uv tool install "wisen[server]"`). Every command and extra is in
@@ -77,9 +85,9 @@ Then `wisen serve` starts the API and chat on `:8000` (the `[server]` extra:
 - **Your own server, optional.** The dashboard on your phone, push
   notifications, an approval inbox and a Telegram bot. It never sees a
   transcript ([docs/server.md](https://github.com/Vela3202019/wisen/blob/main/docs/server.md)).
-- **Any model, or your subscription.** Any pydantic-ai model string, or your
-  Claude Pro/Max subscription for the reflection, chat and the Gardener (through
-  the Claude Code CLI and the Claude Agent SDK).
+- **An API model, or your subscription.** Use a pydantic-ai model with its
+  provider dependencies and credentials, or your Claude Pro/Max subscription
+  through the Claude Code CLI and the Claude Agent SDK.
 - **No database server.** One SQLite file (`~/.wisen/wisen.db`), created on
   first use.
 
@@ -169,6 +177,24 @@ A real reflection, abridged:
 The exact limits, every packet type, stage B, Telegram and the full list of
 network calls are in [docs/privacy.md](https://github.com/Vela3202019/wisen/blob/main/docs/privacy.md).
 
+## FAQ
+
+**How is this different from agent memory or editing `AGENTS.md` myself?**
+wisen looks for recurring corrections across sessions and agents. It proposes
+a diff to your instruction files; you still decide what to merge.
+
+**Does my data leave my machine?** Raw logs stay where your agents wrote them.
+Model calls send excerpts to the provider you choose. If you pair a server,
+it receives derived results and, in stage B, some extra data. See
+[what leaves your machine](https://github.com/Vela3202019/wisen/blob/main/docs/privacy.md).
+
+**Which agents can I use?** Claude Code, Codex, Cursor, Gemini CLI, opencode,
+and Pi. wisen also reads generic exports and git commits.
+
+**What does it cost?** wisen is free and the demo makes no model calls. Real
+runs can use your Claude Pro/Max plan's limits instead of API billing. If you
+use an API key, your provider bills those calls.
+
 ## Documentation
 
 - [Configuration](https://github.com/Vela3202019/wisen/blob/main/docs/configuration.md): models, API keys, paths
@@ -193,6 +219,9 @@ contribution is too. Please follow the
 [Code of Conduct](https://github.com/Vela3202019/wisen/blob/main/CODE_OF_CONDUCT.md), report security problems as
 [SECURITY.md](https://github.com/Vela3202019/wisen/blob/main/SECURITY.md) describes, and see [CHANGELOG.md](https://github.com/Vela3202019/wisen/blob/main/CHANGELOG.md) for
 what changed in each release.
+
+If wisen is useful, give it a star on GitHub. To help out, see the
+[good first issues](https://github.com/Vela3202019/wisen/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 
 ## License
 
