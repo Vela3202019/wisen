@@ -1,6 +1,6 @@
 # Releasing wisen
 
-Pushing a tag like `v0.2.0` runs `.github/workflows/release.yml`. It:
+Pushing a tag like `v0.3.0` runs `.github/workflows/release.yml`. It:
 
 1. fails unless the tag is exactly `v` + the `version` in `pyproject.toml`;
 2. builds the sdist and wheel and runs `twine check`;
@@ -39,12 +39,12 @@ limit deployment to tags matching `v*`.
 #    the tag), and merge that to main
 git checkout main && git pull
 # 2. tag the merged commit and push the tag
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 Watch the run under the repo's Actions tab. If the version check fails, delete the
-tag (`git push origin :refs/tags/v0.2.0 && git tag -d v0.2.0`), fix the version, and
+tag (`git push origin :refs/tags/v0.3.0 && git tag -d v0.3.0`), fix the version, and
 tag again. PyPI never accepts the same version twice, so a version that was
 published can't be re-uploaded — bump to the next one instead.
 
