@@ -136,7 +136,7 @@ printf '{"result":"ok"}\n'
     assert replay.run_replay(item, base_commit=head, harness="wrong").error
 
 
-def _proposal(store, project, sha, before, after, proposal_id="proposal", at=NOW):
+def _proposal(store, project, sha, before, after, proposal_id="proposal", at=NOW, *, path="CLAUDE.md", git_dir=""):
     with store.transaction() as conn:
         conn.execute("""
             INSERT INTO proposals (id, user_id, target, payload, state, created_at, updated_at)
@@ -145,8 +145,8 @@ def _proposal(store, project, sha, before, after, proposal_id="proposal", at=NOW
         conn.execute("""
             INSERT INTO proposal_git (proposal_id, user_id, git_dir, work_tree, path, branch, base_commit,
                                       commit_sha, new_blob, applied_at, merged_at)
-            VALUES (?, ?, '', ?, 'CLAUDE.md', 'test', ?, ?, ?, ?, ?)
-        """, (proposal_id, store.user_id, str(project), sha, sha, after, at.isoformat(), at.isoformat()))
+            VALUES (?, ?, ?, ?, ?, 'test', ?, ?, ?, ?, ?)
+        """, (proposal_id, store.user_id, git_dir, str(project), path, sha, sha, after, at.isoformat(), at.isoformat()))
 
 
 def test_freeze_gate_and_startup_exposure(tmp_path, monkeypatch):
@@ -268,10 +268,33 @@ def test_retention_replays_prior_rules_and_separates_holdout(tmp_path):
                      proposal_id="first")
     latest = manifest(case("new-task"), proposal_id="latest")
     latest.proposed.project["CLAUDE.md"] = "overbroad replacement"
-    _proposal(store, tmp_path / "home", SHA, "a", "b", "first", at=NOW - timedelta(days=7))
-    with store.transaction() as conn:
-        conn.execute("UPDATE proposal_git SET git_dir='home-git' WHERE proposal_id='first'")
+    _proposal(store, tmp_path, SHA, "a", "b", "first", at=NOW - timedelta(days=7))
     _proposal(store, tmp_path, SHA, "b", "c", "latest", at=NOW)
     results = asyncio.run(protocol.retention(store, [first], latest, k=1, run=fake_run))
     assert results[0]["rollback_recommended"]
     assert results[0]["holdout_transfer"]["cases"] == {"holdout": 1}
+
+
+def test_retention_applies_all_merged_project_paths_and_home_changes(tmp_path):
+    project = tmp_path / "project"
+    store = SqliteStore(tmp_path / "wisen.db", "local")
+    first = manifest(case("first-case", project=project), proposal_id="first")
+    first.proposed.project["CLAUDE.md"] = "earliest project rule"
+    home = manifest(case("home-case", project=project), proposal_id="home")
+    home.proposed = ReplayFiles(config={"CLAUDE.md": "earlier home rule"})
+    latest = manifest(case("latest-case", project=project), proposal_id="latest")
+    latest.proposed = ReplayFiles(config={"CLAUDE.md": "stale snapshot", "rules/new.md": "latest rule"})
+    _proposal(store, project, SHA, "a", "b", "first", at=NOW - timedelta(days=2))
+    _proposal(store, tmp_path, SHA, "c", "d", "home", at=NOW - timedelta(days=1),
+              path=".claude/CLAUDE.md", git_dir="home-git")
+    _proposal(store, tmp_path, SHA, "e", "f", "latest", path=".claude/rules/new.md", git_dir="home-git")
+    seen = []
+
+    async def backend(item, variant, votes):
+        if item.id == "home-case":
+            seen.append((variant.config_files, variant.project_files))
+        return {"passed": True}
+
+    asyncio.run(protocol.retention(store, [home, first], latest, k=1, run=backend))
+    assert ({"CLAUDE.md": "earlier home rule", "rules/new.md": "latest rule"},
+            {"CLAUDE.md": "earliest project rule"}) in seen

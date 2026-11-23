@@ -64,20 +64,25 @@ async def retention(store: SqliteStore, earlier: list[Manifest], cumulative: Man
         seen.add(old.proposal_id)
         ordered.append((old, row))
     ordered.sort(key=lambda entry: datetime.fromisoformat(entry[1]["merged_at"]))
+    config = dict(cumulative.proposed.config)
+    project_changes = []
+    for manifest, row in [*ordered, (cumulative, latest)]:
+        path = row["path"]
+        if row["git_dir"]:
+            rel = path.removeprefix(".claude/")
+            config[rel] = manifest.proposed.config[rel]
+        else:
+            project_changes.append((Path(row["work_tree"]).resolve(), path, manifest.proposed.project[path]))
+    accumulated = ReplayFiles(config=config)
     reports = []
-    for index, (old, _) in enumerate(ordered):
-        later = [*ordered[index + 1:], (cumulative, latest)]
-        config = dict(old.proposed.config)
-        for next_manifest, _ in later:
-            config.update(next_manifest.proposed.config)
-        accumulated = ReplayFiles(config=config, project=old.proposed.project)
+    for old, _ in ordered:
         cases = []
         for entry in old.cases:
             project = Path(entry.case.project_path).resolve()
             overlays = dict(entry.cumulative_project_files)
-            for next_manifest, next_row in later:
-                if not next_row["git_dir"] and project.is_relative_to(Path(next_row["work_tree"]).resolve()):
-                    overlays.update(next_manifest.proposed.project)
+            for root, path, text in project_changes:
+                if project.is_relative_to(root):
+                    overlays[path] = text
             cases.append(entry.model_copy(update={"cumulative_project_files": overlays}))
         kwargs = {"model": cumulative.model, "harness": cumulative.harness, "judge_model": cumulative.judge_model,
                   "judge_prompt": cumulative.judge_prompt, "proposed": accumulated}
