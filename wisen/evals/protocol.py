@@ -4,7 +4,12 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from wisen.evals.manifest import Manifest, ReplayFiles, _private_open
+from wisen.evals.manifest import (
+    Manifest,
+    ReplayFiles,
+    _private_open,
+    require_claude_target,
+)
 from wisen.evals.runner import RunCase, run_manifest
 from wisen.gardener.applier import git_row
 from wisen.store import SqliteStore
@@ -23,6 +28,7 @@ def record_gate(store: SqliteStore, manifest: Manifest, report: dict) -> dict:
     applied = git_row(store, manifest.proposal_id)
     if report.get("holdout") or report.get("manifest") != manifest.digest() or applied is None:
         raise ValueError("the gate requires a non-holdout report for an applied proposal")
+    require_claude_target(applied["path"], home=bool(applied["git_dir"]))
     if manifest.proposed.blob != applied["new_blob"] or any(entry.cumulative_project_files for entry in manifest.cases):
         raise ValueError("the gate requires the proposal's frozen Git variant, not a cumulative check")
     meets = report["meets_rule"]

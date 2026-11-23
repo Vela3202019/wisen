@@ -180,6 +180,18 @@ def test_freeze_gate_and_startup_exposure(tmp_path, monkeypatch):
     assert applier._merged(Repo(project), applier.git_row(store, "proposal"), "fake-url") == (True, expected, "github")
 
 
+def test_freeze_and_promotion_reject_standalone_agents_file(tmp_path):
+    store = SqliteStore(tmp_path / "wisen.db", "local")
+    _proposal(store, tmp_path, SHA, "a", "b", path="docs/AGENTS.md")
+    frozen = manifest(case("target"))
+    frozen.proposed = ReplayFiles(project={"docs/AGENTS.md": "new"}, blob="b")
+    with pytest.raises(ValueError, match="does not load standalone AGENTS.md"):
+        freeze_proposal(store, "proposal", [], model=frozen.model, harness=frozen.harness,
+                        judge_model=frozen.judge_model)
+    with pytest.raises(ValueError, match="does not load standalone AGENTS.md"):
+        protocol.record_gate(store, frozen, {"manifest": frozen.digest(), "meets_rule": True})
+
+
 def test_database_with_private_labels_is_owner_only(tmp_path):
     path = tmp_path / "wisen.db"
     store = SqliteStore(path, "local")

@@ -12,6 +12,13 @@ from wisen.evals.cases import Case
 Files = dict[str, str | None]
 
 
+def require_claude_target(path: str, *, home: bool) -> None:
+    if home and not path.startswith(".claude/"):
+        raise ValueError("Claude replay supports home proposals under .claude only")
+    if Path(path).name == "AGENTS.md":
+        raise ValueError("Claude replay does not load standalone AGENTS.md targets")
+
+
 class ReplayFiles(BaseModel):
     config: Files = Field(default_factory=dict)
     project: Files = Field(default_factory=dict)
@@ -98,6 +105,7 @@ def freeze_proposal(store, proposal_id: str, inventory: list[dict], *, model: st
         raise ValueError("apply the proposal before freezing its Git artifacts")
     repo = Repo(Path(row["work_tree"]), Path(row["git_dir"]) if row["git_dir"] else None)
     path = row["path"]
+    require_claude_target(path, home=bool(row["git_dir"]))
     old_blob = repo.blob(row["base_commit"], path)
     new_blob = row["new_blob"]
     cases = {case.id: case for case in load_cases()}
@@ -118,8 +126,6 @@ def freeze_proposal(store, proposal_id: str, inventory: list[dict], *, model: st
     def files(blob: str | None) -> ReplayFiles:
         text = repo.run("cat-file", "blob", blob, text=False).stdout.decode("utf-8") if blob else None
         if row["git_dir"]:
-            if not path.startswith(".claude/"):
-                raise ValueError("Claude replay supports home proposals under .claude only")
             return ReplayFiles(config={**(config or {}), path.removeprefix(".claude/"): text}, blob=blob)
         return ReplayFiles(config=config or {}, project={path: text}, blob=blob)
 

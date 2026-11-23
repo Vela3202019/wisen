@@ -33,6 +33,7 @@ from pydantic_ai import (
 from wisen import config
 from wisen.evals import runner, verification
 from wisen.evals.cases import Case, load_cases
+from wisen.evals.manifest import require_claude_target
 from wisen.gardener import applier
 from wisen.gardener.agent import Deps, Draft, build_agent, change_lines
 from wisen.gardener.git import GitError, one_file_diff
@@ -170,9 +171,11 @@ def _cases_for(t: Target) -> list[Case]:
 
 
 def _variants(t: Target, d: Draft) -> tuple[runner.Variant, runner.Variant] | None:
+    try:
+        require_claude_target(t.path, home=t.is_home)
+    except ValueError:
+        return None
     if t.is_home:
-        if not t.path.startswith(".claude/"):
-            return None  # the replay runs Claude Code, which reads only ~/.claude from home
         rel = t.path.removeprefix(".claude/")
         files = lambda text: {rel: text}
         return runner.Variant(config_files=files(d.current)), runner.Variant(config_files=files(d.proposed))
