@@ -107,7 +107,7 @@
   .loop .days { color:var(--dim); font-size:12px; }
   .top { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .top .actions { display:flex; gap:6px; }
-  .top .actions button, .panel button, .proposal button {
+  .top .actions button, .panel button, .proposal button, #proposals-toggle {
     background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:8px;
     padding:6px 10px; font-size:13px; cursor:pointer; }
   .panel, .proposal { background:var(--card); border:1px solid var(--border); border-radius:12px;
@@ -115,8 +115,9 @@
   .panel h2, #approvals h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em;
                              color:var(--dim); margin:0 0 8px; display:flex; justify-content:space-between;
                              align-items:center; gap:8px; }
-  #approvals h2 button { background:none; border:0; color:var(--dim); font-size:14px; cursor:pointer;
+  #approvals h2 button:not(#proposals-toggle) { background:none; border:0; color:var(--dim); font-size:14px; cursor:pointer;
                          padding:0; text-transform:none; letter-spacing:0; }
+  #proposals-toggle { text-transform:none; letter-spacing:0; text-align:left; }
   #approvals .asof { color:var(--dim); font-size:11px; margin:-4px 0 10px; }
   .panel .row { display:flex; justify-content:space-between; align-items:center; gap:8px;
                 font-size:14px; margin:6px 0; }
@@ -531,6 +532,18 @@ const proposalFolds = (() => {
   try { return JSON.parse(sessionStorage.getItem("wisen:proposal-folds")) || {}; }
   catch (_) { return {}; }
 })();
+let proposalsExpanded = (() => {
+  try { return sessionStorage.getItem("wisen:proposals-expanded") === "true"; }
+  catch (_) { return false; }
+})();
+function setProposalsExpanded(expanded) {
+  proposalsExpanded = expanded;
+  document.getElementById("proposal-list").hidden = !expanded;
+  const button = document.getElementById("proposals-toggle");
+  button.setAttribute("aria-expanded", String(expanded));
+  button.textContent = `${expanded ? "Fold all proposals" : "Show proposals"} · ${button.dataset.count}`;
+  try { sessionStorage.setItem("wisen:proposals-expanded", String(expanded)); } catch (_) {}
+}
 function rememberProposal(card) {
   proposalFolds[card.dataset.foldKey] = card.open;
   try { sessionStorage.setItem("wisen:proposal-folds", JSON.stringify(proposalFolds)); } catch (_) {}
@@ -597,10 +610,16 @@ function renderApprovals(proposals) {
     return proposalCard(p, expired ? "expired" : p.state,
       `${new Date(p.created_at).toLocaleString()}${batch}${expires}`, body, isWaiting(p));
   };
-  el.innerHTML = `<h2>${waiting.length ? `Waiting for you · ${waiting.length}` : "Nothing waiting for you"} ${REFRESH}</h2>
-    <div class="asof">${updatedAt()}</div>`
+  const count = waiting.length + approved.length;
+  el.innerHTML = `<h2><button id="proposals-toggle" type="button" data-count="${count}"
+      aria-expanded="${proposalsExpanded}" aria-controls="proposal-list"
+      onclick="setProposalsExpanded(!proposalsExpanded)" ${count ? "" : "disabled"}>${proposalsExpanded ? "Fold all proposals" : "Show proposals"} · ${count}</button> ${REFRESH}</h2>
+    <div class="asof">${waiting.length ? `${waiting.length} waiting for you` : "Nothing waiting for you"} · ${updatedAt()}</div>
+    <div id="proposal-list" ${proposalsExpanded ? "" : "hidden"}>
+    ${waiting.length ? `<h2>Waiting for you · ${waiting.length}</h2>` : ""}`
     + waiting.map(card).join("")
-    + (approved.length ? `<h2>Approved · ${approved.length}</h2>` + approved.map(card).join("") : "");
+    + (approved.length ? `<h2>Approved · ${approved.length}</h2>` + approved.map(card).join("") : "")
+    + `</div>`;
 }
 
 // The change log: every resolved proposal, newest first, with its decision
@@ -745,6 +764,7 @@ function focusHash() {
   const target = location.hash && document.getElementById(location.hash.slice(1));
   if (!target) return;
   showTab(target.closest("#tab-log") ? "log" : "main");
+  if (target.closest("#approvals")) setProposalsExpanded(true);
   target.classList.add("focus");
   if (target.classList.contains("proposal")) target.open = true;
   if (target.classList.contains("card")) target.classList.add("open");

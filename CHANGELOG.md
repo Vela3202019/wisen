@@ -8,6 +8,9 @@ All notable changes to wisen are recorded here. The format follows
 
 ### Added
 
+- One Show proposals / Fold all proposals button hides the entire proposal list
+  by default, keeping reflections near the top. The choice persists in the
+  current tab; proposal notification links still open the right card.
 - Dashboard proposal and pull-request cards fold, remembering their state in
   the current tab. Close card moves unwanted publish cards to the change log,
   with Reopen card to undo it; branches and GitHub pull requests stay untouched.
