@@ -532,10 +532,11 @@ const proposalFolds = (() => {
   try { return JSON.parse(sessionStorage.getItem("wisen:proposal-folds")) || {}; }
   catch (_) { return {}; }
 })();
-let proposalsExpanded = (() => {
+let proposalsPreference = (() => {
   try { return sessionStorage.getItem("wisen:proposals-expanded") === "true"; }
   catch (_) { return false; }
 })();
+let proposalsExpanded = proposalsPreference;
 function setProposalsExpanded(expanded, remember = true) {
   proposalsExpanded = expanded;
   document.getElementById("proposal-list").hidden = !expanded;
@@ -543,6 +544,7 @@ function setProposalsExpanded(expanded, remember = true) {
   button.setAttribute("aria-expanded", String(expanded));
   button.textContent = `${expanded ? "Fold all proposals" : "Show proposals"} · ${button.dataset.count}`;
   if (remember) {
+    proposalsPreference = expanded;
     try { sessionStorage.setItem("wisen:proposals-expanded", String(expanded)); } catch (_) {}
   }
 }
@@ -763,6 +765,9 @@ async function enablePush() {
 
 // A notification opens #proposal-<id> or #day-<date>: bring it into view.
 function focusHash() {
+  // A hash is a temporary reveal, not a new preference. Back navigation (or
+  // a reflection link) restores the user's choice when leaving a proposal.
+  if (document.getElementById("proposal-list")) setProposalsExpanded(proposalsPreference, false);
   const target = location.hash && document.getElementById(location.hash.slice(1));
   if (!target) return;
   showTab(target.closest("#tab-log") ? "log" : "main");
