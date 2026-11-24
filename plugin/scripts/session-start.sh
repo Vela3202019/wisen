@@ -3,6 +3,7 @@
 # Prints nothing when wisen is not installed or has nothing to say, so a
 # missing install never adds noise to a session.
 command -v wisen >/dev/null 2>&1 || exit 0
+wisen eval record-exposure >/dev/null 2>&1 || true
 out=$(wisen gardener list --json 2>/dev/null) || exit 0
 python3 - "$out" <<'PY' 2>/dev/null || exit 0
 import json, sys

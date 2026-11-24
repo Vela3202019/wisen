@@ -78,6 +78,7 @@ def _encode_project_path(path: str) -> str:
 # any session. They are not the owner's work, so they are never ingested:
 # wisen does not reflect on its own reflection runs.
 _OWN_PROJECT = _encode_project_path(str(config.cli_cwd().resolve()))
+TOOL_REJECTION_MARKER = "The user doesn't want to proceed with this tool use"
 
 
 def _extract_text(content) -> str:
@@ -110,6 +111,31 @@ def _extract_tool_names(content) -> list[str]:
         b["name"] for b in content
         if isinstance(b, dict) and b.get("type") == "tool_use" and "name" in b
     ]
+
+
+def _plain_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
+def _tool_rejection_text(content) -> str:
+    if not isinstance(content, list):
+        return ""
+    for b in content:
+        if not (isinstance(b, dict) and b.get("type") == "tool_result"):
+            continue
+        inner = b.get("content", "")
+        if isinstance(inner, list):
+            inner = _plain_text(inner)
+        if isinstance(inner, str) and TOOL_REJECTION_MARKER in inner:
+            return inner
+    return ""
 
 
 def _parse_jsonl(path: Path) -> list[dict]:
@@ -185,6 +211,8 @@ def _events_to_turns(events: list[dict]) -> list[Turn]:
             timestamp=ts,
             has_tool_call=bool(tool_names),
             tool_names=tool_names,
+            user_text=_plain_text(content) if role == "user" else None,
+            tool_rejected=role == "user" and bool(_tool_rejection_text(content)),
         ))
 
     return sorted(turns, key=lambda t: t.timestamp)

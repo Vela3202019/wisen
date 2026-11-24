@@ -112,13 +112,16 @@ def open_pr(repo: Repo, branch: str) -> str | None:
     return prs[0]["url"] if prs else None
 
 
-def pr_state(repo: Repo, url: str) -> str:
-    """GitHub's state for the pull request at `url`: OPEN, CLOSED or MERGED."""
+def pr_details(repo: Repo, url: str) -> dict:
+    """GitHub's state and merge timestamp for the pull request."""
     r = _gh(repo, "pr", "view", url, "--json", "state,mergedAt,baseRefName")
     if r.returncode != 0:
         raise PrFailed(f"gh pr view failed: {r.stderr.strip()[:300]}")
     try:
-        return json.loads(r.stdout)["state"]
+        details = json.loads(r.stdout)
+        if details["state"] not in ("OPEN", "CLOSED", "MERGED"):
+            raise ValueError("unknown PR state")
+        return details
     except (ValueError, KeyError, TypeError):
         raise PrFailed("gh pr view printed something other than its JSON") from None
 
