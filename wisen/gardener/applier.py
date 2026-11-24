@@ -36,7 +36,7 @@ import json
 import re
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from wisen.gardener import publisher
@@ -215,18 +215,34 @@ def git_row(store: SqliteStore, proposal_id: str) -> sqlite3.Row | None:
                             (store.user_id, proposal_id)).fetchone()
 
 
-def _merged(repo: Repo, row: sqlite3.Row, pr_url: str | None) -> bool | None:
+def _merged(repo: Repo, row: sqlite3.Row, pr_url: str | None) -> tuple[bool | None, datetime | None, str]:
     """True if merged; False if the branch (or its pull request) is gone
     unmerged; None if still open."""
     if pr_url:
-        return {"MERGED": True, "CLOSED": False}.get(publisher.pr_state(repo, pr_url))
+        details = publisher.pr_details(repo, pr_url)
+        merged = {"MERGED": True, "CLOSED": False}.get(details["state"])
+        try:
+            when = datetime.fromisoformat(details.get("mergedAt") or "") if merged else None
+        except ValueError:
+            when = None
+        return merged, when, "github" if when else "detected"
     refs = ["refs/heads/main"] if row["git_dir"] else repo.default_refs()
     for ref in refs:
         if repo.ok("merge-base", "--is-ancestor", row["commit_sha"], ref):
-            return True
+            merges = repo.out("log", "--first-parent", "--merges", "--ancestry-path", "--reverse",
+                              "--format=%H %ct", f"{row['commit_sha']}..{ref}").splitlines()
+            for merged in merges:
+                commit, stamp = merged.split()
+                if not repo.ok("merge-base", "--is-ancestor", row["commit_sha"], f"{commit}^1"):
+                    return True, datetime.fromtimestamp(int(stamp), UTC), "git"
+            # Fast-forwarded: the approval commit time is not the merge time.
+            return True, None, "detected"
         if row["new_blob"] and repo.blob(ref, row["path"]) == row["new_blob"]:
-            return True  # squash or rebase merge: the file on the default branch is the branch's
-    return None if repo.resolve(f"refs/heads/{row['branch']}") else False
+            # Squash/rebase: find the last change of this path on the default branch.
+            stamp = repo.out("log", "-1", "--first-parent", "--format=%ct", ref, "--", row["path"])
+            return (True, datetime.fromtimestamp(int(stamp), UTC), "git") if stamp.isdigit() else (
+                True, None, "detected")
+    return (None if repo.resolve(f"refs/heads/{row['branch']}") else False), None, "detected"
 
 
 def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, str]]:
@@ -244,21 +260,24 @@ def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, s
             continue
         repo = Repo(Path(row["work_tree"]), Path(row["git_dir"]) if row["git_dir"] else None)
         try:
-            merged = _merged(repo, row, pr_url)
+            merged, merge_time, time_source = _merged(repo, row, pr_url)
         except (GitError, publisher.PublishError) as e:
             print(f"[gardener] cannot check {row['branch']}: {e}")
             continue
         if merged is None:
             continue
         now = proposals.clock()
+        if time_source == "git" and not datetime.fromisoformat(row["applied_at"]) <= merge_time <= now:
+            merge_time, time_source = None, "detected"
         with store.transaction() as conn:
             if merged:
                 proposals.transition_in(conn, proposal_id, "applied", "merged", f"merged:{proposal_id}", "applier",
                                         row["branch"])
-                conn.execute("UPDATE proposal_git SET merged_at = COALESCE(merged_at, ?) WHERE proposal_id = ?",
-                             (ts(now), proposal_id))
+                anchor = merge_time or now
+                conn.execute("UPDATE proposal_git SET merged_at = COALESCE(merged_at, ?), merge_time_source = ? "
+                             "WHERE proposal_id = ?", (ts(anchor), time_source, proposal_id))
                 insert_job(conn, store.user_id, "measure-proposal", {"proposal_id": proposal_id},
-                           request_id=f"measure:{proposal_id}", run_after=now + MEASURE_AFTER, max_attempts=3,
+                           request_id=f"measure:{proposal_id}", run_after=anchor + MEASURE_AFTER, max_attempts=3,
                            now=now)
             else:
                 proposals.transition_in(conn, proposal_id, "applied", "abandoned", f"abandoned:{proposal_id}",
@@ -266,7 +285,3 @@ def detect_merges(store: SqliteStore, proposals: Proposals) -> list[tuple[str, s
                                         else f"{row['branch']} was deleted unmerged")
         moved.append((proposal_id, "merged" if merged else "abandoned"))
     return moved
-
-
-def merged_at(store: SqliteStore, proposal_id: str) -> datetime:
-    return datetime.fromisoformat(git_row(store, proposal_id)["merged_at"])

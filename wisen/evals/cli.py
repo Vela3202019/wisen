@@ -12,6 +12,8 @@ Case-bank CLI.
 import argparse
 import asyncio
 import json
+import sys
+from datetime import date
 from pathlib import Path
 
 from wisen.evals import metrics as metrics_mod
@@ -76,8 +78,169 @@ async def _replay(case_id: str, claude_md: Path | None, k: int) -> None:
         raise SystemExit(f"replay error: {replay.error}")
     verdict = await judge(case, replay, k, model)
     print(f"check:    {case.behavior_check}")
-    print(f"repeated: {verdict.repeated}  →  {'FAIL' if verdict.repeated else 'PASS'}")
+    print(f"verdict:  {'ABSTAIN' if verdict.no_signal else 'FAIL' if verdict.repeated else 'PASS'}")
     print(f"evidence: {verdict.evidence}")
+
+
+def _protocol_commands(sub) -> None:
+    freeze = sub.add_parser("freeze", help="pin the case inventory and an applied proposal's Git blobs")
+    freeze.add_argument("proposal_id")
+    freeze.add_argument("inventory", type=Path)
+    freeze.add_argument("--out", type=Path, required=True)
+    freeze.add_argument("--model", required=True)
+    freeze.add_argument("--harness", help="Claude Code version (default: check the installed binary)")
+    freeze.add_argument("--judge-model")
+    freeze.add_argument("--config", type=Path, help="JSON mapping of shared frozen home instruction files")
+    for name in ("paired", "weekly"):
+        run = sub.add_parser(name, help="run the frozen suite and write a private report")
+        run.add_argument("manifest", type=Path)
+        run.add_argument("--out", type=Path, required=True)
+        run.add_argument("--repeats", type=int, default=5)
+        run.add_argument("--votes", type=int, default=3)
+        run.add_argument("--clean-margin", type=float, default=0.05)
+        if name == "paired":
+            mode = run.add_mutually_exclusive_group()
+            mode.add_argument("--holdout", action="store_true")
+            mode.add_argument("--record-gate", action="store_true")
+        else:
+            run.add_argument("--retain", type=Path, action="append", default=[])
+            run.add_argument("--dataset", help="labeled replay dataset for judge drift")
+            run.add_argument("--rater", default="owner")
+            run.add_argument("--baseline-version", help="judge version to compare on the same human labels")
+    field = sub.add_parser("field", help="show replay gate and observational field evidence side by side")
+    field.add_argument("proposal_id")
+    sub.add_parser("record-exposure", help="read a Claude Code SessionStart payload from stdin")
+
+
+def _label_commands(sub) -> None:
+    from wisen.evals.calibration import FAILURES
+
+    sample = sub.add_parser("sample-replays", help="import a stratified sample for blind replay labeling")
+    sample.add_argument("manifest", type=Path)
+    sample.add_argument("report", type=Path)
+    sample.add_argument("dataset")
+    sample.add_argument("--n", type=int, default=150)
+    sample.add_argument("--seed", type=int, default=0)
+    turns = sub.add_parser("sample-turns", help="sample real transcript turns and record both detector predictions")
+    turns.add_argument("dataset")
+    turns.add_argument("dates", nargs="+", type=date.fromisoformat)
+    turns.add_argument("--n", type=int, default=300)
+    turns.add_argument("--seed", type=int, default=0)
+    queue = sub.add_parser("label-queue", help="show blind items without model decisions or arm labels")
+    queue.add_argument("kind", choices=("replay", "turn"))
+    queue.add_argument("dataset")
+    queue.add_argument("--rater", default="owner")
+    queue.add_argument("--round", type=int, default=1, choices=(1, 2))
+    queue.add_argument("--limit", type=int, default=10)
+    label = sub.add_parser("label", help="record one blind human judgment")
+    label.add_argument("id")
+    label.add_argument("label")
+    label.add_argument("--rater", default="owner")
+    label.add_argument("--round", type=int, default=1, choices=(1, 2))
+    label.add_argument("--failure", choices=FAILURES)
+    cal = sub.add_parser("calibrate", help="measure agreement and confidence intervals")
+    cal.add_argument("scorer", choices=("judge", "miner", "observer", "retest"))
+    cal.add_argument("dataset")
+    cal.add_argument("--version")
+    cal.add_argument("--kind", choices=("replay", "turn"), default="replay", help="label kind for retest")
+    cal.add_argument("--rater", default="owner")
+    rerun = sub.add_parser("rejudge", help="score the same blinded outputs with a new judge")
+    rerun.add_argument("dataset")
+    rerun.add_argument("--model")
+    rerun.add_argument("--votes", type=int, default=3)
+    failures = sub.add_parser("failures", help="tally labeled causes and replay errors")
+    failures.add_argument("dataset")
+    failures.add_argument("--rater", default="owner")
+    failures.add_argument("--report", type=Path)
+
+
+async def _protocol(args) -> dict:
+    from wisen.evals.exposure import record_start
+    from wisen.evals.manifest import freeze_proposal, load_manifest, save_manifest
+    from wisen.evals.protocol import (
+        evidence,
+        record_gate,
+        retention,
+        summary,
+        write_report,
+    )
+    from wisen.evals.replay import harness_version
+    from wisen.evals.runner import run_manifest
+    from wisen.llm import eval_model
+    from wisen.store import get_store
+
+    store = get_store()
+    if args.cmd == "record-exposure":
+        return {"records": record_start(store, json.load(sys.stdin))}
+    if args.cmd == "field":
+        return evidence(store, args.proposal_id)
+    if args.cmd == "freeze":
+        manifest = freeze_proposal(store, args.proposal_id, _read_json(args.inventory), model=args.model,
+                                   harness=args.harness or harness_version(), judge_model=args.judge_model or eval_model(),
+                                   config=_read_json(args.config) if args.config else None)
+        save_manifest(args.out, manifest)
+        return {"manifest": manifest.digest(), "path": str(args.out)}
+    manifest = load_manifest(args.manifest)
+    report = await run_manifest(manifest, k=args.repeats, judge_votes=args.votes, clean_margin=args.clean_margin,
+                                holdout=getattr(args, "holdout", False))
+    if args.cmd == "weekly":
+        if args.retain:
+            report["retention"] = await retention(store, [load_manifest(path) for path in args.retain], manifest,
+                                                  k=args.repeats, votes=args.votes, margin=args.clean_margin)
+        if args.dataset:
+            from wisen.evals.calibration import Labels, judge_drift
+
+            report["judge_drift"] = await judge_drift(Labels(store), args.dataset, args.rater, manifest.judge_model,
+                                                      args.votes, args.baseline_version)
+    write_report(args.out, report)
+    result = {**summary(report), "path": str(args.out)}
+    if getattr(args, "record_gate", False):
+        result["promotion"] = record_gate(store, manifest, report)["decision"]
+    if args.cmd == "weekly":
+        result["evidence"] = evidence(store, manifest.proposal_id)
+    return result
+
+
+def _read_json(path: Path):
+    return json.loads(path.read_text())
+
+
+async def _labels(args):
+    from wisen.evals.calibration import (
+        Labels,
+        calibration,
+        failure_report,
+        import_replays,
+        rejudge,
+        sample_turns,
+    )
+    from wisen.evals.manifest import load_manifest
+    from wisen.llm import eval_model
+    from wisen.store import get_store
+
+    labels = Labels(get_store())
+    if args.cmd == "label":
+        labels.label(args.id, args.rater, args.round, args.label, args.failure)
+        return {"labeled": args.id}
+    if args.cmd == "label-queue":
+        return labels.blind(args.kind, args.dataset, args.rater, args.round)[:args.limit]
+    if args.cmd == "sample-replays":
+        count = import_replays(labels, load_manifest(args.manifest), _read_json(args.report), args.dataset,
+                               n=args.n, seed=args.seed)
+        return {"items": count}
+    if args.cmd == "sample-turns":
+        return await sample_turns(labels, [day.isoformat() for day in args.dates], args.dataset, n=args.n, seed=args.seed)
+    if args.cmd == "rejudge":
+        return {"judge_version": await rejudge(labels, args.dataset, args.model or eval_model(), args.votes)}
+    if args.cmd == "failures":
+        return failure_report(labels, args.dataset, args.rater, _read_json(args.report) if args.report else None)
+    if args.scorer == "retest":
+        return calibration(labels.retest(args.kind, args.dataset, args.rater), args.kind)
+    if not args.version:
+        raise ValueError("calibrate requires --version for model or miner scores")
+    kind = "replay" if args.scorer == "judge" else "turn"
+    rows = labels.comparisons(kind, args.dataset, args.rater, args.scorer, args.version)
+    return calibration(rows, kind)
 
 
 def main() -> None:
@@ -105,10 +268,12 @@ def main() -> None:
     rp.add_argument("--k", type=int, default=3)
 
     cp = sub.add_parser("compare")
-    cp.add_argument("--a", type=Path, help="CLAUDE.md variant A (default: current config)")
+    cp.add_argument("--a", type=Path, help="CLAUDE.md variant A (default: no home instructions)")
     cp.add_argument("--b", type=Path, help="CLAUDE.md variant B (omit for single-config run)")
     cp.add_argument("--k", type=int, default=3)
     cp.add_argument("--limit", type=int)
+    _protocol_commands(sub)
+    _label_commands(sub)
 
     args = p.parse_args()
     if args.cmd == "mine":
@@ -125,3 +290,9 @@ def main() -> None:
         from wisen.evals.runner import run_suite
         report = asyncio.run(run_suite(args.a, args.b, args.k, args.limit))
         print(json.dumps(report, indent=2))
+    else:
+        handler = _protocol if args.cmd in ("freeze", "paired", "weekly", "field", "record-exposure") else _labels
+        try:
+            print(json.dumps(asyncio.run(handler(args)), indent=2))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"eval: {exc}") from None

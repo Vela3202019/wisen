@@ -313,7 +313,8 @@ def test_replay_cost_without_usage():
                                 ("reported", RequestUsage(input_tokens=7, output_tokens=3))):
                 judge.as_model = lambda name, usage=usage: FunctionModel(respond_with(usage))
                 judge._judge.cache_clear()
-                report = asyncio.run(runner.compare([case], runner.Variant(), runner.Variant(), cap=2, k=2))
+                report = asyncio.run(runner.compare([case], runner.Variant(), runner.Variant(), cap=2,
+                                                    k=1, judge_votes=2))
                 lines[name] = loop.eval_summary(report, cost)
     finally:
         judge.as_model, runner.run_replay = real

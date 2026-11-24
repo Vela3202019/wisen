@@ -44,6 +44,8 @@ def merge_observations(notes: list[tuple[str, dict]]) -> DayObservation:
         return DayObservation.model_validate(notes[0][1])
     merged: dict = {}
     for name, field in DayObservation.model_fields.items():
+        if name == "turn_corrections":  # local-only; not part of CloudObservation
+            continue
         if get_origin(field.annotation) is list:
             items = [item for _, note in notes for item in note[name]]
             merged[name] = [item for i, item in enumerate(items) if item not in items[:i]]

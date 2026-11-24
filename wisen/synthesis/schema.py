@@ -84,6 +84,11 @@ class KeyMoment(BaseModel):
     significance: str
 
 
+class TurnCorrection(BaseModel):
+    turn_id: str
+    kind: Literal["tool-rejection", "interruption", "explicit-correction", "rephrase-storm"]
+
+
 class DayObservation(BaseModel):
     # Mood signals observed in raw sessions
     mood_signals_user: str       # pattern analysis of how the user wrote prompts
@@ -105,6 +110,7 @@ class DayObservation(BaseModel):
 
     # Free-form day read (feeds Synthesizer as narrative context)
     day_summary: str
+    turn_corrections: list[TurnCorrection] = Field(default_factory=list)
 
 
 # ── Final output: Reflection ────────────────────────────────────────────────────
