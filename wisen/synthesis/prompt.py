@@ -62,6 +62,11 @@ valuable signal for the Synthesizer.
   important than a 20-minute smooth execution.
 - Quote directly. Don't paraphrase session moments — extract the actual words.
 - Don't invent patterns that aren't there. If the day was smooth and aligned, say so clearly.
+- In turn_corrections, label only "You:" turns preceded by a [user-turn-id ...] marker
+  that correct the agent. Use the ID from that marker.
+  Use one label per turn: tool-rejection (denied tool use), interruption (stopped the
+  agent mid-turn), explicit-correction (corrects its preceding response or action),
+  or rephrase-storm (restates an unmet request). Omit ordinary follow-ups and new requests.
 - If no yesterday Reflection exists, note "Day 1 — no baseline" and skip all delta fields.
 - day_summary should read like a coach's raw notes before film review:
   honest, specific, grounded in what you actually saw — not what you think they wanted to do.

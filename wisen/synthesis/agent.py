@@ -5,6 +5,7 @@ Two-stage synthesis pipeline:
 """
 import asyncio
 from datetime import UTC, datetime
+from hashlib import sha256
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -25,14 +26,20 @@ load_dotenv()
 
 # ── Formatters ────────────────────────────────────────────────────────────────
 
+def turn_id(session: NormalizedSession, index: int) -> str:
+    return sha256(f"{session.source}:{session.session_id}:{index}".encode()).hexdigest()[:16]
+
+
 def _format_session(s: NormalizedSession) -> str:
     lines = [
         f"[{s.source}] {s.project_name} — {s.date}",
         (f"Duration: {s.metadata.session_length_minutes:.0f}min  "
          f"Turns: {s.metadata.total_turns}"),
     ]
-    for t in s.turns:
+    for i, t in enumerate(s.turns):
         prefix = "You" if t.role == "user" else "Agent"
+        if t.role == "user" and s.source != "git":
+            lines.append(f"[user-turn-id {turn_id(s, i)}]")
         lines.append(f"{prefix}: {t.content[:400]}")
     return "\n".join(lines)
 
@@ -107,7 +114,7 @@ def _build_synthesizer_context(
     past_docs: list[dict],
     date: str,
 ) -> str:
-    obs_json = observation.model_dump_json(indent=2)
+    obs_json = observation.model_dump_json(indent=2, exclude={"turn_corrections"})
 
     history_lines = []
     for d in past_docs:

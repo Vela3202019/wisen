@@ -357,7 +357,7 @@ def result_packet(doc: dict, *, user: str | None = None, device_id: str | None =
 
 def observation_packet(observation: DayObservation, date: str, *, user: str | None = None,
                        device_id: str | None = None) -> dict:
-    content = {"date": date, **observation.model_dump(mode="json")}
+    content = {"date": date, **observation.model_dump(mode="json", exclude={"turn_corrections"})}
     return _packet("observation", validate(CloudObservation, content, "observation packet", extra="forbid"),
                    user, device_id)
 

@@ -152,7 +152,8 @@ def _updates(store: SqliteStore) -> list[dict]:
     content."""
     with closing(store._connect()) as conn:
         rows = conn.execute(
-            f"SELECT e.proposal_id, e.request_id, e.from_state, e.to_state, e.note, e.at, g.branch, m.result "
+            f"SELECT e.proposal_id, e.request_id, e.from_state, e.to_state, e.note, e.at, g.branch, "
+            f"g.merged_at, m.result "
             f"FROM proposal_events e LEFT JOIN proposal_git g ON g.proposal_id = e.proposal_id "
             f"LEFT JOIN proposal_measures m ON m.proposal_id = e.proposal_id "
             f"WHERE e.user_id = ? AND e.to_state IN ({', '.join('?' * len(GIT_STATES))}) "
@@ -167,7 +168,8 @@ def _updates(store: SqliteStore) -> list[dict]:
             result = json.loads(r["result"])
             measure = {k: result[k] for k in ("verdict", "before", "after")}
         updates.append({"proposal_id": r["proposal_id"], "request_id": r["request_id"],
-                        "from_state": r["from_state"], "to_state": r["to_state"], "at": r["at"],
+                        "from_state": r["from_state"], "to_state": r["to_state"],
+                        "at": (r["merged_at"] or r["at"]) if r["to_state"] == "merged" else r["at"],
                         "branch": r["branch"] if r["to_state"] in ("applied", "merged") else None,
                         "note": r["note"] if r["to_state"] in ("failed", "kept", "revert_proposed") else None,
                         "measure": measure})
