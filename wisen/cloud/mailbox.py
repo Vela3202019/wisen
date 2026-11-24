@@ -757,7 +757,9 @@ class Mailbox:
         docs = self.store(user_id)._list_reflections(1, day)
         return docs[0] if docs else None
 
-    async def inbox(self, user_id: str, limit: int = 50) -> list[Proposal]:
+    async def inbox(self, user_id: str, limit: int = -1) -> list[Proposal]:
+        # The dashboard's change log is also the only way to reopen a closed
+        # card. Do not silently drop history after 50 newer proposals.
         return await self.proposals(user_id).list(limit=limit)
 
     def inbox_details(self, user_id: str) -> dict[str, dict]:
@@ -774,7 +776,35 @@ class Mailbox:
                     d["decision"] = {"decision": r["to_state"], "note": r["note"], "at": r["at"], "actor": r["actor"]}
                 elif r["to_state"] != "proposed":
                     d["outcome"] = {"state": r["to_state"], "note": r["note"], "at": r["at"]}
+            for r in conn.execute("SELECT key, at FROM cloud_state WHERE user_id = ? "
+                                  "AND key LIKE 'dashboard:closed:%'", (user_id,)):
+                d = details.setdefault(r["key"].removeprefix("dashboard:closed:"),
+                                       {"decision": None, "outcome": None})
+                d["closed_at"] = r["at"]
         return details
+
+    def close_card(self, user_id: str, proposal_id: str, closed: bool) -> None:
+        """Archive a dashboard card, not its branch or GitHub PR. Keep this
+        user-scoped presentation metadata separate from the laptop's git
+        lifecycle so later sync packets cannot reopen the card."""
+        with self.store(user_id).transaction() as conn:
+            p = conn.execute("SELECT state FROM proposals WHERE user_id = ? AND id = ?",
+                             (user_id, proposal_id)).fetchone()
+            if p is None:
+                raise LookupError(f"no proposal {proposal_id}")
+            if closed:
+                if p["state"] != "applied":
+                    raise NotPublishable("only an applied proposal's card can be closed; reject pending proposals instead")
+                active = conn.execute("SELECT 1 FROM jobs WHERE user_id = ? AND kind = 'publish' "
+                                      "AND request_id = ? AND state IN ('queued', 'leased', 'waiting')",
+                                      (user_id, f"publish:{proposal_id}")).fetchone()
+                if active:
+                    raise NotPublishable("publishing is in progress; close the card once it finishes")
+                conn.execute("INSERT OR IGNORE INTO cloud_state (user_id, key, value, at) VALUES (?, ?, 'true', ?)",
+                             (user_id, f"dashboard:closed:{proposal_id}", ts(self.clock())))
+            else:
+                conn.execute("DELETE FROM cloud_state WHERE user_id = ? AND key = ?",
+                             (user_id, f"dashboard:closed:{proposal_id}"))
 
     async def publish(self, user_id: str, proposal_id: str) -> Job:
         """The owner's "Push & create PR": one device job per proposal
@@ -782,19 +812,31 @@ class Mailbox:
         second tap while it is queued or running changes nothing; a tap after
         a failure runs it again; once a pull request is recorded, nothing
         runs again. The laptop re-checks the branch before pushing."""
-        p = await self.proposals(user_id).get(proposal_id)
-        if p is None:
-            raise LookupError(f"no proposal {proposal_id}")
-        if p.target.partition(":")[0] == HOME:
-            raise NotPublishable(f"{p.target} is a file outside any repo: its branch has no remote; "
-                                 "merge it on the laptop")
-        if p.state != "applied":
-            raise NotPublishable(f"proposal {proposal_id} is {p.state}; only an applied branch can be published")
-        # One attempt: the failures are the owner's to fix (no remote, no gh
-        # login), and the card shows them at once; tapping again retries.
-        return await self.enqueue_device_job(user_id, "publish", {"proposal_id": proposal_id},
-                                             request_id=f"publish:{proposal_id}", rerun=p.pr_url is None,
-                                             max_attempts=1)
+        job = await asyncio.to_thread(self._publish, user_id, proposal_id)
+        self._notify(user_id)
+        return job
+
+    def _publish(self, user_id: str, proposal_id: str) -> Job:
+        # Check visibility and enqueue under the same lock as close_card:
+        # racing taps from two tabs cannot publish a card just closed.
+        with self.store(user_id).transaction() as conn:
+            p = conn.execute("SELECT target, state, pr_url FROM proposals WHERE user_id = ? AND id = ?",
+                             (user_id, proposal_id)).fetchone()
+            if p is None:
+                raise LookupError(f"no proposal {proposal_id}")
+            if conn.execute("SELECT 1 FROM cloud_state WHERE user_id = ? AND key = ?",
+                            (user_id, f"dashboard:closed:{proposal_id}")).fetchone():
+                raise NotPublishable("this card is closed; reopen it in the change log before publishing")
+            if p["target"].partition(":")[0] == HOME:
+                raise NotPublishable(f"{p['target']} is a file outside any repo: its branch has no remote; "
+                                     "merge it on the laptop")
+            if p["state"] != "applied":
+                raise NotPublishable(f"proposal {proposal_id} is {p['state']}; only an applied branch can be published")
+            now = self.clock()
+            row = insert_job(conn, user_id, "publish", {"proposal_id": proposal_id},
+                             request_id=f"publish:{proposal_id}", rerun=p["pr_url"] is None,
+                             max_attempts=1, now=now, run_after=now, runner="device")
+        return Job.from_row(row)
 
     def publish_jobs(self, user_id: str) -> dict[str, dict]:
         """How each proposal's publish job stands, by proposal id: the

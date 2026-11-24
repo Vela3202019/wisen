@@ -8,6 +8,10 @@ All notable changes to wisen are recorded here. The format follows
 
 ### Added
 
+- Dashboard proposal and pull-request cards fold, remembering their state in
+  the current tab. Close card moves unwanted publish cards to the change log,
+  with Reopen card to undo it; branches and GitHub pull requests stay untouched.
+
 - A replay eval protocol for Gardener rules. `wisen eval freeze` pins the case
   and config versions; `paired` measures rule impact against a clean set;
   `weekly` checks retention and judge drift; `field` shows the promotion

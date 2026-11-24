@@ -484,6 +484,22 @@ async def check_publish():
             card = {p["id"]: p for p in (await inbox()).json()}[other.id]
             assert card["publish"] == {"state": "failed", "error": "DeviceJobFailed: NoRemote"}, card
             assert card["pr_url"] is None and card["state"] == "applied", card
+            # Dismissing the failed publish does not retry it or change git
+            # state. Reopening restores the same failure and retry action.
+            close_url = f"/api/proposals/{other.id}/close"
+            assert (await browser.post(close_url, json={})).status_code == 200
+            closed = {p["id"]: p for p in (await inbox()).json()}[other.id]
+            assert closed["closed_at"] and closed["publish"] == card["publish"]
+            assert closed["state"] == "applied" and closed["pr_url"] is None
+            assert (await browser.post(url(other), json={})).status_code == 409
+            assert server.mailbox.device_jobs(USER, ("queued",)) == []
+            if shutil.which("node"):
+                pages = render_dashboard((await browser.get("/")).text, [closed])
+                assert f'id="proposal-{other.id}"' not in pages["approvals"]
+                assert "Reopen card" in pages["tab-log"] and "<summary>" in pages["tab-log"]
+            assert (await browser.post(close_url, json={"closed": False})).status_code == 200
+            reopened = {p["id"]: p for p in (await inbox()).json()}[other.id]
+            assert not reopened.get("closed_at") and reopened["publish"] == card["publish"]
             assert (await browser.post(url(other), json={})).status_code == 202
             (retry,) = server.mailbox.device_jobs(USER, ("queued",))
             assert retry.args == {"proposal_id": other.id} and retry.attempts == 0 and retry.error is None, retry
@@ -501,16 +517,87 @@ async def check_publish():
     print("✓ cloud: Push & create PR queues one device job, records the laptop's link, and shows a failure by class")
 
 
+async def check_close_cards():
+    server = _server("close-cards")
+    proposals = server.mailbox.proposals(USER)
+
+    async def make(applied=True):
+        p = await proposals.create("shop:AGENTS.md", {"diff": DIFF},
+                                   request_id=uuid.uuid4().hex, actor="gardener")
+        if applied:
+            await proposals.decide(p.id, "approved", request_id=uuid.uuid4().hex, actor="web")
+            await proposals.transition(p.id, "approved", "applied", request_id=uuid.uuid4().hex, actor="laptop")
+        return p
+
+    applied, pending, publishing, racing = await make(), await make(False), await make(), await make()
+    close_url = f"/api/proposals/{applied.id}/close"
+    async with server.http() as http:
+        assert (await http.post(close_url, json={})).status_code == 401
+    async with server.browser() as browser:
+        assert (await browser.post(f"/api/proposals/{'0' * 32}/close", json={})).status_code == 404
+        assert (await browser.post(f"/api/proposals/{pending.id}/close", json={})).status_code == 409
+        assert (await browser.post(f"/api/proposals/{publishing.id}/publish", json={})).status_code == 202
+        assert (await browser.post(f"/api/proposals/{publishing.id}/close", json={})).status_code == 409
+        # A linked PR is archived only in wisen; its link and lifecycle survive.
+        server.mailbox._record_pr(USER, applied.id, PR)
+        before = await proposals.get(applied.id), await proposals.history(applied.id)
+        assert (await browser.post(close_url, json={})).status_code == 200
+        assert (await browser.post(close_url, json={})).status_code == 200
+        assert (await proposals.get(applied.id), await proposals.history(applied.id)) == before
+        # The archive must remain reachable after it leaves the usual recent
+        # 50 proposals, otherwise there is no way back to its publish action.
+        server.clock.now += timedelta(seconds=1)
+        for _ in range(51):
+            await make(False)
+        # Refresh/restart persistence and account isolation, including direct API calls.
+        restarted = Server(server.db, server.clock)
+        async with restarted.browser() as http:
+            cards = (await http.get("/api/proposals")).json()
+            assert len(cards) == 55
+            card = next(p for p in cards if p["id"] == applied.id)
+            assert card["closed_at"] and card["pr_url"] == PR and card["state"] == "applied"
+        server.mailbox.set_user("someone-else", PASSWORD)
+        async with server.browser("someone-else") as http:
+            assert (await http.get("/api/proposals")).json() == []
+            assert (await http.post(close_url, json={})).status_code == 404
+            assert (await http.post(close_url, json={"closed": False})).status_code == 404
+        if shutil.which("node"):
+            html = (await browser.get("/")).text
+            pages = render_dashboard(html, cards)
+            assert f'id="proposal-{applied.id}"' not in pages["approvals"]
+            assert f'href="{PR}"' in pages["tab-log"] and "Reopen card" in pages["tab-log"]
+            assert f'data-fold-key="{pending.id}:proposed" open ontoggle' in pages["approvals"]
+            assert f'data-fold-key="{publishing.id}:applied"  ontoggle' in pages["approvals"]
+            folded = render_dashboard(html, cards, folds={f"{pending.id}:proposed": False,
+                                                         f"{publishing.id}:applied": True})
+            assert f'data-fold-key="{pending.id}:proposed"  ontoggle' in folded["approvals"]
+            assert f'data-fold-key="{publishing.id}:applied" open ontoggle' in folded["approvals"]
+            # A pending card's default-open toggle must not carry into its
+            # later applied stage, which starts collapsed.
+            transitioned = render_dashboard(html, cards, folds={f"{publishing.id}:proposed": True})
+            assert f'data-fold-key="{publishing.id}:applied"  ontoggle' in transitioned["approvals"]
+        assert (await browser.post(close_url, json={"closed": False})).status_code == 200
+        assert (await browser.post(close_url, json={"closed": False})).status_code == 200
+        # Publish and close are mutually exclusive even when two tabs race.
+        results = await asyncio.gather(
+            browser.post(f"/api/proposals/{racing.id}/publish", json={}),
+            browser.post(f"/api/proposals/{racing.id}/close", json={}),
+        )
+        assert sorted(r.status_code for r in results) in ([200, 409], [202, 409]), results
+    print("✓ cloud: foldable cards; close/reopen persist without git changes, isolate users and fence publishing")
+
+
 # The dashboard's own script, run in node against a stub DOM: every element is
 # a sink for innerHTML, everything else a no-op. Returns each element's HTML.
 NODE_DASHBOARD = r"""
 const vm = require("vm");
-const {script, proposals} = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const {script, proposals, folds} = JSON.parse(require("fs").readFileSync(0, "utf8"));
 const els = {};
 const any = new Proxy(function () {}, {get: (t, k) => k === "then" ? undefined : any, apply: () => any});
 const el = id => els[id] || (els[id] = new Proxy({innerHTML: ""}, {get: (t, k) => k in t ? t[k] : any}));
 const document = new Proxy({getElementById: el}, {get: (t, k) => k in t ? t[k] : any});
 const ctx = vm.createContext({document, window: any, navigator: {}, location: any, fetch: () => new Promise(() => {}),
+                              sessionStorage: {getItem: () => JSON.stringify(folds), setItem: () => {}},
                               console, Date, JSON, Promise, String, Object, Array, Math, Number, setTimeout: any});
 vm.runInContext(script, ctx);
 ctx.__proposals = proposals;
@@ -519,9 +606,10 @@ console.log(JSON.stringify(Object.fromEntries(Object.entries(els).map(([k, v]) =
 """
 
 
-def render_dashboard(html: str, proposals: list) -> dict:
+def render_dashboard(html: str, proposals: list, *, folds: dict | None = None) -> dict:
     script = html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
-    r = subprocess.run(["node", "-e", NODE_DASHBOARD], input=json.dumps({"script": script, "proposals": proposals}),
+    r = subprocess.run(["node", "-e", NODE_DASHBOARD],
+                       input=json.dumps({"script": script, "proposals": proposals, "folds": folds or {}}),
                        capture_output=True, text=True, check=True)
     return json.loads(r.stdout)
 
@@ -1028,6 +1116,7 @@ async def main():
     await check_usage_debounce()
     await check_approvals()
     await check_publish()
+    await check_close_cards()
     await check_restart_mid_lease()
     await check_schedule()
     await check_backup_restore()

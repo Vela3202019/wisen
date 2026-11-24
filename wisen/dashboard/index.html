@@ -123,6 +123,11 @@
   .panel .meta, .proposal .meta { color:var(--dim); font-size:12px; }
   .panel code { font-size:20px; letter-spacing:.1em; color:var(--aligned); }
   .proposal.focus { border-color:var(--mild); }
+  .proposal > summary { cursor:pointer; }
+  .proposal > summary .target { overflow-wrap:anywhere; }
+  .proposal > summary .state { float:right; margin-left:8px; }
+  .proposal > summary .meta { margin-top:4px; }
+  .proposal[open] > summary { margin-bottom:10px; }
   .proposal .target { font-weight:600; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:14px; }
   .proposal pre { background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px;
                   overflow-x:auto; font-size:12px; line-height:1.4; max-height:360px; }
@@ -130,12 +135,12 @@
   .proposal pre .del { color:var(--misaligned); }
   .proposal textarea { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--border);
                        border-radius:8px; padding:8px; font:inherit; font-size:14px; min-height:40px; }
-  .proposal .buttons { display:flex; gap:8px; margin-top:8px; }
+  .proposal .buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
   .proposal .approve { background:#238636 !important; border-color:#238636 !important; color:#fff !important; }
   .proposal .reject { color:var(--misaligned) !important; }
   .proposal .state { font-size:12px; padding:2px 10px; border-radius:10px; background:var(--border); }
   .proposal .state.applied, .proposal .state.approved { background:#1f4d2a; color:var(--aligned); }
-  .proposal code { font-size:12px; }
+  .proposal code { font-size:12px; overflow-wrap:anywhere; }
   .proposal a { color:var(--aligned); word-break:break-all; }
   .proposal .error { color:var(--misaligned); font-size:13px; margin:6px 0; }
   .proposal .publish { background:#1f6feb !important; border-color:#1f6feb !important; color:#fff !important; }
@@ -517,7 +522,27 @@ function isWaiting(p) {
 // proposal until its branch or pull request is merged. Everything resolved
 // (rejected, expired, failed, merged, kept, reverted, ...) is the change log's.
 function onMainPage(p) {
-  return isWaiting(p) || p.state === "approved" || p.state === "applied";
+  return !p.closed_at && (isWaiting(p) || p.state === "approved" || p.state === "applied");
+}
+
+// Keep folds through data refreshes and page reloads in this tab. Storage can
+// be unavailable (private browsing); folding still works in memory then.
+const proposalFolds = (() => {
+  try { return JSON.parse(sessionStorage.getItem("wisen:proposal-folds")) || {}; }
+  catch (_) { return {}; }
+})();
+function rememberProposal(card) {
+  proposalFolds[card.dataset.foldKey] = card.open;
+  try { sessionStorage.setItem("wisen:proposal-folds", JSON.stringify(proposalFolds)); } catch (_) {}
+}
+function proposalCard(p, state, meta, body, open = false) {
+  const foldKey = `${p.id}:${state}`;
+  const expanded = proposalFolds[foldKey] ?? open;
+  return `<details class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}" data-fold-key="${esc(foldKey)}" ${expanded ? "open" : ""} ontoggle="rememberProposal(this)">
+    <summary><span class="state ${esc(state)}">${esc(state)}</span><span class="target">${esc(p.target)}</span>
+      <div class="meta">${meta}</div></summary>
+    ${body}
+  </details>`;
 }
 
 function showTab(name) {
@@ -534,20 +559,22 @@ const updatedAt = () => `updated ${new Date().toLocaleTimeString([], {hour:"nume
 // (home:…) has no remote, so its branch stays local for the owner to merge.
 function publishControls(p) {
   const branch = `wisen/gardener/${p.id}`;
-  if (p.pr_url) return `<p class="meta">Pull request <a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.pr_url)}</a> · merge it when you choose</p>`;
-  if (p.target.startsWith("home:")) return `<p class="meta">Branch <code>${esc(branch)}</code> on the laptop. A personal file has no remote: merge it there when you choose.</p>`;
+  const close = `<button onclick="closeProposal(this, true)" title="Move this card to the change log; keep its branch and any pull request">Close card</button>`;
+  if (p.pr_url) return `<p class="meta">Pull request <a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.pr_url)}</a> · merge it when you choose</p><div class="buttons">${close}</div>`;
+  if (p.target.startsWith("home:")) return `<p class="meta">Branch <code>${esc(branch)}</code> on the laptop. A personal file has no remote: merge it there when you choose.</p><div class="buttons">${close}</div>`;
   const job = p.publish || {};
   if (["queued", "leased", "waiting"].includes(job.state)) return `<p class="meta">Publishing… the laptop pushes <code>${esc(branch)}</code> and opens the pull request.</p>`;
   const failed = job.state === "failed" ? `<p class="error">Publishing failed: ${esc(publishError(job.error))}.</p>` : "";
   return `${failed}<div class="buttons">
       <button class="publish" onclick="publish(this)">${job.state === "failed" ? "Retry: push & create PR" : "Push & create PR"}</button>
+      ${close}
     </div>
     <p class="meta">Branch <code>${esc(branch)}</code> on the laptop.</p>`;
 }
 
 function renderApprovals(proposals) {
   const el = document.getElementById("approvals");
-  const waiting = proposals.filter(isWaiting);
+  const waiting = proposals.filter(p => isWaiting(p) && onMainPage(p));
   const approved = proposals.filter(p => !isWaiting(p) && onMainPage(p));
   const card = p => {
     const evidence = (p.payload.evidence || []).map(q => `<li><i>“${esc(q)}”</i></li>`).join("");
@@ -567,13 +594,8 @@ function renderApprovals(proposals) {
         </div>`;
     else if (p.state === "approved") body = `<p class="meta">Approved. The laptop makes the branch next time it checks in; the diff shows here once it has.</p>`;
     else if (p.state === "applied") body = `<pre>${diffHtml(p.payload.diff)}</pre>${publishControls(p)}`;
-    return `<div class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}">
-      <div class="row" style="display:flex;justify-content:space-between;gap:8px">
-        <span class="target">${esc(p.target)}</span><span class="state ${esc(p.state)}">${expired ? "expired" : esc(p.state)}</span>
-      </div>
-      <div class="meta">${new Date(p.created_at).toLocaleString()}${batch}${expires}</div>
-      ${body}
-    </div>`;
+    return proposalCard(p, expired ? "expired" : p.state,
+      `${new Date(p.created_at).toLocaleString()}${batch}${expires}`, body, isWaiting(p));
   };
   el.innerHTML = `<h2>${waiting.length ? `Waiting for you · ${waiting.length}` : "Nothing waiting for you"} ${REFRESH}</h2>
     <div class="asof">${updatedAt()}</div>`
@@ -595,19 +617,16 @@ function renderChangeLog(proposals) {
     if (d) lines.push(`${esc(d.decision)} by ${esc(d.actor)} on ${new Date(d.at).toLocaleString()}${d.note ? ` · “${esc(d.note)}”` : ""}`);
     else if (p.state === "proposed" || p.state === "expired") lines.push("no decision before it expired");
     if (o && o.note) lines.push(`${esc(o.state)}: ${esc(o.note)}`);
+    if (p.closed_at) lines.push(`Card closed on ${new Date(p.closed_at).toLocaleString()}; branch and pull request unchanged.`);
     const branch = `wisen/gardener/${p.id}`;
     let link = "";
     if (p.pr_url) link = `Pull request <a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.pr_url)}</a>`;
     else if (["merged", "measuring", "kept", "revert_proposed"].includes(p.state))
       link = `Branch <code>${esc(branch)}</code>`;
-    return `<div class="proposal" id="proposal-${esc(p.id)}" data-id="${esc(p.id)}">
-      <div class="row" style="display:flex;justify-content:space-between;gap:8px">
-        <span class="target">${esc(p.target)}</span><span class="state ${esc(state)}">${esc(state)}</span>
-      </div>
-      <div class="meta">${when}${batch}</div>
-      ${lines.map(l => `<p class="meta">${l}</p>`).join("")}
+    const body = `${lines.map(l => `<p class="meta">${l}</p>`).join("")}
       ${link ? `<p class="meta">${link}</p>` : ""}
-    </div>`;
+      ${p.closed_at ? `<pre>${diffHtml(p.payload.diff)}</pre><div class="buttons"><button onclick="closeProposal(this, false)">Reopen card</button></div>` : ""}`;
+    return proposalCard(p, p.closed_at ? "closed" : state, `${when}${batch}`, body);
   };
   el.innerHTML = `<h2>Change log · ${done.length} ${REFRESH}</h2><div class="asof">${updatedAt()}</div>`
     + (done.length ? done.map(entry).join("") : `<p class="empty">Nothing decided yet.</p>`);
@@ -620,6 +639,17 @@ async function publish(button) {
     await api(`/api/proposals/${encodeURIComponent(box.dataset.id)}/publish`, {});
   } catch (e) {
     alert("Publish failed: " + e.message);
+  }
+  load();
+}
+
+async function closeProposal(button, closed) {
+  const box = button.closest(".proposal");
+  box.querySelectorAll("button").forEach(b => b.disabled = true);
+  try {
+    await api(`/api/proposals/${encodeURIComponent(box.dataset.id)}/close`, { closed });
+  } catch (e) {
+    alert("Could not update card: " + e.message);
   }
   load();
 }
@@ -716,6 +746,7 @@ function focusHash() {
   if (!target) return;
   showTab(target.closest("#tab-log") ? "log" : "main");
   target.classList.add("focus");
+  if (target.classList.contains("proposal")) target.open = true;
   if (target.classList.contains("card")) target.classList.add("open");
   target.scrollIntoView({ block: "start" });
 }

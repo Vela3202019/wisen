@@ -83,7 +83,9 @@ from wisen.jobs import LEASE, JobEngine
 from wisen.proposals import IllegalTransition, Proposals
 from wisen.store import SqliteStore
 
-T0 = datetime.now(UTC).replace(microsecond=0)
+# Keep the session and its +20 minute solved-problem commit on the same UTC
+# day, even when the suite runs just before midnight.
+T0 = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
 DAY = (T0 - timedelta(days=1)).date().isoformat()
 DAY_BEFORE = (T0 - timedelta(days=2)).date().isoformat()   # the second day the evidence must come from
 CLAUDE_MD = "# Demo\n\nA small demo app.\n"
