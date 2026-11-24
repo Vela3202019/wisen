@@ -536,13 +536,15 @@ let proposalsExpanded = (() => {
   try { return sessionStorage.getItem("wisen:proposals-expanded") === "true"; }
   catch (_) { return false; }
 })();
-function setProposalsExpanded(expanded) {
+function setProposalsExpanded(expanded, remember = true) {
   proposalsExpanded = expanded;
   document.getElementById("proposal-list").hidden = !expanded;
   const button = document.getElementById("proposals-toggle");
   button.setAttribute("aria-expanded", String(expanded));
   button.textContent = `${expanded ? "Fold all proposals" : "Show proposals"} · ${button.dataset.count}`;
-  try { sessionStorage.setItem("wisen:proposals-expanded", String(expanded)); } catch (_) {}
+  if (remember) {
+    try { sessionStorage.setItem("wisen:proposals-expanded", String(expanded)); } catch (_) {}
+  }
 }
 function rememberProposal(card) {
   proposalFolds[card.dataset.foldKey] = card.open;
@@ -764,7 +766,8 @@ function focusHash() {
   const target = location.hash && document.getElementById(location.hash.slice(1));
   if (!target) return;
   showTab(target.closest("#tab-log") ? "log" : "main");
-  if (target.closest("#approvals")) setProposalsExpanded(true);
+  // Reveal notification targets without replacing the user's saved choice.
+  if (target.closest("#approvals")) setProposalsExpanded(true, false);
   target.classList.add("focus");
   if (target.classList.contains("proposal")) target.open = true;
   if (target.classList.contains("card")) target.classList.add("open");
