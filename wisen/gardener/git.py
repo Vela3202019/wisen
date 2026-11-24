@@ -36,14 +36,15 @@ class Repo:
         return ["git", "-C", str(self.work_tree), *args]
 
     def run(self, *args: str, env: dict | None = None, input: str | None = None,
-            check: bool = True, timeout: float | None = None) -> subprocess.CompletedProcess:
+            check: bool = True, timeout: float | None = None, text: bool = True) -> subprocess.CompletedProcess:
         full_env = {k: v for k, v in os.environ.items() if k not in _SCRUB}
         full_env.update({"GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C", **(env or {})})
         # cwd at the work tree: from a subdirectory, `git apply` re-roots a patch by that prefix.
-        r = subprocess.run(self._cmd(args), capture_output=True, text=True, input=input, env=full_env,
+        r = subprocess.run(self._cmd(args), capture_output=True, text=text, input=input, env=full_env,
                            check=False, timeout=timeout, cwd=self.work_tree)
         if check and r.returncode != 0:
-            raise GitError(f"git {args[0]} failed: {r.stderr.strip()[:300]}")
+            stderr = r.stderr if text else r.stderr.decode(errors="replace")
+            raise GitError(f"git {args[0]} failed: {stderr.strip()[:300]}")
         return r
 
     def out(self, *args: str, **kwargs) -> str:

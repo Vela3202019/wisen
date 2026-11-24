@@ -6,6 +6,16 @@ All notable changes to wisen are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A replay eval protocol for Gardener rules. `wisen eval freeze` pins the case
+  and config versions; `paired` measures rule impact against a clean set;
+  `weekly` checks retention and judge drift; `field` shows the promotion
+  verdict alongside observational field evidence.
+- Blind human labeling and failure analysis through `wisen eval`:
+  `sample-replays`, `sample-turns`, `label-queue`, `label`, `calibrate`,
+  `rejudge` and `failures`. See the [replay eval protocol](docs/replay-eval.md).
+
 ## [0.3.1] - 2026-11-23
 
 ### Changed
