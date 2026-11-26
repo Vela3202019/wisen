@@ -28,7 +28,7 @@ jobs:
           mkdir _site
           cp docs/walkthrough.html _site/index.html
           cp -r docs/assets _site/assets
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v3
       - id: deployment
         uses: actions/deploy-pages@v4
