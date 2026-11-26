@@ -29,6 +29,6 @@ jobs:
           cp docs/walkthrough.html _site/index.html
           cp -r docs/assets _site/assets
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
       - id: deployment
         uses: actions/deploy-pages@v4
