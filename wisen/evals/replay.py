@@ -128,7 +128,7 @@ def run_replay(case: Case, claude_md: Path | None = None, *, config_files: dict[
                model: str | None = None, harness: str | None = None) -> ReplayResult:
     try:
         if is_local(model):
-            return _run_local(case, claude_md, config_files or {}, project_files or {}, model, harness)
+            return _run_local(case, claude_md, config_files or {}, project_files or {}, base_commit, model, harness)
         return _run_replay(case, claude_md, config_files, project_files, base_commit, model, harness)
     except (GitError, OSError, ValueError, subprocess.CalledProcessError) as exc:
         return ReplayResult("", "", error=f"replay setup failed: {type(exc).__name__}: {exc}")
@@ -140,11 +140,12 @@ def instructions(claude_md: Path | None, config_files: dict[str, str | None],
                  project_files: dict[str, str | None]) -> str:
     """The instruction files a local model gets in place of a staged Claude
     config: home CLAUDE.md, rules and skills, then the project's CLAUDE.md
-    and AGENTS.md files."""
+    and AGENTS.md files and its .claude rules and skills."""
     files = {"CLAUDE.md": claude_md.read_text()} if claude_md is not None else {}
     files.update({rel: text for rel, text in config_files.items() if text is not None})
     files.update({f"project/{rel}": text for rel, text in project_files.items()
-                  if text is not None and Path(rel).name in ("CLAUDE.md", "AGENTS.md")})
+                  if text is not None and (Path(rel).name in ("CLAUDE.md", "AGENTS.md")
+                                           or (Path(rel).parts[:1] == (".claude",) and rel.endswith(".md")))})
     return "\n\n".join(f"<instructions file=\"{rel}\">\n{text.strip()}\n</instructions>"
                        for rel, text in sorted(files.items()) if text.strip())
 
@@ -155,10 +156,24 @@ def _post_chat(url: str, payload: dict) -> dict:
     return response.json()
 
 
-def _run_local(case, claude_md, config_files, project_files, model, harness) -> ReplayResult:
+def _committed_instructions(case: Case, base_commit: str | None) -> dict[str, str | None]:
+    """The project's top-level CLAUDE.md and AGENTS.md at the replay commit:
+    what a Claude replay's worktree would hold before the variant's files."""
+    project = Path(case.project_path)
+    if not (project / ".git").exists():
+        return {}
+    repo = Repo(project)
+    sha = base_commit or commit_near(project, case.date)
+    if sha is None:
+        return {}
+    return {name: repo.read_blob(blob) for name in ("CLAUDE.md", "AGENTS.md") if (blob := repo.blob(sha, name))}
+
+
+def _run_local(case, claude_md, config_files, project_files, base_commit, model, harness) -> ReplayResult:
     if harness is not None and harness_version(model) != harness:
         return ReplayResult("", "", error="local endpoint does not match the frozen manifest")
-    system = instructions(claude_md, config_files, project_files)
+    project = {**_committed_instructions(case, base_commit), **project_files}
+    system = instructions(claude_md, config_files, project)
     messages = [*([{"role": "system", "content": system}] if system else []),
                 {"role": "user", "content": build_prompt(case)}]
     payload = {"model": model.removeprefix(LOCAL_PREFIX), "messages": messages,
