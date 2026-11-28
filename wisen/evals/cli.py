@@ -10,6 +10,8 @@ Case-bank CLI.
   python -m evals compare [--a PATH] [--b PATH]        run the suite per config, report
   python -m evals report REPORT [--evidence]           Markdown scorecard of a paired/weekly/demo report
   python -m evals demo [--model local:NAME]            the protocol on the public synthetic case bank
+  python -m evals export-sft --out DIR                 mlx-lm training data from the case bank
+  python -m evals distill-demo --out DIR               mlx-lm training data that teaches the demo rules
 """
 import argparse
 import asyncio
@@ -115,11 +117,30 @@ def _protocol_commands(sub) -> None:
     report.add_argument("--top", type=int, default=5, help="cases listed per gains and regressions")
     demo = sub.add_parser("demo", help="run the protocol on the public synthetic case bank")
     demo.add_argument("--model", help="local:NAME or a pinned Claude model (default: simulated, no model call)")
+    demo.add_argument("--proposed-model", help="the proposed arm's model, e.g. a fine-tuned local:NAME@URL "
+                      "(default: --model)")
+    demo.add_argument("--rules", choices=("proposed", "both", "current", "none"), default="proposed",
+                      help="which arms get the demo rules (default: proposed)")
     demo.add_argument("--judge-model")
     demo.add_argument("--repeats", type=int, default=3)
     demo.add_argument("--votes", type=int, default=3)
     demo.add_argument("--clean-margin", type=float, default=0.05)
     demo.add_argument("--out", type=Path, help="also write the full JSON report here")
+    sft = sub.add_parser("export-sft", help="write mlx-lm train/valid JSONL from the case bank (see docs/training.md)")
+    sft.add_argument("--out", type=Path, required=True)
+    sft.add_argument("--exclude", type=Path, action="append", default=[],
+                     help="frozen manifest whose cases stay out of training (repeatable)")
+    targets = sft.add_mutually_exclusive_group()
+    targets.add_argument("--raw", action="store_true", help="use the agent's own post-correction reply locally (default)")
+    targets.add_argument("--rewrite", action="store_true", help="send private case context and replies to the configured "
+                         "eval model for a rewritten target")
+    sft.add_argument("--include-mined", action="store_true", help="also use cases not yet confirmed")
+    sft.add_argument("--valid-fraction", type=float, default=0.1)
+    distill = sub.add_parser("distill-demo", help="write mlx-lm train/valid JSONL that teaches the demo rules")
+    distill.add_argument("--out", type=Path, required=True)
+    distill.add_argument("--per-rule", type=int, default=40, help="training requests per demo rule")
+    distill.add_argument("--clean", type=int, default=40, help="requests no rule bears on")
+    distill.add_argument("--valid-fraction", type=float, default=0.1)
     field = sub.add_parser("field", help="show replay gate and observational field evidence side by side")
     field.add_argument("proposal_id")
     sub.add_parser("record-exposure", help="read a Claude Code SessionStart payload from stdin")
@@ -222,11 +243,27 @@ async def _scorecard(args) -> str:
     from wisen.evals.demo import run_demo
     from wisen.evals.protocol import write_report
 
-    report = await run_demo(args.model, repeats=args.repeats, votes=args.votes, clean_margin=args.clean_margin,
+    report = await run_demo(args.model, proposed_model=args.proposed_model, rules_in=args.rules,
+                            repeats=args.repeats, votes=args.votes, clean_margin=args.clean_margin,
                             judge_model=args.judge_model)
     if args.out:
         write_report(args.out, report)
     return render(report)
+
+
+async def _training(args) -> dict:
+    from wisen.evals import training
+
+    if args.cmd == "distill-demo":
+        return await training.distill_demo(args.out, per_rule=args.per_rule, clean=args.clean,
+                                           valid_fraction=args.valid_fraction)
+    from wisen.evals.manifest import load_manifest
+
+    frozen = [entry.case for path in args.exclude for entry in load_manifest(path).cases]
+    return await training.export_cases(load_cases(), args.out, exclude={c.id for c in frozen},
+                                       exclude_sessions=frozenset(c.session_id for c in frozen),
+                                       ask=training.teacher() if args.rewrite else None,
+                                       include_mined=args.include_mined, valid_fraction=args.valid_fraction)
 
 
 def _read_json(path: Path):
@@ -318,6 +355,11 @@ def main() -> None:
         from wisen.evals.runner import run_suite
         report = asyncio.run(run_suite(args.a, args.b, args.k, args.limit))
         print(json.dumps(report, indent=2))
+    elif args.cmd in ("export-sft", "distill-demo"):
+        try:
+            print(json.dumps(asyncio.run(_training(args)), indent=2))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"eval: {exc}") from None
     elif args.cmd in ("report", "demo"):
         try:
             print(asyncio.run(_scorecard(args)), end="")

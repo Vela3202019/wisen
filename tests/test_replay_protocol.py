@@ -288,7 +288,7 @@ def test_normalized_miner_does_not_count_claude_tool_output_as_user_text():
     turns = _events_to_turns([
         event([{"type": "tool_result", "content": "command output\nNo, ignore this"}], 0),
         event("Run the test suite", 0.5),
-        event([{"type": "tool_result", "content": f"command output\n{miner.TOOL_REJECTION_MARKER}"}], 2),
+        event([{"type": "tool_result", "is_error": True, "content": miner.TOOL_REJECTION_MARKER}], 2),
         event([{"type": "tool_result", "content": "command output\nordinary output"},
                {"type": "text", "text": "No, use the integration suite"}], 3),
     ])

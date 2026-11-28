@@ -114,9 +114,16 @@ def local_base_url() -> str:
     return config.get("model", "local_base_url", "WISEN_LOCAL_BASE_URL", _LOCAL_BASE_URL).rstrip("/")
 
 
+def local_target(model: str) -> tuple[str, str]:
+    """(model name, base URL) of `local:NAME`, or of `local:NAME@URL` for a
+    server other than the configured one."""
+    name, sep, url = model.removeprefix(LOCAL_PREFIX).partition("@")
+    return name, url.rstrip("/") if sep else local_base_url()
+
+
 def harness_version(model: str | None = None) -> str:
     if is_local(model):
-        return f"single-turn chat completion at {local_base_url()}"
+        return f"single-turn chat completion at {local_target(model)[1]}"
     try:
         result = subprocess.run(["claude", "--version"], capture_output=True, text=True, check=True, timeout=10)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -209,9 +216,10 @@ def _run_local(case, claude_md, config_files, project_files, base_commit, model,
     system = instructions(claude_md, config_files, project)
     messages = [*([{"role": "system", "content": system}] if system else []),
                 {"role": "user", "content": build_prompt(case)}]
-    payload = {"model": model.removeprefix(LOCAL_PREFIX), "messages": messages,
+    name, base_url = local_target(model)
+    payload = {"model": name, "messages": messages,
                "max_tokens": _LOCAL_MAX_TOKENS, "temperature": _LOCAL_TEMPERATURE}
-    url = f"{local_base_url()}/chat/completions"
+    url = f"{base_url}/chat/completions"
     try:
         data = _post_chat(url, payload)
     except httpx.TimeoutException:

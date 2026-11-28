@@ -38,6 +38,8 @@ The gate requires a case-bootstrap 95% CI with a targeted lower bound above zero
 
 A `local:NAME` model replays each case as one chat completion from an OpenAI-compatible server at `WISEN_LOCAL_BASE_URL` (or `[model].local_base_url`; default `http://localhost:8080/v1`), for example `mlx_lm.server --model NAME` on Apple silicon. The instruction files (home `CLAUDE.md`, rules and skills, the project's `CLAUDE.md`/`AGENTS.md`) become the system message and the case prefix the user message; sampling uses temperature 0.7 so repeats differ. There are no tools and no worktree, so it measures the next reply, not a full agent run, and the diff is always empty. `freeze --model local:NAME` records the endpoint as the harness and replay refuses a different one. Judging still runs on the eval model.
 
+To compare a fine-tuned local model with its base model, see [training.md](training.md).
+
 ## Calibrate and analyze
 
 ```sh
