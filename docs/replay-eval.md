@@ -4,6 +4,9 @@
 
 ## Freeze and run
 
+New to replay? Use the [case selection prompt](replay-case-prompt.md) in Wisen
+chat to find a correction you can replay and grade by hand.
+
 Mine cases with `wisen eval mine`, then `wisen eval review CASE_ID --confirm` only after checking the conversation prefix, expected behavior and rubric. Reserve unseen cases before tuning rules. Start with ~40 cases across targeted failures, clean non-regressions, edge cases (boundary or too-broad rules) and adversarial cases (e.g. conflicting instructions in a benign task). Keep holdout cases out of rule design, gate decisions and judge tuning. Case banks, manifests, label databases and full reports can contain private transcript text and diffs; do not commit or share them.
 
 After approving and applying a proposal to its **branch**, write a local inventory JSON list with one entry per case:
