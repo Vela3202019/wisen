@@ -207,6 +207,9 @@ def test_freeze_and_promotion_reject_standalone_agents_file(tmp_path):
                         judge_model=frozen.judge_model)
     with pytest.raises(ValueError, match="does not load standalone AGENTS.md"):
         protocol.record_gate(store, frozen, {"manifest": frozen.digest(), "meets_rule": True})
+    with pytest.raises(Exception) as local_freeze:  # a local model reads AGENTS.md: later checks fail instead
+        freeze_proposal(store, "proposal", [], model="local:qwen", harness="local", judge_model=frozen.judge_model)
+    assert "AGENTS.md" not in str(local_freeze.value)
 
 
 def test_database_with_private_labels_is_owner_only(tmp_path):
@@ -381,6 +384,27 @@ def test_local_replay_sends_instructions_and_reads_reply(monkeypatch):
     assert "request to http://mac.local:9000/v1/chat/completions failed" in replay.run_replay(item, model="local:qwen").error
 
 
+def test_local_replay_reads_committed_project_instructions_and_skills(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    repo = Repo(project)
+    project.mkdir()
+    repo.run("init", "-q")
+    (project / "CLAUDE.md").write_text("Committed rule.")
+    repo.run("add", "CLAUDE.md")
+    repo.run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+    sent = {}
+
+    def post(url, payload):
+        sent.update(payload)
+        return {"choices": [{"message": {"content": "ok"}}]}
+    monkeypatch.setattr(replay, "_post_chat", post)
+    item = case("local", project=project).case
+    replay.run_replay(item, project_files={".claude/skills/t/SKILL.md": "Skill text."},
+                      base_commit=repo.resolve("HEAD"), model="local:qwen")
+    system = sent["messages"][0]["content"]
+    assert "Committed rule." in system and "Skill text." in system
+
+
 def test_demo_bank_and_simulated_run_are_reproducible():
     from wisen.evals import demo
 
@@ -413,6 +437,19 @@ def test_demo_replays_local_and_claude_models(tmp_path):
     assert all(b and len(b) == 40 and p != "synthetic" for p, _, b, _ in seen)
 
 
+def test_scorecard_case_rates_use_matched_pairs():
+    from wisen.evals import scorecard
+
+    outcomes = iter([{"passed": True}, {"error": "x"}, {"passed": True}, {"passed": False}])
+
+    async def run(item, variant, votes):
+        return next(outcomes)
+    report = asyncio.run(runner._paired({"eval": [(case("a").case, "cur", "new")]}, 2, 1, 0.05, run, capture=True))
+    result = report["case_results"][0]
+    assert result["difference"] == 1 and result["matched_pass_rates"] == {"current": 0.0, "proposed": 1.0}
+    assert "0% → 100%" in scorecard.render(report)
+
+
 def test_scorecard_states_the_verdict_without_private_text():
     from wisen.evals import demo, scorecard
 
@@ -424,6 +461,9 @@ def test_scorecard_states_the_verdict_without_private_text():
     for attempt in simulated["case_results"][0]["attempts"]:
         attempt["proposed"]["evidence"] = attempt["current"]["evidence"] = "private quote"
     assert "Simulated" in scorecard.render(simulated) and "private quote" not in scorecard.render(simulated)
+    simulated["case_results"][0]["attempts"][0]["current"] = {"outcome": "error", "error": "/home/me/app is not a git repo"}
+    assert "/home/me/app" not in scorecard.render(simulated)
+    assert "/home/me/app" in scorecard.render(simulated, evidence=True)
     report["meets_rule"] = None
     report["paired"]["clean"]["ci95"] = None
     assert "**Verdict: Insufficient evidence**" in scorecard.render(report)

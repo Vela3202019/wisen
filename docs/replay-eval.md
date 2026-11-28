@@ -28,7 +28,7 @@ The gate requires a case-bootstrap 95% CI with a targeted lower bound above zero
 
 ## Read the result
 
-`wisen eval report replay.json` prints one Markdown scorecard: the verdict, each gate check with its required and observed bound, a table per cohort (pass rates per arm, paired difference, 95% CI, wins/losses/ties, sign test, errors and abstentions), the largest per-case gains and regressions, and retention of earlier rules for a `weekly` report. It holds only aggregates and case IDs, so it can be shared; `--evidence` adds judge quotes, which can contain private transcript text.
+`wisen eval report replay.json` prints one Markdown scorecard: the verdict, each gate check with its required and observed bound, a table per cohort (pass rates per arm, paired difference, 95% CI, wins/losses/ties, sign test, errors and abstentions), the largest per-case gains and regressions, and retention of earlier rules for a `weekly` report. It holds only aggregates and case IDs, so it can be shared; `--evidence` adds judge quotes and replay error messages, which can contain private transcript text and local paths.
 
 ## Try it on the public demo bank
 

@@ -75,7 +75,7 @@ def _case_lines(report: dict, evidence: bool, top: int) -> list[str]:
         lines += ["", f"### {title}", ""]
         for c in picked:
             rule = f", {rule_types[c['case']]}" if c["case"] in rule_types else ""
-            rates = c["pass_rates"]
+            rates = c.get("matched_pass_rates") or c["pass_rates"]
             lines.append(f"- `{c['case']}` ({_COHORTS.get(c['cohort'], c['cohort'])}{rule}): "
                          f"{_pct(rates['current'])} → {_pct(rates['proposed'])}")
             if evidence:
@@ -140,5 +140,8 @@ def render(report: dict, *, evidence: bool = False, top: int = 5) -> str:
     errors = Counter(a[arm].get("error", "")[:80] for c in report.get("case_results", []) for a in c.get("attempts", [])
                      for arm in a if a[arm]["outcome"] == "error")
     if errors:
-        lines += ["", "## Replay errors", "", *[f"- {n}× {msg or 'unknown'}" for msg, n in errors.most_common(5)]]
+        lines += ["", "## Replay errors", ""]
+        lines += ([f"- {n}× {msg or 'unknown'}" for msg, n in errors.most_common(5)] if evidence else
+                  [(f"{sum(errors.values())} replays failed to run; `--evidence` lists the messages, "
+                   "which can name local paths.")])
     return "\n".join(lines) + "\n"
