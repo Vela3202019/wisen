@@ -6,5 +6,8 @@ search over your raw session history across all agents, and search over your
 harness configs. Ask "how was my week?" and it investigates, reflections first,
 then transcripts, then configs, before answering with dates and quotes.
 
+To turn past corrections into tasks you can try by hand, copy the
+[replay case selection prompt](replay-case-prompt.md) into chat.
+
 What the chat model receives is listed under
 [What leaves your machine](privacy.md).
