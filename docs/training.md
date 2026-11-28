@@ -13,7 +13,9 @@ reply, not a full agent run with tools ([replay-eval.md](replay-eval.md#replay-o
 ## 1. Install
 
 ```bash
-uv tool install 'mlx-lm==0.32.2'        # Apple silicon
+uv venv ~/.venvs/wisen-mlx --python 3.12   # Apple silicon
+source ~/.venvs/wisen-mlx/bin/activate
+uv pip install 'mlx-lm[train]==0.32.2'
 ```
 
 As a rough guide, a 24 GB Mac fits LoRA on 1.5–4B models comfortably, and 7–8B
@@ -62,11 +64,14 @@ about general model quality.
 
 ```bash
 export MODEL=mlx-community/Qwen2.5-Coder-3B-Instruct-4bit
-sh scripts/train_mlx.sh data/demo adapters/demo   # from the Wisen checkout
+python scripts/train_mlx.py data/demo adapters/demo   # from the Wisen checkout
 ```
 
 The script defaults to 100 iterations, batch size 1 and a 1,024-token limit.
-Set `ITERS=5` for a smoke test. `--mask-prompt` computes loss on replies only.
+Pass `--iters 5` for a smoke test. `--mask-prompt` computes loss on replies only.
+The script uses MLX's tokenizer and chat template to check both splits before
+training. If a prompt would leave no room for reply tokens, shorten that row
+or raise `--max-seq-length` (a longer window needs more memory).
 Sustained rising validation loss alongside falling training loss can indicate
 overfitting; use held-out replay to see whether behavior actually improved.
 

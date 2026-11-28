@@ -1,9 +1,11 @@
 import asyncio
 import json
-import os
-import subprocess
-from pathlib import Path
+import sys
+from types import SimpleNamespace
 
+import pytest
+
+from scripts import train_mlx
 from wisen.connectors.claude_code import TOOL_REJECTION_MARKER
 from wisen.evals import demo, replay, training
 from wisen.evals.cases import Case, ContextTurn
@@ -30,22 +32,36 @@ def test_frozen_session_stays_out_after_case_bank_changes(tmp_path):
     assert not training.trainable([live], {"old-case"}, exclude_sessions=frozenset({"frozen-session"}))
 
 
-def test_mac_training_wrapper_uses_both_splits_and_a_fresh_adapter(tmp_path):
+def test_mac_training_wrapper_uses_both_splits_and_a_fresh_adapter(tmp_path, monkeypatch):
     rows = [(str(i), training.example(str(i), "answer")) for i in range(2)]
     data = tmp_path / "data with spaces"
     ids = training.write_dataset(rows, data, valid_fraction=0.99)
     assert len(ids["train"]) == len(ids["valid"]) == 1
-    fake = tmp_path / "mlx_lm.lora"
-    fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
-    fake.chmod(0o700)
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "MODEL": "base", "ITERS": "5"}
+    def process(row):
+        offset = len(row["messages"][0]["content"].split())
+        return [0] * (offset + 2), offset
+
+    dataset = SimpleNamespace(ChatDataset=lambda rows, tokenizer, mask_prompt: SimpleNamespace(process=process))
+    monkeypatch.setitem(sys.modules, "mlx_lm.tuner.datasets", dataset)
+    monkeypatch.setitem(sys.modules, "mlx_lm.utils", SimpleNamespace(load_tokenizer=lambda name: None))
+    calls = []
+    monkeypatch.setattr(train_mlx.subprocess, "run", lambda args, **kwargs: calls.append(args))
     adapter = tmp_path / "adapter"
-    cmd = ["sh", str(Path(__file__).resolve().parents[1] / "scripts/train_mlx.sh"), str(data), str(adapter)]
-    args = subprocess.check_output(cmd, text=True, env=env).splitlines()
+    train_mlx.train(data, adapter, "base", 5, 4)
+    args, = calls
     for flag, value in (("--data", str(data)), ("--adapter-path", str(adapter)), ("--model", "base"), ("--iters", "5")):
         assert args[args.index(flag) + 1] == value
+    for split in ("train", "valid"):
+        path = data / f"{split}.jsonl"
+        original = path.read_text()
+        path.write_text(json.dumps(training.example("four token prompt here", "answer")) + "\n")
+        with pytest.raises(ValueError, match=f"{split}.jsonl:1: no reply tokens fit"):
+            train_mlx.train(data, adapter, "base", 5, 4)
+        path.write_text(original)
     adapter.mkdir()
-    assert subprocess.run(cmd, env=env, capture_output=True, check=False).returncode != 0
+    with pytest.raises(ValueError, match="new adapter directory"):
+        train_mlx.train(data, adapter, "base", 5, 4)
+    assert len(calls) == 1
 
 
 def test_export_cases_targets_splits_and_exclusions(tmp_path):
