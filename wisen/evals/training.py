@@ -24,7 +24,12 @@ from collections.abc import Awaitable, Callable, Iterable
 from hashlib import sha256
 from pathlib import Path
 
-from wisen.connectors.claude_code import _group_by_session, _parse_jsonl, _plain_text
+from wisen.connectors.claude_code import (
+    _group_by_session,
+    _parse_jsonl,
+    _plain_text,
+    _tool_rejection_text,
+)
 from wisen.evals.cases import Case
 from wisen.evals.demo import load_bank, rules
 from wisen.evals.miner import _HARNESS_RE
@@ -128,7 +133,8 @@ def _trailing_reply(case: Case) -> str:
 
 
 def reply_after(case: Case) -> str:
-    """The agent's text after the case's turn, up to the next human turn, read
+    """The agent's text after the case's turn, up to the next human turn (text
+    or a tool rejection), read
     from the source transcript; empty when the transcript is gone."""
     path = Path(case.source_path)
     try:
@@ -144,7 +150,8 @@ def reply_after(case: Case) -> str:
         if event.get("isMeta") or event.get("isSidechain") or not isinstance(msg, dict):
             continue
         text = _plain_text(msg.get("content", "")).strip()
-        if msg.get("role") == "user" and text and not _HARNESS_RE.match(text):
+        if msg.get("role") == "user" and ((text and not _HARNESS_RE.match(text))
+                                          or _tool_rejection_text(msg.get("content", ""))):
             break
         if msg.get("role") == "assistant" and text:
             parts.append(text)

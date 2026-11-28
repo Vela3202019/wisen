@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+from wisen.connectors.claude_code import TOOL_REJECTION_MARKER
 from wisen.evals import demo, replay, training
 from wisen.evals.cases import Case, ContextTurn
 
@@ -26,6 +27,8 @@ def test_export_cases_targets_splits_and_exclusions(tmp_path):
     events = [_event("user", "add requests", 0), _event("assistant", "pip install requests", 1),
               _event("user", "no, use uv", 2), _event("assistant", [{"type": "text", "text": "uv add requests"}], 3),
               _event("user", "<system-reminder>ignored</system-reminder>", 4), _event("assistant", "Done.", 5),
+              _event("user", [{"type": "tool_result", "content": TOOL_REJECTION_MARKER}], 5),
+              _event("assistant", "after a rejection", 5),
               _event("user", "thanks", 6), _event("assistant", "later turn", 7)]
     transcript.write_text("".join(json.dumps(e) + "\n" for e in events))
     clean_context = [ContextTurn(role="user", content="run the tests"), ContextTurn(role="assistant", content="All pass.")]
