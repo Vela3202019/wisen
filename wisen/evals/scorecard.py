@@ -81,7 +81,8 @@ def _case_lines(report: dict, evidence: bool, top: int) -> list[str]:
             if evidence:
                 arm = "proposed" if c["difference"] < 0 else "current"
                 quote = next((a[arm].get("evidence") for a in c.get("attempts", [])
-                              if a[arm]["outcome"] == "fail" and a[arm].get("evidence")), None)
+                              if a[arm]["outcome"] == "fail" and a[arm].get("evidence")
+                              and {o["outcome"] for o in a.values()} <= {"pass", "fail"}), None)
                 if quote:
                     lines.append(f"  - {arm} failure: “{quote.strip()[:300]}”")
     if rule_types and scored:

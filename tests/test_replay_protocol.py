@@ -390,7 +390,12 @@ def test_local_replay_reads_committed_project_instructions_and_skills(tmp_path, 
     project.mkdir()
     repo.run("init", "-q")
     (project / "CLAUDE.md").write_text("Committed rule.")
-    repo.run("add", "CLAUDE.md")
+    (project / ".claude" / "rules").mkdir(parents=True)
+    (project / "shared.md").write_text("Shared rule.")
+    (project / ".claude" / "rules" / "shared.md").symlink_to("../../shared.md")
+    (project / "src").mkdir()
+    (project / "src" / "app.md").write_text("Not instructions.")
+    repo.run("add", ".")
     repo.run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
     sent = {}
 
@@ -402,7 +407,8 @@ def test_local_replay_reads_committed_project_instructions_and_skills(tmp_path, 
     replay.run_replay(item, project_files={".claude/skills/t/SKILL.md": "Skill text."},
                       base_commit=repo.resolve("HEAD"), model="local:qwen")
     system = sent["messages"][0]["content"]
-    assert "Committed rule." in system and "Skill text." in system
+    assert "Committed rule." in system and "Skill text." in system and "Shared rule." in system
+    assert "Not instructions." not in system
 
 
 def test_demo_bank_and_simulated_run_are_reproducible():
@@ -448,6 +454,12 @@ def test_scorecard_case_rates_use_matched_pairs():
     result = report["case_results"][0]
     assert result["difference"] == 1 and result["matched_pass_rates"] == {"current": 0.0, "proposed": 1.0}
     assert "0% → 100%" in scorecard.render(report)
+    result["attempts"][0]["current"]["outcome"] = "fail"  # its pair errored, so it is not in the matched rates
+    for attempt in result["attempts"]:
+        for arm in attempt.values():
+            arm["evidence"] = "unmatched" if attempt["proposed"]["outcome"] == "error" else "matched"
+    assert "matched" in scorecard.render(report, evidence=True)
+    assert "unmatched" not in scorecard.render(report, evidence=True)
 
 
 def test_scorecard_states_the_verdict_without_private_text():
