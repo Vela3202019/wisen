@@ -407,10 +407,11 @@ def test_local_replay_reads_committed_project_instructions_and_skills(tmp_path, 
         return {"choices": [{"message": {"content": "ok"}}]}
     monkeypatch.setattr(replay, "_post_chat", post)
     item = case("local", project=project).case
-    replay.run_replay(item, project_files={".claude/skills/t/SKILL.md": "Skill text.", "CLAUDE.md": "New rule."},
+    replay.run_replay(item, project_files={".claude/skills/t/SKILL.md": "Skill text.", "CLAUDE.md": "New rule.",
+                                           ".claude/skills/t/reference.md": "Reference text."},
                       base_commit=repo.resolve("HEAD"), model="local:qwen")
     system = sent["messages"][0]["content"]
-    assert "New rule." in system and "Skill text." in system and "Shared rule." in system
+    assert all(text in system for text in ("New rule.", "Skill text.", "Reference text.", "Shared rule."))
     assert not any(text in system for text in ("Committed rule.", "Not instructions.", "Command prompt."))
 
 

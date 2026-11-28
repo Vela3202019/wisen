@@ -157,12 +157,13 @@ def _post_chat(url: str, payload: dict) -> dict:
 
 
 def _is_project_instruction(rel: str) -> bool:
-    """CLAUDE.md and AGENTS.md files, .claude rules and skills: the files
-    loaded as instructions, not command or agent prompts run on request."""
+    """CLAUDE.md and AGENTS.md files, .claude rules and skills (with their
+    reference files): the files loaded as instructions, not command or agent
+    prompts run on request."""
     parts = Path(rel).parts
     return (parts[-1:] in (("CLAUDE.md",), ("AGENTS.md",))
             or (parts[:2] == (".claude", "rules") and rel.endswith(".md"))
-            or (parts[:2] == (".claude", "skills") and parts[-1] == "SKILL.md"))
+            or (parts[:2] == (".claude", "skills") and rel.endswith(".md")))
 
 
 def _committed_instructions(case: Case, base_commit: str | None) -> dict[str, str | None]:
