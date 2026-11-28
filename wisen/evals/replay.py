@@ -195,7 +195,10 @@ def _committed_instructions(case: Case, base_commit: str | None) -> dict[str, st
             if _is_project_instruction(target) or mode == "120000":
                 continue
         if blob and mode != "160000":
-            files[rel] = repo.read_blob(blob)
+            try:
+                files[rel] = repo.read_blob(blob)
+            except UnicodeDecodeError:  # not text: Claude Code would not read it as instructions either
+                continue
     return files
 
 

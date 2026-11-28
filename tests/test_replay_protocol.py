@@ -398,6 +398,8 @@ def test_local_replay_reads_committed_project_instructions_and_skills(tmp_path, 
     (project / ".claude" / "commands").mkdir()
     (project / ".claude" / "commands" / "ship.md").write_text("Command prompt.")
     (project / "AGENTS.md").symlink_to("CLAUDE.md")
+    (project / ".claude" / "skills" / "old").mkdir(parents=True)
+    (project / ".claude" / "skills" / "old" / "notes.md").write_bytes("caf\xe9".encode("cp1252"))
     repo.run("add", ".")
     repo.run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
     sent = {}
