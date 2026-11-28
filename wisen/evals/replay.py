@@ -3,6 +3,7 @@ or, for a `local:` model, one chat completion from an OpenAI-compatible server
 (such as `mlx_lm.server`) with the instruction files as the system message."""
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -144,8 +145,7 @@ def instructions(claude_md: Path | None, config_files: dict[str, str | None],
     files = {"CLAUDE.md": claude_md.read_text()} if claude_md is not None else {}
     files.update({rel: text for rel, text in config_files.items() if text is not None})
     files.update({f"project/{rel}": text for rel, text in project_files.items()
-                  if text is not None and (Path(rel).name in ("CLAUDE.md", "AGENTS.md")
-                                           or (Path(rel).parts[:1] == (".claude",) and rel.endswith(".md")))})
+                  if text is not None and _is_project_instruction(rel)})
     return "\n\n".join(f"<instructions file=\"{rel}\">\n{text.strip()}\n</instructions>"
                        for rel, text in sorted(files.items()) if text.strip())
 
@@ -156,9 +156,14 @@ def _post_chat(url: str, payload: dict) -> dict:
     return response.json()
 
 
+def _is_project_instruction(rel: str) -> bool:
+    return Path(rel).name in ("CLAUDE.md", "AGENTS.md") or (Path(rel).parts[:1] == (".claude",) and rel.endswith(".md"))
+
+
 def _committed_instructions(case: Case, base_commit: str | None) -> dict[str, str | None]:
-    """The project's top-level CLAUDE.md and AGENTS.md at the replay commit:
-    what a Claude replay's worktree would hold before the variant's files."""
+    """The project's instruction files at the replay commit (CLAUDE.md and
+    AGENTS.md files, .claude rules and skills): what a Claude replay's worktree
+    would hold before the variant's files. A symlink reads as its target."""
     project = Path(case.project_path)
     if not (project / ".git").exists():
         return {}
@@ -166,7 +171,18 @@ def _committed_instructions(case: Case, base_commit: str | None) -> dict[str, st
     sha = base_commit or commit_near(project, case.date)
     if sha is None:
         return {}
-    return {name: repo.read_blob(blob) for name in ("CLAUDE.md", "AGENTS.md") if (blob := repo.blob(sha, name))}
+    files = {}
+    for line in repo.out("ls-tree", "-r", "-z", sha, check=False).split("\0"):
+        meta, _, rel = line.partition("\t")
+        if not rel or not _is_project_instruction(rel):
+            continue
+        mode, _, blob = meta.split(" ")
+        if mode == "120000":
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(rel), repo.read_blob(blob)))
+            blob = None if target.startswith("..") else repo.blob(sha, target)
+        if blob:
+            files[rel] = repo.read_blob(blob)
+    return files
 
 
 def _run_local(case, claude_md, config_files, project_files, base_commit, model, harness) -> ReplayResult:
