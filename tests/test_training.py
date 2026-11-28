@@ -38,6 +38,7 @@ def test_export_cases_targets_splits_and_exclusions(tmp_path):
     assert sorted(r["messages"][1]["content"] for r in rows) == ["All pass.", "uv add requests\n\nDone."]
     assert {r["messages"][0]["content"] for r in rows} == {"add requests", "run the tests"}
     assert (meta["train"], meta["valid"], meta["excluded"]) == (1, 1, 1)
+    assert {p.stat().st_mode & 0o777 for p in (tmp_path / "raw").iterdir()} == {0o600}
     assert sorted(meta["case_ids"]["train"] + meta["case_ids"]["valid"]) == ["2026-07-01-s1-2", "2026-07-01-s1-9"]
 
     seen = []

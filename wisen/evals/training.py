@@ -17,6 +17,7 @@ to hold the rules in its weights.
 """
 import asyncio
 import json
+import os
 import re
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable
@@ -86,14 +87,22 @@ def write_dataset(examples: list[tuple[str, dict]], out: Path, valid_fraction: f
     ranked = sorted(examples, key=lambda e: sha256(e[0].encode()).hexdigest())
     n_valid = max(1, round(len(ranked) * valid_fraction))
     splits = {"train": ranked[n_valid:], "valid": ranked[:n_valid]}
-    out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(mode=0o700, parents=True, exist_ok=True)
     for name, rows in splits.items():
-        (out / f"{name}.jsonl").write_text("".join(json.dumps(row) + "\n" for _, row in rows))
+        _write_private(out / f"{name}.jsonl", "".join(json.dumps(row) + "\n" for _, row in rows))
     return {name: [key for key, _ in rows] for name, rows in splits.items()}
 
 
+def _write_private(path: Path, text: str) -> None:
+    """Write `text` readable by the owner only: exports hold session excerpts."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
 def _write_meta(out: Path, meta: dict) -> dict:
-    (out / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    _write_private(out / "meta.json", json.dumps(meta, indent=2) + "\n")
     return meta
 
 
