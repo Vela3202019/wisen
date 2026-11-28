@@ -17,7 +17,11 @@ All notable changes to wisen are recorded here. The format follows
   for real with `--model`.
 - Replay on a local model: `local:NAME` sends each case to an OpenAI-compatible
   server (such as `mlx_lm.server`) at `WISEN_LOCAL_BASE_URL`, with the
-  instruction files as the system message.
+  instruction files as the system message. `local:NAME@URL` names a server per
+  model, and `wisen eval demo --proposed-model … --rules …` compares two models.
+- `wisen eval export-sft` and `wisen eval distill-demo` write mlx-lm training
+  data from the case bank or for the demo rules, keeping holdout and frozen
+  cases out; docs/training.md compares a LoRA with the same rules in the prompt.
 
 - One Show proposals / Fold all proposals button hides the entire proposal list
   by default, keeping reflections near the top. The choice persists in the

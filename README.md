@@ -130,6 +130,8 @@ at the repo root. `claude plugin validate .` checks both.
   before and after and proposes a revert if things got worse. `wisen eval demo`
   shows the scorecard on a public case bank; see
   [docs/replay-eval.md](https://github.com/Vela3202019/wisen/blob/main/docs/replay-eval.md).
+  [docs/training.md](https://github.com/Vela3202019/wisen/blob/main/docs/training.md)
+  compares a rule in the prompt with the same lesson trained into a local model.
 
 The full pipeline, with a diagram and a map of the code, is in
 [docs/how-it-works.md](https://github.com/Vela3202019/wisen/blob/main/docs/how-it-works.md).

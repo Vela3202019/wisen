@@ -1,8 +1,10 @@
 """
 `wisen eval demo`: the paired replay protocol on a public, synthetic case bank
 (`demo/cases.json`), so anyone can see and reproduce a scorecard without a
-private transcript. The current arm has no instructions; the proposed arm adds
-`demo/rules.md`. Targeted and clean cohorts feed the gate; holdout prompts
+private transcript. By default the current arm has no instructions and the
+proposed arm adds `demo/rules.md`; `proposed_model` and `rules_in` set up the
+other comparisons, such as a fine-tuned model against its base (see
+docs/training.md). Targeted and clean cohorts feed the gate; holdout prompts
 (same rules, different wording) measure transfer.
 
 Without a model the agent is simulated: no model call, made-up pass rates, the
@@ -22,6 +24,7 @@ from wisen.evals.runner import RunCase, Variant, _paired, run_case
 
 DEMO_DIR = Path(__file__).parent / "demo"
 _COHORT_KIND = {"targeted": "eval", "clean": "clean", "holdout": "holdout"}
+RULES_IN = ("proposed", "both", "current", "none")  # which arms get demo/rules.md
 # Simulated chance a replay passes, per (cohort, rules applied).
 _SIMULATED = {("targeted", False): 0.35, ("targeted", True): 0.8,
               ("holdout", False): 0.35, ("holdout", True): 0.6,
@@ -67,8 +70,15 @@ def _scratch_repo(root: Path) -> tuple[Path, str]:
     return project, sha
 
 
-async def run_demo(model: str | None = None, *, repeats: int = 3, votes: int = 3, clean_margin: float = 0.05,
-                   judge_model: str | None = None, seed: int = 0, run: RunCase | None = None) -> dict:
+async def run_demo(model: str | None = None, *, proposed_model: str | None = None, rules_in: str = "proposed",
+                   repeats: int = 3, votes: int = 3, clean_margin: float = 0.05, judge_model: str | None = None,
+                   seed: int = 0, run: RunCase | None = None) -> dict:
+    if rules_in not in RULES_IN:
+        raise ValueError(f"rules_in must be one of {', '.join(RULES_IN)}")
+    if proposed_model and model is None:
+        raise ValueError("a proposed model needs a current model (--model)")
+    models = (model, proposed_model or model)
+    ruled = tuple(rules_in in (arm, "both") for arm in ("current", "proposed"))
     bank = load_bank()
     if model is None:
         run = run or simulated(seed)
@@ -81,16 +91,18 @@ async def run_demo(model: str | None = None, *, repeats: int = 3, votes: int = 3
             return await run_case(case, variant, k, judge_model)
     with tempfile.TemporaryDirectory() as tmp:
         base_commit = None
-        if model is not None and not is_local(model):
+        if any(m is not None and not is_local(m) for m in models):
             project, base_commit = _scratch_repo(Path(tmp))
             bank = [(cohort, rule, case.model_copy(update={"project_path": str(project)}))
                     for cohort, rule, case in bank]
-        arms = [Variant(config_files=files, model=model, base_commit=base_commit, capture=True)
-                for files in ({}, {"CLAUDE.md": rules()})]
+        arms = [Variant(config_files={"CLAUDE.md": rules()} if rule else {}, model=m, base_commit=base_commit,
+                        capture=True) for m, rule in zip(models, ruled)]
         runs: dict = {}
         for cohort, _, case in bank:
             runs.setdefault(_COHORT_KIND[cohort], []).append((case, *arms))
         report = await _paired(runs, repeats, votes, clean_margin, run, capture=True)
-    return {**report, "proposal_id": "demo-rules", "demo": True, "simulated": model is None,
+    label = [f"{m or 'simulated'}{' + rules' if rule else ''}" for m, rule in zip(models, ruled)]
+    return {**report, "proposal_id": "demo-rules" if (proposed_model, rules_in) == (None, "proposed") else "demo",
+            "demo": True, "simulated": model is None, "arms": dict(zip(("current", "proposed"), label)),
             "model": model or "simulated", "judge_model": judge_model if model else "simulated",
             "rule_types": {case.id: rule for _, rule, case in bank}}

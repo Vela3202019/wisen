@@ -121,7 +121,9 @@ def render(report: dict, *, evidence: bool = False, top: int = 5) -> str:
               "Hold": "; ".join(failed) + "." if failed else "the gate rule was not met.",
               "Insufficient evidence": "no scored pairs in a gate cohort."}[decision]
     lines += [f"**Verdict: {decision}** ({reason})", ""]
-    meta = [("Agent model", report.get("model")), ("Judge model", report.get("judge_model")),
+    arms = report.get("arms")
+    meta = [("Arms", f"{arms['current']} (current) vs {arms['proposed']} (proposed)" if arms else None),
+            ("Agent model", None if arms else report.get("model")), ("Judge model", report.get("judge_model")),
             ("Replays", (f"{report['replays']} ({report['agent_repeats']} per arm per case, "
                         f"{report['judge_votes']} judge votes each)")),
             ("Tokens", f"{report.get('tokens', 0):,}" + (" (lower bound)" if report.get("tokens_unmeasured") else "")),
