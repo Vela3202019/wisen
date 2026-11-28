@@ -8,6 +8,8 @@ Case-bank CLI.
   python -m evals metrics [--since DATE]               Tier-1 outcome metrics (JSON)
   python -m evals replay <id> [--claude-md PATH]       replay one case, print verdict
   python -m evals compare [--a PATH] [--b PATH]        run the suite per config, report
+  python -m evals report REPORT [--evidence]           Markdown scorecard of a paired/weekly/demo report
+  python -m evals demo [--model local:NAME]            the protocol on the public synthetic case bank
 """
 import argparse
 import asyncio
@@ -87,8 +89,8 @@ def _protocol_commands(sub) -> None:
     freeze.add_argument("proposal_id")
     freeze.add_argument("inventory", type=Path)
     freeze.add_argument("--out", type=Path, required=True)
-    freeze.add_argument("--model", required=True)
-    freeze.add_argument("--harness", help="Claude Code version (default: check the installed binary)")
+    freeze.add_argument("--model", required=True, help="pinned Claude model, or local:NAME for a local server")
+    freeze.add_argument("--harness", help="Claude Code version, or the local endpoint (default: detect)")
     freeze.add_argument("--judge-model")
     freeze.add_argument("--config", type=Path, help="JSON mapping of shared frozen home instruction files")
     for name in ("paired", "weekly"):
@@ -107,6 +109,17 @@ def _protocol_commands(sub) -> None:
             run.add_argument("--dataset", help="labeled replay dataset for judge drift")
             run.add_argument("--rater", default="owner")
             run.add_argument("--baseline-version", help="judge version to compare on the same human labels")
+    report = sub.add_parser("report", help="print a Markdown scorecard of a paired, weekly or demo report")
+    report.add_argument("report", type=Path)
+    report.add_argument("--evidence", action="store_true", help="add judge quotes (may contain private text)")
+    report.add_argument("--top", type=int, default=5, help="cases listed per gains and regressions")
+    demo = sub.add_parser("demo", help="run the protocol on the public synthetic case bank")
+    demo.add_argument("--model", help="local:NAME or a pinned Claude model (default: simulated, no model call)")
+    demo.add_argument("--judge-model")
+    demo.add_argument("--repeats", type=int, default=3)
+    demo.add_argument("--votes", type=int, default=3)
+    demo.add_argument("--clean-margin", type=float, default=0.05)
+    demo.add_argument("--out", type=Path, help="also write the full JSON report here")
     field = sub.add_parser("field", help="show replay gate and observational field evidence side by side")
     field.add_argument("proposal_id")
     sub.add_parser("record-exposure", help="read a Claude Code SessionStart payload from stdin")
@@ -176,7 +189,7 @@ async def _protocol(args) -> dict:
         return evidence(store, args.proposal_id)
     if args.cmd == "freeze":
         manifest = freeze_proposal(store, args.proposal_id, _read_json(args.inventory), model=args.model,
-                                   harness=args.harness or harness_version(), judge_model=args.judge_model or eval_model(),
+                                   harness=args.harness or harness_version(args.model), judge_model=args.judge_model or eval_model(),
                                    config=_read_json(args.config) if args.config else None)
         save_manifest(args.out, manifest)
         return {"manifest": manifest.digest(), "path": str(args.out)}
@@ -199,6 +212,21 @@ async def _protocol(args) -> dict:
     if args.cmd == "weekly":
         result["evidence"] = evidence(store, manifest.proposal_id)
     return result
+
+
+async def _scorecard(args) -> str:
+    from wisen.evals.scorecard import render
+
+    if args.cmd == "report":
+        return render(_read_json(args.report), evidence=args.evidence, top=args.top)
+    from wisen.evals.demo import run_demo
+    from wisen.evals.protocol import write_report
+
+    report = await run_demo(args.model, repeats=args.repeats, votes=args.votes, clean_margin=args.clean_margin,
+                            judge_model=args.judge_model)
+    if args.out:
+        write_report(args.out, report)
+    return render(report)
 
 
 def _read_json(path: Path):
@@ -290,6 +318,11 @@ def main() -> None:
         from wisen.evals.runner import run_suite
         report = asyncio.run(run_suite(args.a, args.b, args.k, args.limit))
         print(json.dumps(report, indent=2))
+    elif args.cmd in ("report", "demo"):
+        try:
+            print(asyncio.run(_scorecard(args)), end="")
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"eval: {exc}") from None
     else:
         handler = _protocol if args.cmd in ("freeze", "paired", "weekly", "field", "record-exposure") else _labels
         try:

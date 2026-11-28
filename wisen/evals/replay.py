@@ -1,4 +1,6 @@
-"""Headless replay in a detached worktree and a fresh Claude config directory."""
+"""Headless replay in a detached worktree and a fresh Claude config directory,
+or, for a `local:` model, one chat completion from an OpenAI-compatible server
+(such as `mlx_lm.server`) with the instruction files as the system message."""
 import json
 import os
 import re
@@ -8,6 +10,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
+
+from wisen import config
 from wisen.evals.cases import Case
 from wisen.gardener.git import GitError, Repo
 
@@ -15,6 +20,11 @@ _CLAUDE_HOME = Path.home() / ".claude"
 _ALLOWED_TOOLS = "Read,Grep,Glob,Edit,Write"
 _MAX_TURNS = 8
 _TIMEOUT_S = 300
+LOCAL_PREFIX = "local:"
+_LOCAL_BASE_URL = "http://localhost:8080/v1"
+_LOCAL_MAX_TOKENS = 1024
+# Above zero so repeats sample different replies instead of one greedy answer.
+_LOCAL_TEMPERATURE = 0.7
 
 
 @dataclass
@@ -95,7 +105,17 @@ def _git(project: Path, *args: str) -> str:
     return Repo(project).out(*args)
 
 
-def harness_version() -> str:
+def is_local(model: str | None) -> bool:
+    return bool(model) and model.startswith(LOCAL_PREFIX)
+
+
+def local_base_url() -> str:
+    return config.get("model", "local_base_url", "WISEN_LOCAL_BASE_URL", _LOCAL_BASE_URL).rstrip("/")
+
+
+def harness_version(model: str | None = None) -> str:
+    if is_local(model):
+        return f"single-turn chat completion at {local_base_url()}"
     try:
         result = subprocess.run(["claude", "--version"], capture_output=True, text=True, check=True, timeout=10)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -107,11 +127,58 @@ def run_replay(case: Case, claude_md: Path | None = None, *, config_files: dict[
                project_files: dict[str, str | None] | None = None, base_commit: str | None = None,
                model: str | None = None, harness: str | None = None) -> ReplayResult:
     try:
+        if is_local(model):
+            return _run_local(case, claude_md, config_files or {}, project_files or {}, model, harness)
         return _run_replay(case, claude_md, config_files, project_files, base_commit, model, harness)
     except (GitError, OSError, ValueError, subprocess.CalledProcessError) as exc:
         return ReplayResult("", "", error=f"replay setup failed: {type(exc).__name__}: {exc}")
     except subprocess.TimeoutExpired:
         return ReplayResult("", "", error="replay setup timed out")
+
+
+def instructions(claude_md: Path | None, config_files: dict[str, str | None],
+                 project_files: dict[str, str | None]) -> str:
+    """The instruction files a local model gets in place of a staged Claude
+    config: home CLAUDE.md, rules and skills, then the project's CLAUDE.md
+    and AGENTS.md files."""
+    files = {"CLAUDE.md": claude_md.read_text()} if claude_md is not None else {}
+    files.update({rel: text for rel, text in config_files.items() if text is not None})
+    files.update({f"project/{rel}": text for rel, text in project_files.items()
+                  if text is not None and Path(rel).name in ("CLAUDE.md", "AGENTS.md")})
+    return "\n\n".join(f"<instructions file=\"{rel}\">\n{text.strip()}\n</instructions>"
+                       for rel, text in sorted(files.items()) if text.strip())
+
+
+def _post_chat(url: str, payload: dict) -> dict:
+    response = httpx.post(url, json=payload, timeout=_TIMEOUT_S)
+    response.raise_for_status()
+    return response.json()
+
+
+def _run_local(case, claude_md, config_files, project_files, model, harness) -> ReplayResult:
+    if harness is not None and harness_version(model) != harness:
+        return ReplayResult("", "", error="local endpoint does not match the frozen manifest")
+    system = instructions(claude_md, config_files, project_files)
+    messages = [*([{"role": "system", "content": system}] if system else []),
+                {"role": "user", "content": build_prompt(case)}]
+    payload = {"model": model.removeprefix(LOCAL_PREFIX), "messages": messages,
+               "max_tokens": _LOCAL_MAX_TOKENS, "temperature": _LOCAL_TEMPERATURE}
+    url = f"{local_base_url()}/chat/completions"
+    try:
+        data = _post_chat(url, payload)
+    except httpx.TimeoutException:
+        return ReplayResult("", "", error=f"local model timed out after {_TIMEOUT_S}s")
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        return ReplayResult("", "", error=f"local model request to {url} failed: {type(exc).__name__}: {exc}")
+    try:
+        text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return ReplayResult("", "", error="local model returned no message")
+    if not isinstance(text, str) or not text.strip():
+        return ReplayResult("", "", error="local model returned an empty message")
+    usage = data.get("usage") or {}
+    return ReplayResult(final_text=text, diff="",
+                        tokens=usage.get("total_tokens") or _tokens(usage), cost_usd=None)
 
 
 def _run_replay(case, claude_md, config_files, project_files, base_commit, model, harness) -> ReplayResult:

@@ -26,6 +26,18 @@ Freeze reads the old and new proposal blobs from local Git, records the output o
 
 The gate requires a case-bootstrap 95% CI with a targeted lower bound above zero and a clean lower bound at or above −5 percentage points (set beforehand with `--clean-margin`). It is inconclusive with no scored pairs in either primary cohort. Error or abstention in either primary cohort blocks promotion; both arm outcomes and matched scored counts remain visible. Sign tests compare the direction of the per-case differences; edge and adversarial results are diagnostic, not silently pooled with primary cohorts. Report sample sizes and inspect representative failures before making a decision.
 
+## Read the result
+
+`wisen eval report replay.json` prints one Markdown scorecard: the verdict, each gate check with its required and observed bound, a table per cohort (pass rates per arm, paired difference, 95% CI, wins/losses/ties, sign test, errors and abstentions), the largest per-case gains and regressions, and retention of earlier rules for a `weekly` report. It holds only aggregates and case IDs, so it can be shared; `--evidence` adds judge quotes, which can contain private transcript text.
+
+## Try it on the public demo bank
+
+`wisen eval demo` runs the same paired protocol on a synthetic, committed case bank (`wisen/evals/demo/`): 12 targeted cases for six rules in `rules.md`, 6 holdout cases that word the same rules differently (transfer), and 8 clean cases the rules must not break. The current arm has no instructions; the proposed arm adds the rules. Without `--model` the agent is simulated (no model call, made-up pass rates, real statistics). With `--model local:NAME` or a pinned Claude model it replays for real and judges on the eval model, so the scorecard is reproducible by anyone. `--out demo.json` keeps the full report for `wisen eval report`.
+
+## Replay on a local model
+
+A `local:NAME` model replays each case as one chat completion from an OpenAI-compatible server at `WISEN_LOCAL_BASE_URL` (or `[model].local_base_url`; default `http://localhost:8080/v1`), for example `mlx_lm.server --model NAME` on Apple silicon. The instruction files (home `CLAUDE.md`, rules and skills, the project's `CLAUDE.md`/`AGENTS.md`) become the system message and the case prefix the user message; sampling uses temperature 0.7 so repeats differ. There are no tools and no worktree, so it measures the next reply, not a full agent run, and the diff is always empty. `freeze --model local:NAME` records the endpoint as the harness and replay refuses a different one. Judging still runs on the eval model.
+
 ## Calibrate and analyze
 
 ```sh

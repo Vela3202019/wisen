@@ -348,3 +348,82 @@ def test_retention_applies_all_merged_project_paths_and_home_changes(tmp_path):
     asyncio.run(protocol.retention(store, [home, first], latest, k=1, run=backend))
     assert ({"CLAUDE.md": "earlier home rule", "rules/new.md": "latest rule"},
             {"CLAUDE.md": "earliest project rule"}) in seen
+
+
+def test_local_replay_sends_instructions_and_reads_reply(monkeypatch):
+    sent = {}
+
+    def post(url, payload):
+        sent.update(url=url, payload=payload)
+        return {"choices": [{"message": {"content": "uv add requests"}}], "usage": {"total_tokens": 42}}
+
+    monkeypatch.setenv("WISEN_LOCAL_BASE_URL", "http://mac.local:9000/v1/")
+    monkeypatch.setattr(replay, "_post_chat", post)
+    item = case("local").case
+    harness = replay.harness_version("local:qwen")
+    result = replay.run_replay(item, config_files={"CLAUDE.md": "Use uv.", "rules/gone.md": None},
+                               project_files={"CLAUDE.md": "Project rule.", "src/app.py": "code"},
+                               model="local:qwen", harness=harness)
+    assert (result.final_text, result.diff, result.tokens, result.error) == ("uv add requests", "", 42, "")
+    assert sent["url"] == "http://mac.local:9000/v1/chat/completions"
+    system, user = sent["payload"]["messages"]
+    assert sent["payload"]["model"] == "qwen" and sent["payload"]["temperature"] > 0
+    assert "Use uv." in system["content"] and "Project rule." in system["content"]
+    assert "code" not in system["content"] and "gone" not in system["content"]
+    assert user == {"role": "user", "content": replay.build_prompt(item)}
+    assert "does not match" in replay.run_replay(item, model="local:qwen", harness="1.0").error
+    monkeypatch.setattr(replay, "_post_chat", lambda *_: {"choices": []})
+    assert replay.run_replay(item, model="local:qwen").error == "local model returned no message"
+
+    def down(*_):
+        raise replay.httpx.ConnectError("refused")
+    monkeypatch.setattr(replay, "_post_chat", down)
+    assert "request to http://mac.local:9000/v1/chat/completions failed" in replay.run_replay(item, model="local:qwen").error
+
+
+def test_demo_bank_and_simulated_run_are_reproducible():
+    from wisen.evals import demo
+
+    bank = demo.load_bank()
+    assert len({c.id for _, _, c in bank}) == len(bank)
+    assert {cohort for cohort, _, _ in bank} == {"targeted", "clean", "holdout"}
+    assert all(c.behavior_check.endswith("?") for _, _, c in bank)
+    first, second = (asyncio.run(demo.run_demo()) for _ in range(2))
+    assert first["paired"] == second["paired"] and first["simulated"]
+    assert first["cases"] == {"eval": 12, "holdout": 6, "clean": 8}
+    assert first["replays"] == len(bank) * 2 * 3
+
+
+def test_demo_replays_local_and_claude_models(tmp_path):
+    from wisen.evals import demo
+
+    seen = []
+
+    async def run(item, variant, votes):
+        seen.append((item.project_path, variant.model, variant.base_commit, bool(variant.config_files)))
+        if variant.base_commit:
+            assert (Path(item.project_path) / ".git").exists()
+        return {"passed": bool(variant.config_files) or item.kind == "clean"}
+
+    report = asyncio.run(demo.run_demo("local:qwen", repeats=1, run=run))
+    assert {(p, m, b) for p, m, b, _ in seen} == {("synthetic", "local:qwen", None)}
+    assert report["meets_rule"] is True and not report["simulated"]
+    seen.clear()
+    asyncio.run(demo.run_demo("claude-sonnet-4-6", repeats=1, run=run))
+    assert all(b and len(b) == 40 and p != "synthetic" for p, _, b, _ in seen)
+
+
+def test_scorecard_states_the_verdict_without_private_text():
+    from wisen.evals import demo, scorecard
+
+    frozen = manifest(case("regression", "clean"), case("target"))
+    report = asyncio.run(runner.run_manifest(frozen, run=fake_run))
+    text = scorecard.render(report)
+    assert "**Verdict: Promote**" in text and "| Targeted (gate) | 1 | 0% | 100% | +100.0 pp |" in text
+    simulated = asyncio.run(demo.run_demo())
+    for attempt in simulated["case_results"][0]["attempts"]:
+        attempt["proposed"]["evidence"] = attempt["current"]["evidence"] = "private quote"
+    assert "Simulated" in scorecard.render(simulated) and "private quote" not in scorecard.render(simulated)
+    report["meets_rule"] = None
+    report["paired"]["clean"]["ci95"] = None
+    assert "**Verdict: Insufficient evidence**" in scorecard.render(report)

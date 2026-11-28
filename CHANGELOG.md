@@ -8,6 +8,17 @@ All notable changes to wisen are recorded here. The format follows
 
 ### Added
 
+- `wisen eval report` prints a shareable Markdown scorecard of a `paired`,
+  `weekly` or `demo` report: the verdict, each gate check, per-cohort paired
+  differences with 95% CIs, the largest per-case gains and regressions, and
+  retention of earlier rules.
+- `wisen eval demo` runs the paired protocol on a public, synthetic case bank
+  (targeted, holdout and clean cohorts for six rules), simulated by default or
+  for real with `--model`.
+- Replay on a local model: `local:NAME` sends each case to an OpenAI-compatible
+  server (such as `mlx_lm.server`) at `WISEN_LOCAL_BASE_URL`, with the
+  instruction files as the system message.
+
 - One Show proposals / Fold all proposals button hides the entire proposal list
   by default, keeping reflections near the top. The choice persists in the
   current tab; proposal notification links still open the right card.
