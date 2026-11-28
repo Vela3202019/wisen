@@ -157,13 +157,20 @@ def _post_chat(url: str, payload: dict) -> dict:
 
 
 def _is_project_instruction(rel: str) -> bool:
-    return Path(rel).name in ("CLAUDE.md", "AGENTS.md") or (Path(rel).parts[:1] == (".claude",) and rel.endswith(".md"))
+    """CLAUDE.md and AGENTS.md files, .claude rules and skills: the files
+    loaded as instructions, not command or agent prompts run on request."""
+    parts = Path(rel).parts
+    return (parts[-1:] in (("CLAUDE.md",), ("AGENTS.md",))
+            or (parts[:2] == (".claude", "rules") and rel.endswith(".md"))
+            or (parts[:2] == (".claude", "skills") and parts[-1] == "SKILL.md"))
 
 
 def _committed_instructions(case: Case, base_commit: str | None) -> dict[str, str | None]:
     """The project's instruction files at the replay commit (CLAUDE.md and
     AGENTS.md files, .claude rules and skills): what a Claude replay's worktree
-    would hold before the variant's files. A symlink reads as its target."""
+    would hold before the variant's files. A link to a regular file outside
+    the instruction set reads as that file; a link to an instruction file is
+    left to that file's own entry, which a variant can replace."""
     project = Path(case.project_path)
     if not (project / ".git").exists():
         return {}
@@ -171,16 +178,22 @@ def _committed_instructions(case: Case, base_commit: str | None) -> dict[str, st
     sha = base_commit or commit_near(project, case.date)
     if sha is None:
         return {}
-    files = {}
+    tree = {}
     for line in repo.out("ls-tree", "-r", "-z", sha, check=False).split("\0"):
         meta, _, rel = line.partition("\t")
-        if not rel or not _is_project_instruction(rel):
+        if rel:
+            mode, _, blob = meta.split(" ")
+            tree[rel] = (mode, blob)
+    files = {}
+    for rel, (mode, blob) in tree.items():
+        if not _is_project_instruction(rel):
             continue
-        mode, _, blob = meta.split(" ")
         if mode == "120000":
             target = posixpath.normpath(posixpath.join(posixpath.dirname(rel), repo.read_blob(blob)))
-            blob = None if target.startswith("..") else repo.blob(sha, target)
-        if blob:
+            mode, blob = tree.get(target, ("", None))
+            if _is_project_instruction(target) or mode == "120000":
+                continue
+        if blob and mode != "160000":
             files[rel] = repo.read_blob(blob)
     return files
 

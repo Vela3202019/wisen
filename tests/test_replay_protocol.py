@@ -395,6 +395,9 @@ def test_local_replay_reads_committed_project_instructions_and_skills(tmp_path, 
     (project / ".claude" / "rules" / "shared.md").symlink_to("../../shared.md")
     (project / "src").mkdir()
     (project / "src" / "app.md").write_text("Not instructions.")
+    (project / ".claude" / "commands").mkdir()
+    (project / ".claude" / "commands" / "ship.md").write_text("Command prompt.")
+    (project / "AGENTS.md").symlink_to("CLAUDE.md")
     repo.run("add", ".")
     repo.run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
     sent = {}
@@ -404,11 +407,11 @@ def test_local_replay_reads_committed_project_instructions_and_skills(tmp_path, 
         return {"choices": [{"message": {"content": "ok"}}]}
     monkeypatch.setattr(replay, "_post_chat", post)
     item = case("local", project=project).case
-    replay.run_replay(item, project_files={".claude/skills/t/SKILL.md": "Skill text."},
+    replay.run_replay(item, project_files={".claude/skills/t/SKILL.md": "Skill text.", "CLAUDE.md": "New rule."},
                       base_commit=repo.resolve("HEAD"), model="local:qwen")
     system = sent["messages"][0]["content"]
-    assert "Committed rule." in system and "Skill text." in system and "Shared rule." in system
-    assert "Not instructions." not in system
+    assert "New rule." in system and "Skill text." in system and "Shared rule." in system
+    assert not any(text in system for text in ("Committed rule.", "Not instructions.", "Command prompt."))
 
 
 def test_demo_bank_and_simulated_run_are_reproducible():
