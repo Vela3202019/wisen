@@ -109,8 +109,12 @@ def _write_meta(out: Path, meta: dict) -> dict:
 # ── From the case bank ──────────────────────────────────────────────────────
 
 def trainable(cases: Iterable[Case], exclude: set[str], include_mined: bool = False) -> list[Case]:
-    return [c for c in cases if c.split == "eval" and c.id not in exclude and c.status != "rejected"
-            and (include_mined or c.status == "confirmed")]
+    """Confirmed eval-split cases outside `exclude`. A whole session goes when
+    any of its cases is excluded: a later case's context holds the earlier ones."""
+    cases = list(cases)
+    held = {c.session_id for c in cases if c.id in exclude}
+    return [c for c in cases if c.split == "eval" and c.session_id not in held and c.id not in exclude
+            and c.status != "rejected" and (include_mined or c.status == "confirmed")]
 
 
 def _trailing_reply(case: Case) -> str:

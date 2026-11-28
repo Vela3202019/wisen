@@ -9,8 +9,8 @@ def _event(role, content, ts):
     return {"sessionId": "s1", "timestamp": f"2026-07-01T10:00:0{ts}", "message": {"role": role, "content": content}}
 
 
-def _case(case_id, transcript, *, split="eval", status="confirmed", kind="correction", context=None):
-    return Case(id=case_id, date="2026-07-01", session_id="s1", source_path=str(transcript), project_path="/p",
+def _case(case_id, transcript, *, split="eval", status="confirmed", kind="correction", context=None, session="s1"):
+    return Case(id=case_id, date="2026-07-01", session_id=session, source_path=str(transcript), project_path="/p",
                 detector=None if kind == "clean" else "explicit-correction",
                 context=context or [ContextTurn(role="user", content="add requests"),
                                     ContextTurn(role="assistant", content="pip install requests")],
@@ -31,7 +31,8 @@ def test_export_cases_targets_splits_and_exclusions(tmp_path):
     clean_context = [ContextTurn(role="user", content="run the tests"), ContextTurn(role="assistant", content="All pass.")]
     cases = [_case("2026-07-01-s1-2", transcript), _case("2026-07-01-s1-9", transcript, kind="clean",
                                                           context=clean_context),
-             _case("held", transcript, split="holdout"), _case("frozen", transcript),
+             _case("held", transcript, split="holdout"), _case("frozen", transcript, session="s2"),
+             _case("same-session-as-frozen", transcript, session="s2"),
              _case("rejected", transcript, status="rejected"), _case("unreviewed", transcript, status="mined")]
     meta = asyncio.run(training.export_cases(cases, tmp_path / "raw", exclude={"frozen"}))
     rows = _rows(tmp_path / "raw" / "train.jsonl") + _rows(tmp_path / "raw" / "valid.jsonl")
