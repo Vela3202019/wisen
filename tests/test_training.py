@@ -26,7 +26,10 @@ def test_export_cases_targets_splits_and_exclusions(tmp_path):
     transcript = tmp_path / "s1.jsonl"
     events = [_event("user", "add requests", 0), _event("assistant", "pip install requests", 1),
               _event("user", "no, use uv", 2), _event("assistant", [{"type": "text", "text": "uv add requests"}], 3),
-              _event("user", "<system-reminder>ignored</system-reminder>", 4), _event("assistant", "Done.", 5),
+              _event("user", "<system-reminder>ignored</system-reminder>", 4),
+              _event("user", [{"type": "tool_result", "is_error": False, "content": TOOL_REJECTION_MARKER}], 4),
+              _event("user", [{"type": "tool_result", "content": f"example: {TOOL_REJECTION_MARKER}"}], 4),
+              _event("assistant", "Done.", 5),
               _event("user", [{"type": "tool_result", "content": TOOL_REJECTION_MARKER}], 5),
               _event("assistant", "after a rejection", 5),
               _event("user", "thanks", 6), _event("assistant", "later turn", 7)]

@@ -133,7 +133,10 @@ def _tool_rejection_text(content) -> str:
         inner = b.get("content", "")
         if isinstance(inner, list):
             inner = _plain_text(inner)
-        if isinstance(inner, str) and TOOL_REJECTION_MARKER in inner:
+        if not isinstance(inner, str) or b.get("is_error") is False:
+            continue
+        if (b.get("is_error") is True and TOOL_REJECTION_MARKER in inner
+                or "is_error" not in b and inner.startswith(TOOL_REJECTION_MARKER)):
             return inner
     return ""
 
