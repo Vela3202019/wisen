@@ -141,6 +141,7 @@ async def _paired(runs: dict, k: int, votes: int, margin: float, run: RunCase, *
         for case, current, proposed in cases:
             case_outcomes = {arm: totals[arm].fromkeys(totals[arm], 0) for arm in arms}
             case_deltas = []
+            matched = dict.fromkeys(arms, 0)
             attempts = []
             for repeat in range(k):
                 results = {}
@@ -158,6 +159,8 @@ async def _paired(runs: dict, k: int, votes: int, margin: float, run: RunCase, *
                 a, b = (results[arm]["outcome"] for arm in arms)
                 if {a, b} <= {"pass", "fail"}:
                     case_deltas.append(int(b == "pass") - int(a == "pass"))
+                    matched["current"] += a == "pass"
+                    matched["proposed"] += b == "pass"
                 if capture:
                     attempts.append(results)
             delta = mean(case_deltas) if case_deltas else None
@@ -165,7 +168,9 @@ async def _paired(runs: dict, k: int, votes: int, margin: float, run: RunCase, *
                 deltas.append(delta)
             case_result = {"case": case.id, "cohort": kind, "outcomes": case_outcomes,
                            "pass_rates": {arm: case_outcomes[arm]["pass"] / k for arm in arms},
-                           "matched_scored": len(case_deltas), "difference": delta}
+                           "matched_scored": len(case_deltas), "difference": delta,
+                           "matched_pass_rates": ({arm: matched[arm] / len(case_deltas) for arm in arms}
+                                                  if case_deltas else None)}
             if capture:
                 case_result["attempts"] = attempts
             report["case_results"].append(case_result)

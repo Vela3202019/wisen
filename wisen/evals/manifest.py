@@ -12,10 +12,11 @@ from wisen.evals.cases import Case
 Files = dict[str, str | None]
 
 
-def require_claude_target(path: str, *, home: bool) -> None:
+def require_claude_target(path: str, *, home: bool, local: bool = False) -> None:
+    """`local`: a local model reads AGENTS.md too (see replay.instructions)."""
     if home and not path.startswith(".claude/"):
         raise ValueError("Claude replay supports home proposals under .claude only")
-    if Path(path).name == "AGENTS.md":
+    if Path(path).name == "AGENTS.md" and not local:
         raise ValueError("Claude replay does not load standalone AGENTS.md targets")
 
 
@@ -105,7 +106,7 @@ def freeze_proposal(store, proposal_id: str, inventory: list[dict], *, model: st
         raise ValueError("apply the proposal before freezing its Git artifacts")
     repo = Repo(Path(row["work_tree"]), Path(row["git_dir"]) if row["git_dir"] else None)
     path = row["path"]
-    require_claude_target(path, home=bool(row["git_dir"]))
+    require_claude_target(path, home=bool(row["git_dir"]), local=model.startswith("local:"))
     old_blob = repo.blob(row["base_commit"], path)
     new_blob = row["new_blob"]
     cases = {case.id: case for case in load_cases()}

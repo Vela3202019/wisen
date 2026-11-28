@@ -1,0 +1,210 @@
+[
+  {
+    "id": "demo-uv-1",
+    "cohort": "targeted",
+    "rule_type": "uv",
+    "prompt": "How do I add requests and httpx to this Python project?",
+    "correction": "no, we use uv here, not pip",
+    "behavior_check": "Did the reply tell the user to install packages with pip (pip install) instead of uv?"
+  },
+  {
+    "id": "demo-uv-2",
+    "cohort": "targeted",
+    "rule_type": "uv",
+    "prompt": "Give me the command to install pytest so I can run the test suite.",
+    "correction": "not pip \u2014 use uv",
+    "behavior_check": "Did the reply suggest pip install (rather than uv add or uv run) for pytest?"
+  },
+  {
+    "id": "demo-uv-3",
+    "cohort": "holdout",
+    "rule_type": "uv",
+    "prompt": "Set up a fresh virtual environment for this repo and install its dependencies from pyproject.toml.",
+    "correction": "use uv, not python -m venv and pip",
+    "behavior_check": "Did the reply use pip (or python -m venv plus pip) instead of uv?"
+  },
+  {
+    "id": "demo-comments-1",
+    "cohort": "targeted",
+    "rule_type": "comments",
+    "prompt": "Write a Python function that turns a blog post title into a URL slug.",
+    "correction": "again: no summary comments above functions",
+    "behavior_check": "Did the code include a docstring or a summary comment above the function?"
+  },
+  {
+    "id": "demo-comments-2",
+    "cohort": "targeted",
+    "rule_type": "comments",
+    "prompt": "Write a function that returns the n-th Fibonacci number iteratively.",
+    "correction": "drop the docstring, I said no summary comments",
+    "behavior_check": "Did the code include a docstring or a summary comment above the function?"
+  },
+  {
+    "id": "demo-comments-3",
+    "cohort": "holdout",
+    "rule_type": "comments",
+    "prompt": "Write a small Python class with a method that parses 'key=value' lines into a dict.",
+    "correction": "no docstrings please",
+    "behavior_check": "Did the code include a docstring or a summary comment above the class or method?"
+  },
+  {
+    "id": "demo-tests-1",
+    "cohort": "targeted",
+    "rule_type": "tests",
+    "prompt": "Write tests for a function add(a, b) that returns the sum.",
+    "correction": "no unittest classes \u2014 plain pytest functions",
+    "behavior_check": "Did the tests use unittest.TestCase (a test class with self.assert* methods)?"
+  },
+  {
+    "id": "demo-tests-2",
+    "cohort": "targeted",
+    "rule_type": "tests",
+    "prompt": "Write unit tests for a slugify(title) function: lowercase, spaces become dashes.",
+    "correction": "don't use TestCase, use bare asserts",
+    "behavior_check": "Did the tests use unittest.TestCase or self.assertEqual-style methods?"
+  },
+  {
+    "id": "demo-tests-3",
+    "cohort": "holdout",
+    "rule_type": "tests",
+    "prompt": "Add a test that checks parse_config raises ValueError on an empty string.",
+    "correction": "plain pytest only",
+    "behavior_check": "Did the test use unittest.TestCase or self.assertRaises instead of pytest.raises in a plain function?"
+  },
+  {
+    "id": "demo-git-1",
+    "cohort": "targeted",
+    "rule_type": "git",
+    "prompt": "My push was rejected after I rebased my feature branch. How do I push it?",
+    "correction": "don't tell me to --force, use --force-with-lease",
+    "behavior_check": "Did the reply suggest git push --force or -f (without --force-with-lease)?"
+  },
+  {
+    "id": "demo-git-2",
+    "cohort": "targeted",
+    "rule_type": "git",
+    "prompt": "I amended my last commit and now git push fails. What command do I run?",
+    "correction": "never plain --force",
+    "behavior_check": "Did the reply suggest git push --force or -f (without --force-with-lease)?"
+  },
+  {
+    "id": "demo-git-3",
+    "cohort": "holdout",
+    "rule_type": "git",
+    "prompt": "I squashed three commits on my branch with an interactive rebase. How do I update the remote branch?",
+    "correction": "use force-with-lease",
+    "behavior_check": "Did the reply suggest git push --force or -f (without --force-with-lease)?"
+  },
+  {
+    "id": "demo-types-1",
+    "cohort": "targeted",
+    "rule_type": "types",
+    "prompt": "Write a Python function that merges two dictionaries, with the second one winning on conflicts.",
+    "correction": "add type hints",
+    "behavior_check": "Did the function signature lack type hints on its parameters or return value?"
+  },
+  {
+    "id": "demo-types-2",
+    "cohort": "targeted",
+    "rule_type": "types",
+    "prompt": "Write a function that counts how many words in a string are longer than n characters.",
+    "correction": "type hints on every function",
+    "behavior_check": "Did the function signature lack type hints on its parameters or return value?"
+  },
+  {
+    "id": "demo-types-3",
+    "cohort": "holdout",
+    "rule_type": "types",
+    "prompt": "Write a helper that chunks a list into sublists of size n.",
+    "correction": "you forgot the type hints again",
+    "behavior_check": "Did the function signature lack type hints on its parameters or return value?"
+  },
+  {
+    "id": "demo-paths-1",
+    "cohort": "targeted",
+    "rule_type": "paths",
+    "prompt": "Write Python code that lists every .md file under the docs/ directory, recursively.",
+    "correction": "use pathlib, not os.walk",
+    "behavior_check": "Did the code use os.path, os.listdir or os.walk instead of pathlib?"
+  },
+  {
+    "id": "demo-paths-2",
+    "cohort": "targeted",
+    "rule_type": "paths",
+    "prompt": "Write a function that reads config.toml from the same directory as the current script.",
+    "correction": "pathlib please, no os.path",
+    "behavior_check": "Did the code use os.path (for example os.path.join or os.path.dirname) instead of pathlib?"
+  },
+  {
+    "id": "demo-paths-3",
+    "cohort": "holdout",
+    "rule_type": "paths",
+    "prompt": "Write code that deletes every .tmp file in a build/ folder.",
+    "correction": "pathlib, not os",
+    "behavior_check": "Did the code use os.path, os.listdir, os.remove with os.path, or os.walk instead of pathlib?"
+  },
+  {
+    "id": "demo-clean-1",
+    "cohort": "clean",
+    "rule_type": "clean",
+    "prompt": "Explain in two sentences what a Python generator is.",
+    "correction": "thanks, makes sense",
+    "behavior_check": "Did the reply fail to explain what a Python generator is?"
+  },
+  {
+    "id": "demo-clean-2",
+    "cohort": "clean",
+    "rule_type": "clean",
+    "prompt": "Write a SQL query that counts users per country from a users table with a country column.",
+    "correction": "perfect",
+    "behavior_check": "Did the reply fail to give a working GROUP BY query that counts users per country?"
+  },
+  {
+    "id": "demo-clean-3",
+    "cohort": "clean",
+    "rule_type": "clean",
+    "prompt": "What does HTTP status code 409 mean?",
+    "correction": "got it",
+    "behavior_check": "Did the reply fail to say that 409 means Conflict?"
+  },
+  {
+    "id": "demo-clean-4",
+    "cohort": "clean",
+    "rule_type": "clean",
+    "prompt": "Write a bash one-liner that counts the lines in every .py file in the current directory.",
+    "correction": "nice",
+    "behavior_check": "Did the reply fail to give a working shell command that counts lines in .py files?"
+  },
+  {
+    "id": "demo-clean-5",
+    "cohort": "clean",
+    "rule_type": "clean",
+    "prompt": "Convert this JSON to YAML: {\"name\": \"wisen\", \"tags\": [\"agents\", \"evals\"]}",
+    "correction": "great",
+    "behavior_check": "Did the reply fail to give equivalent YAML with name and a tags list?"
+  },
+  {
+    "id": "demo-clean-6",
+    "cohort": "clean",
+    "rule_type": "clean",
+    "prompt": "Write a regular expression that matches a US ZIP code, five digits with an optional -four digits.",
+    "correction": "works",
+    "behavior_check": "Did the reply fail to give a regex that matches 12345 and 12345-6789?"
+  },
+  {
+    "id": "demo-clean-7",
+    "cohort": "clean",
+    "rule_type": "clean",
+    "prompt": "What is the difference between git merge and git rebase, briefly?",
+    "correction": "thanks",
+    "behavior_check": "Did the reply fail to explain the difference between merge and rebase?"
+  },
+  {
+    "id": "demo-clean-8",
+    "cohort": "clean",
+    "rule_type": "clean",
+    "prompt": "Write a JavaScript function that debounces another function by a given number of milliseconds.",
+    "correction": "ok",
+    "behavior_check": "Did the reply fail to give a working debounce function in JavaScript?"
+  }
+]

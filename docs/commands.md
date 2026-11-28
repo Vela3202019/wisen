@@ -12,6 +12,8 @@ wisen serve                     # POST /synthesize, GET /reflections, POST /chat
 wisen export [dir]              # dump reflections to JSON files
 wisen egress                    # what passed the egress gate today
 wisen eval <args>               # case bank: mine, list, review, metrics, replay, compare
+                                #   report: Markdown scorecard of a replay report
+                                #   demo: the protocol on the public synthetic case bank
 wisen gardener list|approve|reject|status|run|reset  # Gardener proposals when not paired
 wisen worker                    # laptop daemon: syncs with a paired server (outbound only);
                                 #   unpaired, runs local Gardener jobs only

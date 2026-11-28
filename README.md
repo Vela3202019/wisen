@@ -125,8 +125,11 @@ at the repo root. `claude plugin validate .` checks both.
   stored in SQLite.
 - **Use it.** The chat agent, the dashboard and the voice briefing read the
   reflection; the Gardener turns recurring friction into proposals.
-- **Measure.** Two weeks after you merge a proposal, the eval loop compares
-  before and after, and proposes a revert if things got worse.
+- **Measure.** Before a rule is promoted, a paired replay compares the agent
+  with and without it; two weeks after you merge it, the field check compares
+  before and after and proposes a revert if things got worse. `wisen eval demo`
+  shows the scorecard on a public case bank; see
+  [docs/replay-eval.md](https://github.com/Vela3202019/wisen/blob/main/docs/replay-eval.md).
 
 The full pipeline, with a diagram and a map of the code, is in
 [docs/how-it-works.md](https://github.com/Vela3202019/wisen/blob/main/docs/how-it-works.md).

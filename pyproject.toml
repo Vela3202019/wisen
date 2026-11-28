@@ -56,3 +56,4 @@ include = ["wisen*"]
 
 [tool.setuptools.package-data]
 "wisen.dashboard" = ["*.html", "*.js", "*.webmanifest", "*.svg", "*.png"]
+"wisen.evals" = ["demo/*.json", "demo/*.md"]
