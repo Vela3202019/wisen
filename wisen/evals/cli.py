@@ -130,7 +130,10 @@ def _protocol_commands(sub) -> None:
     sft.add_argument("--out", type=Path, required=True)
     sft.add_argument("--exclude", type=Path, action="append", default=[],
                      help="frozen manifest whose cases stay out of training (repeatable)")
-    sft.add_argument("--raw", action="store_true", help="target the agent's own reply after the correction, no teacher")
+    targets = sft.add_mutually_exclusive_group()
+    targets.add_argument("--raw", action="store_true", help="use the agent's own post-correction reply locally (default)")
+    targets.add_argument("--rewrite", action="store_true", help="send private case context and replies to the configured "
+                         "eval model for a rewritten target")
     sft.add_argument("--include-mined", action="store_true", help="also use cases not yet confirmed")
     sft.add_argument("--valid-fraction", type=float, default=0.1)
     distill = sub.add_parser("distill-demo", help="write mlx-lm train/valid JSONL that teaches the demo rules")
@@ -256,9 +259,10 @@ async def _training(args) -> dict:
                                            valid_fraction=args.valid_fraction)
     from wisen.evals.manifest import load_manifest
 
-    exclude = {entry.case.id for path in args.exclude for entry in load_manifest(path).cases}
-    return await training.export_cases(load_cases(), args.out, exclude=exclude,
-                                       ask=None if args.raw else training.teacher(),
+    frozen = [entry.case for path in args.exclude for entry in load_manifest(path).cases]
+    return await training.export_cases(load_cases(), args.out, exclude={c.id for c in frozen},
+                                       exclude_sessions=frozenset(c.session_id for c in frozen),
+                                       ask=training.teacher() if args.rewrite else None,
                                        include_mined=args.include_mined, valid_fraction=args.valid_fraction)
 
 

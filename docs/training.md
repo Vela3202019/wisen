@@ -13,7 +13,7 @@ reply, not a full agent run with tools ([replay-eval.md](replay-eval.md#replay-o
 ## 1. Install
 
 ```bash
-uv tool install mlx-lm        # mlx_lm.lora, mlx_lm.server, … (Apple silicon only)
+uv tool install 'mlx-lm==0.32.2'        # Apple silicon
 ```
 
 As a rough guide, a 24 GB Mac fits LoRA on 1.5–4B models comfortably, and 7–8B
@@ -22,14 +22,16 @@ models in 4-bit with batch size 1–2 and `--grad-checkpoint`.
 ## 2. Make training data
 
 Both commands write `train.jsonl` and `valid.jsonl` in mlx-lm's chat format,
-plus `meta.json` (counts and case IDs, no text). The teacher is Wisen's eval
-model, so they need its API key.
+plus `meta.json` (counts and, for private cases, IDs). Public distillation uses
+Wisen's configured eval model as the teacher and needs its API key. A private
+case export is local by default.
 
 **Public: the demo rules.** The teacher writes fresh requests for each of the
-six demo rules, drops any request that is close to a demo case (word-overlap
-Jaccard ≥ 0.5, so the demo bank stays unseen), and answers the rest while
-following the rules. The examples carry no instructions, so the adapter has to
-learn the rules into its weights.
+six demo rules without receiving the evaluation prompts. Wisen filters out
+requests that overlap with a demo case (word-set Jaccard ≥ 0.5), then the
+teacher answers the rest while following the rules. The filter can miss
+paraphrases: inspect generated requests before treating the results as evidence
+of transfer. The examples carry no rule in the prompt.
 
 ```bash
 wisen eval distill-demo --out data/demo            # 40 requests per rule + 40 clean
@@ -39,31 +41,34 @@ wisen eval distill-demo --out data/demo            # 40 requests per rule + 40 c
 leave its cases out:
 
 ```bash
-wisen eval export-sft --out data/mine --exclude manifest.json
+wisen eval export-sft --out ~/.wisen/training/mine --exclude manifest.json
 ```
 
-The prompt is each case's replay prompt. For a correction, the target is a
-teacher rewrite of the reply that would have needed no correction. With
-`--raw`, the target is instead the agent's own reply after your correction,
-read from the transcript. A clean case's target is the agent's original reply.
-Holdout cases are never exported. Only confirmed cases are used, unless you
+The prompt is each case's replay prompt. For a correction, the target is the
+agent's reply after your correction, read from the transcript. Review targets
+and drop replies that still get the task wrong. **Optional `--rewrite` sends
+the prompt, correction and replies to your configured eval provider** to write
+a replacement target; use it only with data you may send there. A clean case's
+target is the agent's original reply. Supply every frozen manifest with
+`--exclude` (repeatable); Wisen skips their sessions and holdouts.
+Only confirmed cases are used, unless you
 pass `--include-mined`. The data contains your code: keep the data and the
 adapter private.
 
-With a few dozen examples, the run shows that the pipeline works; LoRA results
-need hundreds of examples.
+With a few dozen examples, treat the run as a pipeline check, not a claim
+about general model quality.
 
 ## 3. Train
 
 ```bash
-MODEL=mlx-community/Qwen2.5-Coder-3B-Instruct-4bit   # for example
-mlx_lm.lora --model $MODEL --train --data data/demo --mask-prompt \
-  --batch-size 2 --num-layers 16 --iters 600 --grad-checkpoint \
-  --adapter-path adapters/demo
+export MODEL=mlx-community/Qwen2.5-Coder-3B-Instruct-4bit
+sh scripts/train_mlx.sh data/demo adapters/demo   # from the Wisen checkout
 ```
 
-`--mask-prompt` computes the loss on the replies only. Watch the validation loss;
-when it starts rising, the adapter is memorizing.
+The script defaults to 100 iterations, batch size 1 and a 1,024-token limit.
+Set `ITERS=5` for a smoke test. `--mask-prompt` computes loss on replies only.
+Sustained rising validation loss alongside falling training loss can indicate
+overfitting; use held-out replay to see whether behavior actually improved.
 
 ## 4. Serve both models
 

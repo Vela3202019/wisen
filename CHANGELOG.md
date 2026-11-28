@@ -21,7 +21,9 @@ All notable changes to wisen are recorded here. The format follows
   model, and `wisen eval demo --proposed-model … --rules …` compares two models.
 - `wisen eval export-sft` and `wisen eval distill-demo` write mlx-lm training
   data from the case bank or for the demo rules, keeping holdout and frozen
-  cases out; docs/training.md compares a LoRA with the same rules in the prompt.
+  sessions from supplied manifests out. Private export stays local unless
+  `--rewrite` is requested. `scripts/train_mlx.sh` trains a LoRA on Apple
+  silicon; docs/training.md compares it with the same rules in the prompt.
 
 - One Show proposals / Fold all proposals button hides the entire proposal list
   by default, keeping reflections near the top. The choice persists in the

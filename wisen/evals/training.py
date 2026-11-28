@@ -5,7 +5,7 @@ valid.jsonl, plus meta.json describing the run (counts and case IDs, no text).
 
 export_cases: from the mined case bank. The prompt is the replay prompt. A
 correction's target is the reply that would have needed no correction: a
-teacher model's rewrite (default) or, with no teacher, the agent's own reply
+teacher model's rewrite or, by default, the agent's own reply
 after the correction. A clean case's target is the agent's original reply.
 Holdout cases and frozen manifest cases never enter, so the replay suite
 stays a test the model has not trained on.
@@ -48,12 +48,10 @@ the reply, as the assistant, without mentioning the correction."""
 _WRITER = "You write realistic requests developers send to a coding assistant, for training data."
 _REQUESTS = """Write {n} different requests where an assistant that ignored the rule about "{rule}"
 below would likely break it. Vary the task, wording and length; each request must stand alone.
-Do not repeat or paraphrase the example requests. One request per line, no numbering.
+One request per line, no numbering.
 
 Rules:
-{rules}
-Example requests (do not reuse):
-{examples}"""
+{rules}"""
 _CLEAN_REQUESTS = """Write {n} different requests that none of the rules below bears on, across
 everyday coding work. Vary the task, wording and length; each request must stand alone.
 One request per line, no numbering.
@@ -90,7 +88,7 @@ def write_dataset(examples: list[tuple[str, dict]], out: Path, valid_fraction: f
     if len(examples) < 2:
         raise ValueError(f"{len(examples)} usable examples; training needs at least two (one for validation)")
     ranked = sorted(examples, key=lambda e: sha256(e[0].encode()).hexdigest())
-    n_valid = max(1, round(len(ranked) * valid_fraction))
+    n_valid = min(len(ranked) - 1, max(1, round(len(ranked) * valid_fraction)))
     splits = {"train": ranked[n_valid:], "valid": ranked[:n_valid]}
     out.mkdir(mode=0o700, parents=True, exist_ok=True)
     for name, rows in splits.items():
@@ -113,11 +111,12 @@ def _write_meta(out: Path, meta: dict) -> dict:
 
 # ── From the case bank ──────────────────────────────────────────────────────
 
-def trainable(cases: Iterable[Case], exclude: set[str], include_mined: bool = False) -> list[Case]:
+def trainable(cases: Iterable[Case], exclude: set[str], include_mined: bool = False, *,
+              exclude_sessions: frozenset[str] = frozenset()) -> list[Case]:
     """Confirmed eval-split cases outside `exclude`. A whole session goes when
     any of its cases is excluded: a later case's context holds the earlier ones."""
     cases = list(cases)
-    held = {c.session_id for c in cases if c.id in exclude}
+    held = exclude_sessions | {c.session_id for c in cases if c.id in exclude or c.split == "holdout"}
     return [c for c in cases if c.split == "eval" and c.session_id not in held and c.id not in exclude
             and c.status != "rejected" and (include_mined or c.status == "confirmed")]
 
@@ -173,8 +172,9 @@ async def _target(case: Case, ask: Ask | None) -> str | None:
 
 
 async def export_cases(cases: Iterable[Case], out: Path, *, exclude: set[str] = frozenset(), ask: Ask | None = None,
-                       include_mined: bool = False, valid_fraction: float = 0.1, concurrency: int = 4) -> dict:
-    picked = trainable(cases, set(exclude), include_mined)
+                       include_mined: bool = False, valid_fraction: float = 0.1, concurrency: int = 4,
+                       exclude_sessions: frozenset[str] = frozenset()) -> dict:
+    picked = trainable(cases, set(exclude), include_mined, exclude_sessions=exclude_sessions)
     gate = asyncio.Semaphore(concurrency)
 
     async def one(case: Case) -> str | None:
@@ -214,13 +214,9 @@ async def distill_demo(out: Path, *, per_rule: int = 40, clean: int = 40, ask: A
                        valid_fraction: float = 0.1, concurrency: int = 4) -> dict:
     ask = ask or teacher()
     bank = load_bank()
-    by_rule: dict[str, list[str]] = {}
-    for cohort, rule, case in bank:
-        if cohort != "clean":
-            by_rule.setdefault(rule, []).append(case.context[0].content)
+    rule_names = {rule for cohort, rule, _ in bank if cohort != "clean"}
     text = rules()
-    asks = {rule: _REQUESTS.format(n=per_rule + per_rule // 4, rule=rule, rules=text,
-                                   examples="\n".join(prompts)) for rule, prompts in sorted(by_rule.items())}
+    asks = {rule: _REQUESTS.format(n=per_rule + per_rule // 4, rule=rule, rules=text) for rule in sorted(rule_names)}
     if clean:
         asks["clean"] = _CLEAN_REQUESTS.format(n=clean + clean // 4, rules=text)
     written = await asyncio.gather(*(ask(_WRITER, prompt) for prompt in asks.values()))

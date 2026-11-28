@@ -1,5 +1,8 @@
 import asyncio
 import json
+import os
+import subprocess
+from pathlib import Path
 
 from wisen.connectors.claude_code import TOOL_REJECTION_MARKER
 from wisen.evals import demo, replay, training
@@ -22,6 +25,29 @@ def _rows(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+def test_frozen_session_stays_out_after_case_bank_changes(tmp_path):
+    live = _case("new-case", tmp_path / "unused", session="frozen-session")
+    assert not training.trainable([live], {"old-case"}, exclude_sessions=frozenset({"frozen-session"}))
+
+
+def test_mac_training_wrapper_uses_both_splits_and_a_fresh_adapter(tmp_path):
+    rows = [(str(i), training.example(str(i), "answer")) for i in range(2)]
+    data = tmp_path / "data with spaces"
+    ids = training.write_dataset(rows, data, valid_fraction=0.99)
+    assert len(ids["train"]) == len(ids["valid"]) == 1
+    fake = tmp_path / "mlx_lm.lora"
+    fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+    fake.chmod(0o700)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "MODEL": "base", "ITERS": "5"}
+    adapter = tmp_path / "adapter"
+    cmd = ["sh", str(Path(__file__).resolve().parents[1] / "scripts/train_mlx.sh"), str(data), str(adapter)]
+    args = subprocess.check_output(cmd, text=True, env=env).splitlines()
+    for flag, value in (("--data", str(data)), ("--adapter-path", str(adapter)), ("--model", "base"), ("--iters", "5")):
+        assert args[args.index(flag) + 1] == value
+    adapter.mkdir()
+    assert subprocess.run(cmd, env=env, capture_output=True, check=False).returncode != 0
+
+
 def test_export_cases_targets_splits_and_exclusions(tmp_path):
     transcript = tmp_path / "s1.jsonl"
     events = [_event("user", "add requests", 0), _event("assistant", "pip install requests", 1),
@@ -37,7 +63,8 @@ def test_export_cases_targets_splits_and_exclusions(tmp_path):
     clean_context = [ContextTurn(role="user", content="run the tests"), ContextTurn(role="assistant", content="All pass.")]
     cases = [_case("2026-07-01-s1-2", transcript), _case("2026-07-01-s1-9", transcript, kind="clean",
                                                           context=clean_context),
-             _case("held", transcript, split="holdout"), _case("frozen", transcript, session="s2"),
+             _case("held", transcript, split="holdout", session="s3"), _case("frozen", transcript, session="s2"),
+             _case("same-session-as-holdout", transcript, session="s3"),
              _case("same-session-as-frozen", transcript, session="s2"),
              _case("rejected", transcript, status="rejected"), _case("unreviewed", transcript, status="mined")]
     meta = asyncio.run(training.export_cases(cases, tmp_path / "raw", exclude={"frozen"}))
@@ -63,6 +90,7 @@ def test_distill_demo_drops_near_duplicates_and_carries_no_instructions(tmp_path
 
     async def ask(instructions, prompt):
         if instructions == training._WRITER:
+            assert not any(case.context[0].content in prompt for _, _, case in demo.load_bank())
             topic = prompt.split('"')[1] if '"' in prompt else "clean"
             fresh = " ".join(f"{topic}{i}" for i in range(5))
             return f"1. {bank_prompt}\n- {fresh}\n- {fresh}\n- {fresh} extra\n"
